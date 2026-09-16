@@ -1,0 +1,35 @@
+name: SOL_SWING_V2
+exchange: binance
+symbol: SOL/USDT
+timeframe: 1h
+warmup_candles: 50
+flatten_on_start: true
+capital_allocated: 1000.0
+strategy:
+  type: dip_bounce
+  trend_ma_period: 24
+  dip_threshold_pct: 0.02
+  force_trade_after_hours: null
+risk:
+  max_position_size_pct: 0.1
+  stop_loss_pct: 0.1
+  take_profit_pct: null
+  max_daily_loss_pct: 0.5
+  max_concurrent_positions: 10
+  trailing_stop_pct: 0.05
+  fee_pct: 0.001
+  partial_take_profit_pct: null
+  partial_exit_fraction: 0.5
+  profit_lock_arm_pct: 0.03
+  profit_lock_trigger_pct: 0.027999999999999997
+exit_check_timeframe: 1m
+backtest:
+  starting_capital: 1000
+  since: '2024-01-01T00:00:00Z'
+trend_filter:
+  enabled: true
+  ema_period: 200
+price_level_sizing:
+  enabled: true
+  min_size_multiplier: 0.5
+  max_size_multiplier: 1.5
