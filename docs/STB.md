@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.73 |
+| **Version** | 0.74 |
 | **Date** | 2026-09-17 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -87,6 +87,7 @@
 | 0.71 | EF-79 : surveillance quotidienne des cryptos mesuree contre l'horaire - indistinguable sur ETH/BTC, nettement perdante sur DOGE. Rien n'est change, banc commis |
 | 0.72 | EF-80 : graphique des cryptos casse par une regression d'EF-78 (import local). Corrige, tests HTTP reels ajoutes |
 | 0.73 | EF-81 : **trading manuel en paper**, panier a part, ordres reels sur le testnet. Verifie par un aller-retour reel |
+| 0.74 | EF-82 : dashboard accessible depuis tout appareil de la maison (mot de passe obligatoire), deploiement Raspberry Pi (systemd, installateur), verrou anti-doublon rendu portable. Pousse sur GitHub |
 ---
 
 ## 1. Introduction
@@ -247,6 +248,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-79 | Mesurer ce que donnerait une surveillance QUOTIDIENNE des bots crypto au lieu d'horaire - question de l'utilisateur | Pourrait - **mesure, reponse negative**. Meme protocole que la validation de `trend_regime`, banc commis dans `scripts/bench_trend_regime_timeframe.py`. ETH et BTC : aucune difference distinguable du bruit entre fenetres. DOGE : le quotidien perd plus de la moitie du gain (+76,6 % -> +33,9 % en test, 1h devant sur 3 coupes sur 3). La baisse de ~40 % du nombre de trades est deja integree via les frais et ne compense rien. Les trois bots restent en 1h. Voir STC §3.62 |
 | EF-80 | Le graphique de cours des bots crypto doit se charger - signale par l'utilisateur ("le chargement de l'historique des crypto ne fonctionne pas") | Doit - **realise**. Regression introduite la veille (EF-78) : un import local dans `do_GET` masquait `parse_qs` pour la route des cryptos, qui mourait sans repondre. Invisible aux 78 tests existants, qui ne passaient jamais par le handler HTTP. Corrige, avec 3 tests sur un vrai serveur HTTP dont la capacite a detecter le defaut a ete verifiee en reintroduisant le bug. Voir STC §3.63 |
 | EF-81 | L'utilisateur doit pouvoir acheter et vendre a la main, en paper, depuis un panier separe des bots - "une interface de trade manuel, bouton achat, vente avec un panier a part" | Devrait - **realise**. Onglet "Manuel" : registre local a capital propre, verse par l'utilisateur, qui ne touche pas au panier commun des bots ; ordres reels sur le testnet Binance par le meme executeur que les bots. Le compte testnet etant partage, un achat est refuse avant tout ordre si le solde libre reel ne le couvre pas. Prix d'execution reel et prix de revient frais inclus enregistres ; vente plafonnee a la position ; remise a zero par sauvegarde qui ne vend rien. Verifie par un aller-retour reel (222 DOGE). Voir STC §3.64 |
+| EF-82 | Le dashboard doit etre accessible depuis n'importe quel appareil de la maison, et le systeme doit tourner sur un Raspberry Pi - demande de l'utilisateur, avec mandat de tout changer et de commiter | Doit - **realise**. Le serveur ecoute sur le reseau, la page trouve le serveur par sa propre origine (et non plus `localhost` en dur), demarrage automatique Linux (script + systemd + installateur). **Tout client non-local est refuse tant qu'aucun mot de passe n'est defini**, puis authentifie par HTTP Basic - un dashboard qui passe des ordres ne s'ouvre pas sur un reseau par oubli. **Defaut grave corrige au passage** : le verrou anti-doublon utilisait `tasklist`, absent de Linux, et aurait laisse deux instances d'un meme bot tourner sur le Pi. Verifie via l'IP reseau du poste actuel. Voir STC §3.65 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

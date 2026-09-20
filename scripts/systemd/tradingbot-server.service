@@ -1,0 +1,20 @@
+# Serveur de controle + dashboard (EF-82). Installe par scripts/install_pi.sh,
+# qui remplace __ROOT__ et __USER__ par les vraies valeurs.
+[Unit]
+Description=Trading Bot - serveur de controle et dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__ROOT__
+ExecStart=__ROOT__/.venv/bin/python -m tradingbot.control_server
+Restart=on-failure
+RestartSec=5
+# Le verrou anti-doublon est un fichier PID : un arret propre le nettoie.
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -69,3 +69,49 @@ def test_release_lock_removes_file():
         acquire_lock(lock_path)
         release_lock(lock_path)
         assert not lock_path.exists()
+
+
+# --- EF-82 : detection de processus portable (Raspberry Pi) ----------------
+#
+# `_is_process_running` ne connaissait que `tasklist` (Windows). Sur Linux la
+# commande n'existe pas, l'exception etait avalee et TOUT verrou etait juge
+# perime - y compris celui d'un bot vivant : anti-doublon desactive en
+# silence. La branche POSIX est testee ici en simulant `os.kill`, JAMAIS en
+# l'appelant : sur Windows, `os.kill(pid, 0)` termine le processus.
+
+from tradingbot import process_lock
+
+
+def _posix(monkeypatch, kill_behaviour):
+    monkeypatch.setattr(process_lock.sys, "platform", "linux")
+    monkeypatch.setattr(process_lock.os, "kill", kill_behaviour)
+
+
+def test_posix_live_process_is_detected(monkeypatch):
+    _posix(monkeypatch, lambda pid, sig: None)   # signal 0 accepte = vivant
+    assert process_lock._is_process_running(4242) is True
+
+
+def test_posix_dead_process_is_detected(monkeypatch):
+    def dead(pid, sig):
+        raise ProcessLookupError
+    _posix(monkeypatch, dead)
+    assert process_lock._is_process_running(4242) is False
+
+
+def test_posix_process_of_another_user_counts_as_alive(monkeypatch):
+    """EPERM = le processus existe mais ne nous appartient pas : il tourne."""
+    def forbidden(pid, sig):
+        raise PermissionError
+    _posix(monkeypatch, forbidden)
+    assert process_lock._is_process_running(4242) is True
+
+
+def test_posix_never_calls_tasklist(monkeypatch):
+    """Le symptome d'origine : sur Linux, `tasklist` n'existe pas. Il ne doit
+    jamais etre tente hors Windows."""
+    called = []
+    monkeypatch.setattr(process_lock.subprocess, "run", lambda *a, **k: called.append(a) or None)
+    _posix(monkeypatch, lambda pid, sig: None)
+    process_lock._is_process_running(4242)
+    assert called == []

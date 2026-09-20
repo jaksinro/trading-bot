@@ -11,6 +11,10 @@ dashboard est ouvert directement en fichier local, tant que ce serveur tourne).
 
 import json
 import subprocess
+import base64
+import hmac
+import os
+import socket
 import sys
 import threading
 import time
@@ -20,10 +24,24 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import ccxt
 import yaml
+from dotenv import load_dotenv
 
 from tradingbot.process_lock import _is_process_running, acquire_lock
 
 PORT = 8765
+
+# EF-82 : acces depuis les autres appareils de la maison (Raspberry Pi).
+# Par defaut le serveur ecoute sur toutes les interfaces, MAIS il ne sert
+# rien a un client non-local tant qu'aucun mot de passe n'est defini : un
+# dashboard qui sait passer des ordres et arreter des bots ne doit jamais
+# etre ouvert sur un reseau par simple oubli. Les connexions locales
+# (127.0.0.1, ::1) restent libres, pour l'usage sur la machine elle-meme et
+# pour le script de demarrage automatique.
+BIND_HOST_ENV = "DASHBOARD_BIND"
+PASSWORD_ENV = "DASHBOARD_PASSWORD"
+USER_ENV = "DASHBOARD_USER"
+DEFAULT_BIND_HOST = "0.0.0.0"
+DEFAULT_USER = "trader"
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SERVER_LOCK_PATH = ROOT / "control_server.lock"
 CONFIG_DIR = ROOT / "config"
@@ -667,6 +685,45 @@ def build_config(payload: dict) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
+    # ------------------------------------------------------------------
+    # Acces reseau (EF-82)
+    # ------------------------------------------------------------------
+
+    def _client_is_loopback(self) -> bool:
+        host = self.client_address[0] if self.client_address else ""
+        return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _authorized(self) -> bool:
+        """Vrai si la requete peut etre servie. Sinon la reponse (401/403)
+        est deja envoyee. Toute route, statique ou API, passe par ici."""
+        if self._client_is_loopback():
+            return True
+        password = os.environ.get(PASSWORD_ENV, "")
+        if not password:
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                "Acces reseau refuse : aucun mot de passe n'est defini. Ajoute "
+                f"{PASSWORD_ENV}=... dans le fichier .env du serveur, puis relance-le.".encode("utf-8")
+            )
+            return False
+        user = os.environ.get(USER_ENV, DEFAULT_USER)
+        header = self.headers.get("Authorization", "")
+        if header.startswith("Basic "):
+            try:
+                given = base64.b64decode(header[6:].strip()).decode("utf-8")
+            except Exception:
+                given = ""
+            if hmac.compare_digest(given.encode(), f"{user}:{password}".encode()):
+                return True
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Trading Bot"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("Identifiants requis.".encode("utf-8"))
+        return False
+
     def _send_json(self, status: int, data: dict) -> None:
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
@@ -684,6 +741,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        if not self._authorized():
+            return
         length = int(self.headers.get("Content-Length", 0))
         try:
             payload = json.loads(self.rfile.read(length))
@@ -1246,6 +1305,8 @@ class Handler(BaseHTTPRequestHandler):
         kill_by_name(name)
 
     def do_GET(self) -> None:
+        if not self._authorized():
+            return
         if self.path == "/api/list-configs":
             self._send_json(200, {"configs": list_known_configs()})
             return
@@ -1396,6 +1457,29 @@ def kill_by_name(name: str) -> None:
         subprocess.run(["kill", "-9", str(pid)], capture_output=True)
 
 
+def local_ip_addresses() -> list[str]:
+    """Adresses IP locales non-loopback, pour afficher a l'utilisateur ou
+    taper depuis son telephone. Meilleur effort : une machine sans reseau
+    renvoie une liste vide, jamais une erreur."""
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127."):
+                ips.add(ip)
+    except Exception:
+        pass
+    try:
+        # L'adresse utilisee pour sortir vers le reseau, sans rien envoyer.
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(("10.255.255.255", 1))
+        ips.add(probe.getsockname()[0])
+        probe.close()
+    except Exception:
+        pass
+    return sorted(ips)
+
+
 def main() -> None:
     # CT-26 : deux instances de ce serveur ont deja tourne simultanement sur
     # le meme poste sans que rien ne le signale - `HTTPServer.allow_reuse_address`
@@ -1405,8 +1489,17 @@ def main() -> None:
     # Meme verrou atomique que les bots (`bot_{name}.lock`), applique ici a
     # ce process lui-meme plutot qu'a un bot nomme.
     acquire_lock(CONTROL_SERVER_LOCK_PATH)
-    server = ThreadingHTTPServer(("localhost", PORT), Handler)
+    load_dotenv()
+    bind_host = os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
+    server = ThreadingHTTPServer((bind_host, PORT), Handler)
     print(f"Serveur de controle demarre : http://localhost:{PORT}/dashboard.html")
+    if bind_host not in ("localhost", "127.0.0.1", "::1"):
+        for ip in local_ip_addresses():
+            print(f"  depuis un autre appareil : http://{ip}:{PORT}/dashboard.html")
+        if os.environ.get(PASSWORD_ENV, ""):
+            print(f"  acces reseau protege par mot de passe (utilisateur '{os.environ.get(USER_ENV, DEFAULT_USER)}')")
+        else:
+            print(f"  ATTENTION : aucun {PASSWORD_ENV} dans .env - les autres appareils recevront un refus (403)")
     print("Ctrl+C pour arreter.")
     try:
         server.serve_forever()

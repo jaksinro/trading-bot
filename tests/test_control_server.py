@@ -640,3 +640,99 @@ def test_every_get_route_either_answers_or_404s_but_never_drops(live_server):
         except urllib.error.HTTPError:
             pass  # un 4xx/5xx propre est acceptable ; l'absence de reponse ne l'est pas
     assert errors == [], "au moins une route a leve une exception non geree"
+
+
+# --- EF-82 : acces depuis le reseau local, protege par mot de passe --------
+#
+# Un dashboard qui sait passer des ordres et arreter des bots ne doit jamais
+# etre expose sur un reseau par simple oubli : sans mot de passe, un client
+# non-local recoit un refus. Le client "distant" est simule en faisant mentir
+# le handler sur l'adresse du client - tout le reste (serveur, requetes HTTP,
+# en-tetes) est reel.
+
+import base64
+
+
+class _RemoteHandler(control_server.Handler):
+    def _client_is_loopback(self):
+        return False
+
+
+@pytest.fixture
+def remote_server(monkeypatch):
+    monkeypatch.setattr(control_server, "_public_exchange", _FakeExchange())
+    server = ThreadingHTTPServer(("localhost", 0), _RemoteHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://localhost:{server.server_address[1]}"
+    server.shutdown()
+
+
+def _get_status(base: str, path: str, headers: dict | None = None):
+    request = urllib.request.Request(base + path, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, dict(response.headers), response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers), exc.read()
+
+
+def _basic(user: str, password: str) -> dict:
+    token = base64.b64encode(f"{user}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+def test_local_client_needs_no_password(live_server, monkeypatch):
+    monkeypatch.delenv(control_server.PASSWORD_ENV, raising=False)
+    base, _ = live_server
+    status, _, _ = _get_status(base, "/api/list-configs")
+    assert status == 200
+
+
+def test_remote_client_is_refused_when_no_password_is_configured(remote_server, monkeypatch):
+    """LE garde-fou : rien n'est servi sur le reseau tant que le mot de
+    passe n'existe pas - ni l'API, ni la page elle-meme."""
+    monkeypatch.delenv(control_server.PASSWORD_ENV, raising=False)
+    for path in ("/api/list-configs", "/dashboard.html"):
+        status, _, body = _get_status(remote_server, path)
+        assert status == 403, path
+        assert control_server.PASSWORD_ENV.encode() in body, "le refus doit dire quoi faire"
+
+
+def test_remote_client_without_credentials_gets_a_browser_prompt(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    status, headers, _ = _get_status(remote_server, "/api/list-configs")
+    assert status == 401
+    assert headers.get("WWW-Authenticate", "").startswith("Basic"), "le navigateur doit pouvoir demander le mot de passe"
+
+
+def test_remote_client_with_wrong_password_is_refused(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    status, _, _ = _get_status(remote_server, "/api/list-configs", _basic("trader", "faux"))
+    assert status == 401
+
+
+def test_remote_client_with_right_password_is_served(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    status, _, body = _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))
+    assert status == 200
+    assert b"configs" in body
+
+
+def test_remote_post_is_protected_too(remote_server, monkeypatch):
+    """Les ordres partent en POST : c'est la partie qu'il faut proteger avant tout."""
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    request = urllib.request.Request(
+        remote_server + "/api/manual-deposit", data=b'{"amount": 1}',
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=10)
+    assert exc.value.code == 401
+
+
+def test_the_user_name_is_configurable(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    monkeypatch.setenv(control_server.USER_ENV, "youenn")
+    assert _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))[0] == 401
+    assert _get_status(remote_server, "/api/list-configs", _basic("youenn", "secret"))[0] == 200

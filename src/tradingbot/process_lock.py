@@ -13,10 +13,27 @@ bots tournant systematiquement en double)."""
 import atexit
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
 def _is_process_running(pid: int) -> bool:
+    """EF-82 : cette fonction ne connaissait que `tasklist` (Windows). Sur
+    Linux la commande n'existe pas, l'exception etait avalee et la reponse
+    etait toujours "mort" - donc TOUT verrou etait juge perime et supprime,
+    y compris celui d'un bot bien vivant : le garde-fou anti-doublon aurait
+    ete silencieusement desactive sur le Raspberry Pi. Sur POSIX, le signal
+    0 teste l'existence d'un processus sans rien lui envoyer."""
+    if sys.platform != "win32":
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True  # existe, mais appartient a un autre utilisateur
+        except Exception:
+            return False
     try:
         result = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True, timeout=5

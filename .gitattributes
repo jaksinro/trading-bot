@@ -1,0 +1,4 @@
+# Les scripts destines au Raspberry Pi doivent garder des fins de ligne Unix,
+# quel que soit le poste qui les commite (EF-82).
+*.sh text eol=lf
+*.service text eol=lf

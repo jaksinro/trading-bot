@@ -385,6 +385,35 @@ silencieusement une autre entreprise.
 > montant exact des frais. Les frais doivent etre modelises dans la config du
 > bot, jamais deduits des executions paper. Voir STC §3.60.
 
+## Deployer sur un Raspberry Pi (et ouvrir le dashboard a toute la maison)
+
+Materiel conseille : **Raspberry Pi 5, 8 Go, sur SSD** (NVMe via HAT ou USB 3),
+alimentation officielle, boitier ventile. Pas de carte SD comme disque
+systeme : les bots ecrivent en continu (SQLite + `dashboard.html` a chaque
+cycle), ce qui use une carte SD en quelques mois. Un Pi 4 en 4 Go suffit pour
+les bots seuls ; les 8 Go absorbent les backtests.
+
+```bash
+git clone https://github.com/jaksinro/trading-bot.git && cd trading-bot
+cp .env.example .env && nano .env      # cles testnet + DASHBOARD_PASSWORD
+bash scripts/install_pi.sh
+```
+
+L'installateur cree l'environnement Python, installe deux services systemd
+(`tradingbot-server` puis `tradingbot-bots`) et affiche l'adresse a taper
+depuis un telephone : `http://<ip-du-pi>:8765/dashboard.html`.
+
+**Mot de passe obligatoire.** Le serveur ecoute sur le reseau, mais refuse
+tout appareil autre que lui-meme tant que `DASHBOARD_PASSWORD` est vide
+dans `.env` (403 avec le message qui le dit). Une fois defini, le navigateur
+demande l'identifiant (`DASHBOARD_USER`, defaut `trader`) une fois et s'en
+souvient. Mot de passe en clair sur le reseau local : convenable chez soi,
+pas depuis Internet.
+
+**Limite** : IB Gateway (actions) n'existe officiellement qu'en Linux
+x86-64. Le Pi porte les cryptos et le dashboard ; les actions restent liees
+a une machine x86 (`IBKR_HOST` peut pointer vers elle par le reseau).
+
 ## Lancer le mode paper actions (Interactive Brokers, aucun argent reel)
 
 Seul courtier PEA/CTO avec une API publique (la quasi-totalite des courtiers
@@ -498,7 +527,7 @@ par semaine, et jamais s'il a une position ouverte.
 - [x] Outil de decouverte de cryptos tendance
 - [x] Filtre optionnel de probabilite de hausse (Monte Carlo, 3 ans d'historique)
 - [x] Outil de recherche des meilleurs parametres par backtest sur grille, avec validation out-of-sample (3 ans, 2 strategies, 3 paires)
-- [x] Tests unitaires + integration (748 tests)
+- [x] Tests unitaires + integration (759 tests)
 - [x] Bot d'investissement regulier (versements programmes + allocation cible, sans stop-loss), backtest, paper trading IBKR ET onglet dashboard dedie — simulation par defaut, versement idempotent, reconciliation avec le courtier. Constat honnete : les mecaniques d'allocation n'apportent rien de mesurable, les frais et le cash dormant pesent davantage
 - [x] Filtre de tendance optionnel (EMA) pour eviter les achats a contre-courant, integre a l'optimizer — voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md
 - [x] Sizing optionnel par volatilite (ATR) — resultat mitige, desormais inclus dans la grille de `optimize`/`reoptimizer`

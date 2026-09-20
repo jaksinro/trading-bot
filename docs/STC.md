@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.73 |
+| **Version** | 0.74 |
 | **Date** | 2026-09-17 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -87,6 +87,7 @@
 | 0.71 | EF-79 (§3.62) : **surveiller les cryptos une fois par jour** (bougies 1d) mesure contre l'actuel 1h, meme protocole que §3.51, banc commis dans `scripts/`. ETH et BTC : indistinguable, l'ecart 1h/1d est noye dans l'ecart entre fenetres. **DOGE : le quotidien perd plus de la moitie du gain** (+76,6 % -> +33,9 %), 1h devant sur 3 coupes sur 3. Rien n'est change. Constat collateral : BTC perd contre le buy & hold sur la coupe 60/40, son avantage reste le plus fragile |
 | 0.72 | EF-80 (§3.63) : **regression introduite a EF-78** - un import local de `parse_qs` dans `do_GET` en faisait une variable locale de toute la fonction, et `/api/price-history` mourait en UnboundLocalError sans repondre : graphique des cryptos casse. Aucun test ne passait par le handler HTTP. Corrige ; 3 tests sur un vrai serveur HTTP, verifies capables de detecter le defaut |
 | 0.73 | EF-81 (§3.64) : **panier de trading manuel en paper** - onglet "Manuel", registre local a capital propre (`manual_trading.py`), ordres reels sur le testnet via `PaperExecutor`, achat refuse avant tout ordre si le cash du panier ou le solde testnet (partage avec les bots) ne suffit pas, vente plafonnee a la position, remise a zero par sauvegarde. Verifie par un aller-retour reel sur DOGE. Piege a connaitre : les bots reecrivent `dashboard.html` a chaque cycle, toute evolution du dashboard exige de les redemarrer |
+| 0.74 | EF-82 (§3.65) : **acces au dashboard depuis tout appareil de la maison et deploiement Raspberry Pi**. Le serveur ecoute sur le reseau, la page derive l'adresse du serveur de sa propre origine, script de demarrage + unites systemd + installateur Linux. **Mot de passe obligatoire pour tout client non-local** (403 tant qu'il n'est pas defini, puis HTTP Basic). **Defaut grave corrige** : la detection de processus du verrou anti-doublon ne connaissait que `tasklist` (Windows) et aurait juge tout verrou perime sur Linux - deux instances d'un meme bot auraient pu tourner sur le Pi. Verifie via l'IP reseau du poste. Projet commite et pousse sur GitHub |
 
 ---
 
@@ -1517,6 +1518,33 @@ Le versement de septembre etant consomme dans la table d'idempotence, le bot **n
 **Verification reelle** : versement de 300 USDT fictifs, achat de 20 USDT de DOGE sur le testnet (222 DOGE a 0,08971), vente de tout (0,08961), refus propre d'une vente sans position et d'un achat de 5 000 USDT au-dela du cash - aucun ordre parti dans ces deux cas. Bilan de l'aller-retour -0,06 USDT = ecart achat/vente + deux fois 0,02 de frais, comptabilite coherente. Onglet verifie dans le navigateur (cours BTC en direct, estimation, bascule Acheter/Vendre). Panier remis a zero ensuite, historique sauvegarde.
 
 **Validation** : `tests/test_manual_trading.py`, 16 tests (executor factice, aucune cle) : versement, cash depense frais compris, prix de revient frais inclus et pondere, refus avant ordre sur cash insuffisant et sur solde testnet insuffisant, prix reel d'execution enregistre, rejet sans effet mais journalise, vente totale par defaut, vente plafonnee, vente partielle conservant le revient, vente sans position refusee, valorisation aux cours fournis, remise a zero par sauvegarde. Suite complete : **748 tests**.
+
+---
+
+### 3.65 EF-82 : acces au dashboard depuis tout appareil de la maison, et deploiement Raspberry Pi
+
+**Demande** : "si je devais acheter un raspberry pi je devrais acheter lequel pour faire tourner les bots et le serveur du dashboard ? (pour que je puisse acceder au dashboard depuis n'importe quel appareil de ma maison)", puis "on fait ca, je te laisse tout changer et commit sur le github".
+
+**Dimensionnement** : Raspberry Pi 5 en 8 Go, sur SSD (NVMe via HAT ou USB 3) et non sur carte SD - chaque bot ecrit dans SQLite ET reecrit `dashboard.html` a chaque cycle, exactement le profil d'ecriture qui use une carte SD. Un Pi 4 en 4 Go suffirait pour les bots seuls ; les 8 Go absorbent les backtests de l'onglet Test (pandas sur 67 000 bougies). Toutes les dependances (ccxt, pandas, numpy, ib_async) existent en ARM64. **Limite dite d'emblee** : IB Gateway n'existe officiellement qu'en Linux x86-64 ; le Pi regle le cas crypto, pas le cas actions.
+
+**Quatre choses qui empechaient l'acces reseau ou le fonctionnement sur Linux, trouvees en lisant le code avant de repondre** :
+
+1. **Le serveur ecoutait sur `localhost` uniquement** - injoignable depuis un autre appareil. Il ecoute desormais sur `DASHBOARD_BIND` (defaut `0.0.0.0`).
+2. **Le dashboard appelait `http://localhost:8765` en dur** : ouvert depuis un telephone, le navigateur cherchait le serveur sur lui-meme. L'adresse est desormais `window.location.origin`, celle qui a servi la page (repli sur localhost uniquement en ouverture directe du fichier).
+3. **Le demarrage automatique etait un script PowerShell.** Equivalent Linux : `scripts/autostart_bots.sh` (meme logique : attendre que le serveur REPONDE, puis demander a l'API de lancer chaque config, 409 ignore), deux unites systemd (`tradingbot-server`, puis `tradingbot-bots` en oneshot dependant de la premiere) et `scripts/install_pi.sh` idempotent (apt, venv, `.env`, tests rapides, unites installees avec les vrais chemins et utilisateur). `.gitattributes` force les fins de ligne Unix sur `*.sh` et `*.service`, quel que soit le poste qui commite.
+4. **LE defaut grave, invisible sur Windows** : `process_lock._is_process_running` ne connaissait que `tasklist`. Sur Linux la commande n'existe pas, l'exception etait avalee et la reponse etait toujours "mort" - donc TOUT verrou etait juge perime et supprime, y compris celui d'un bot bien vivant. **Le garde-fou anti-doublon aurait ete silencieusement desactive sur le Pi** : deux instances du meme bot, memes cles, meme panier. Corrige par `os.kill(pid, 0)` sur POSIX (EPERM = existe, appartient a un autre utilisateur = vivant). Teste en simulant `os.kill`, jamais en l'appelant : sur Windows, `os.kill(pid, 0)` TERMINE le processus.
+
+**Securite, decision prise sans attendre** : un dashboard qui sait passer des ordres (onglet Manuel, "Executer reellement") et arreter des bots ne doit jamais etre ouvert sur un reseau par simple oubli. Regle implantee dans le handler, appliquee a TOUTE route, statique comme API :
+- client local (127.0.0.1, ::1) : libre - usage sur la machine et script de demarrage automatique ;
+- client distant et `DASHBOARD_PASSWORD` vide : **403** avec un message disant exactement quoi faire ;
+- client distant : HTTP Basic (`DASHBOARD_USER`, defaut `trader`), comparaison en temps constant, 401 avec `WWW-Authenticate` pour que le navigateur demande l'identifiant une fois et s'en souvienne.
+Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le reseau LOCAL (pas de HTTPS) - convenable chez soi, pas depuis Internet.
+
+**Verification reelle sur le poste actuel, via son IP reseau (192.168.1.42), pas seulement en tests** : local 200 sans identifiant ; distant sans mot de passe configure -> 403 ; mot de passe configure : sans identifiant 401 + invite du navigateur, mauvais 401, bon 200 ; dashboard ouvert dans le navigateur par l'IP reseau, connecte a l'API, 3/3 bots. Le fichier `dashboard.html` a du etre regenere ET les bots redemarres (ils le reecrivent a chaque cycle avec le modele en memoire, §3.64).
+
+**Validation** : 7 tests d'acces reseau sur un vrai serveur HTTP (client distant simule en faisant mentir le handler sur l'adresse, tout le reste reel) et 4 tests de la branche POSIX du verrou. Suite complete : **759 tests**. Scripts shell verifies par `bash -n`.
+
+**Depot** : le projet etait sur `github.com/jaksinro/trading-bot` (prive) avec un seul commit du 16/09 ; quatre jours de travail (EF-63 a EF-81) commites en un premier commit d'etat, puis ce lot dans un commit distinct, pousses.
 
 ---
 

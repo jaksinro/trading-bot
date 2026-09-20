@@ -610,6 +610,21 @@ gain ou perte. « Tout vendre » liquide la ligne au marché.
 **Remettre le panier à zéro** efface le registre après l'avoir sauvegardé. Ça
 ne vend rien : si tu veux repartir sans position, vends d'abord.
 
+## 9. Ouvrir le dashboard depuis ton téléphone ou un autre ordinateur
+
+Le dashboard est accessible depuis n'importe quel appareil de la maison à
+l'adresse `http://<adresse-du-serveur>:8765/dashboard.html` — le serveur
+affiche cette adresse au démarrage.
+
+**Il faut d'abord définir un mot de passe.** Tant que la ligne
+`DASHBOARD_PASSWORD=` du fichier `.env` est vide, les autres appareils
+reçoivent un refus qui explique quoi faire. C'est voulu : ce dashboard sait
+passer des ordres et arrêter des bots, il ne doit pas s'ouvrir sur le réseau
+par oubli. Une fois le mot de passe défini (et le serveur relancé), ton
+navigateur demande l'identifiant — `trader` par défaut — une seule fois.
+
+Sur la machine du serveur elle-même, rien ne change : pas de mot de passe.
+
 ## Historique des changements de l'interface
 
 | Date | Changement |
@@ -671,6 +686,7 @@ ne vend rien : si tu veux repartir sans position, vends d'abord.
 | 2026-09-16 | Mesure de pente au clic sur ce nouveau graphique (§6.1), demandé par l'utilisateur ("cliquer sur 2 bougies... sans bouton") — 2 clics suffisent : le 1er pose un point, le 2e calcule et affiche la variation de clôture entre les deux, avec un segment tracé entre les points sur le graphique |
 | 2026-09-16 | Nouveau champ "Type de compte" dans le formulaire de création (§5.2), demandé par l'utilisateur ("configurer des bots qui peuvent investir avec une PEA ou un CTO") — "Actions (paper trading Interactive Brokers)" permet de créer un bot sur une vraie action en argent fictif, en plus des bots crypto existants. Nécessite TWS/IB Gateway installé (voir l'encadré §5.2) ; nouvelle stratégie "Rebond de creux - journalier" avec fenêtre de tendance réglable |
 | 2026-09-17 | Le champ Symbole affiche désormais une liste déroulante de 11 actions courantes (TotalEnergies, Orange, Société Générale, Renault, Air France-KLM, ArcelorMittal, Air Liquide, LVMH, L'Oréal, Sanofi, BNP Paribas) quand "Type de compte" = "Actions", demandé par l'utilisateur ("que je puisse sélectionner les actions avec une liste") — "Autre..." reste disponible pour un ticker non listé, comme pour les cryptos |
+| 2026-09-20 | **Dashboard accessible depuis tout appareil de la maison** (préparation Raspberry Pi). La page trouve désormais son serveur toute seule, quel que soit l'appareil qui l'ouvre. Un **mot de passe** est obligatoire pour les autres appareils : sans lui, refus avec explication ; avec lui, le navigateur le demande une fois. Voir §9 |
 | 2026-09-19 | **Nouvel onglet « 🖐 Manuel »**, demandé par l'utilisateur ("une interface de trade manuel, bouton achat, vente avec un panier à part", en paper). Panier à capital propre, ordres réels sur le testnet, estimation avant envoi, positions avec gain latent, historique. Voir §8 |
 | 2026-09-18 | **Onglet Investissement repensé**, demandé par l'utilisateur ("une interface digne de ce nom pour visualiser les actions achetées, le cours des actions... avec des boutons pour vendre plus tôt, reset le panier, augmenter le plafond"). Le tableau de chiffres laisse la place à un **graphique comparatif** des six lignes (toutes ramenées à 0 % au début de la période, seule façon de comparer des cours de 7 € et de 400 €) avec un sélecteur 1 mois à 5 ans, et à **une carte par action** : cours, gain calculé sur le prix de revient réel frais compris, courbe miniature avec ce prix en pointillés, et barre d'allocation réelle vs cible. Trois nouvelles actions : **vendre la moitié ou tout** d'une ligne, **remettre le panier à zéro** (sauvegarde l'historique, ne vend rien), et **ajuster le plafond mensuel** par − / + ou montant exact. Le tableau d'avant reste accessible, replié. Voir §7.1 bis |
 | 2026-09-18 | **Correction d'un défaut sérieux du bouton « Exécuter réellement »**, découvert parce que tu l'avais cliqué. Interactive Brokers avait bien acheté 1 action TotalEnergies et 1 Société Générale, mais renvoyait à tort « ordre annulé » — le bot a donc enregistré deux ordres rejetés, un portefeuille vide et 200 € de liquidités qu'il n'avait plus. Le suivi affichait donc du faux. Le bot croit désormais les **exécutions** du courtier plutôt que le statut annoncé, et signale l'incohérence quand elle se produit. À savoir aussi : le **compte paper ne facture aucune commission**, alors que le vrai courtier en prend 3 € minimum par ordre — tes résultats en paper sont donc meilleurs que la réalité, de ce montant. Voir §7 |

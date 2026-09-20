@@ -1,0 +1,16 @@
+# Relance les bots une fois le serveur pret (EF-82). Oneshot : le script
+# demande au serveur de lancer chaque bot, puis se termine ; les bots
+# eux-memes sont des sous-processus du serveur.
+[Unit]
+Description=Trading Bot - demarrage des bots
+After=tradingbot-server.service
+Requires=tradingbot-server.service
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__ROOT__
+ExecStart=/usr/bin/env bash __ROOT__/scripts/autostart_bots.sh
+
+[Install]
+WantedBy=multi-user.target

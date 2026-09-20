@@ -613,7 +613,15 @@ function renderPriceChartSection(name, data) {
   return `${renderPriceRangeSelector(name)}${chartHtml}`;
 }
 
-const CONTROL_SERVER = "http://localhost:8765";
+// EF-82 : l'adresse du serveur est celle qui a servi cette page - c'est ce
+// qui permet d'ouvrir le dashboard depuis un telephone ou un autre PC de la
+// maison. "localhost:8765" en dur ne fonctionnait que sur la machine du
+// serveur : depuis un autre appareil, le navigateur cherchait le serveur sur
+// lui-meme. Le repli ne sert que si le fichier est ouvert directement
+// (file://), sans serveur.
+const CONTROL_SERVER = window.location.protocol.startsWith("http")
+  ? window.location.origin
+  : "http://localhost:8765";
 
 // Top 10 cryptos par capitalisation (vs USDT) - liste figee volontairement
 // courte pour guider vers des paires liquides/bien supportees par Binance,
