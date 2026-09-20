@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.74 |
-| **Date** | 2026-09-17 |
+| **Version** | 0.75 |
+| **Date** | 2026-09-20 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -88,6 +88,7 @@
 | 0.72 | EF-80 (§3.63) : **regression introduite a EF-78** - un import local de `parse_qs` dans `do_GET` en faisait une variable locale de toute la fonction, et `/api/price-history` mourait en UnboundLocalError sans repondre : graphique des cryptos casse. Aucun test ne passait par le handler HTTP. Corrige ; 3 tests sur un vrai serveur HTTP, verifies capables de detecter le defaut |
 | 0.73 | EF-81 (§3.64) : **panier de trading manuel en paper** - onglet "Manuel", registre local a capital propre (`manual_trading.py`), ordres reels sur le testnet via `PaperExecutor`, achat refuse avant tout ordre si le cash du panier ou le solde testnet (partage avec les bots) ne suffit pas, vente plafonnee a la position, remise a zero par sauvegarde. Verifie par un aller-retour reel sur DOGE. Piege a connaitre : les bots reecrivent `dashboard.html` a chaque cycle, toute evolution du dashboard exige de les redemarrer |
 | 0.74 | EF-82 (§3.65) : **acces au dashboard depuis tout appareil de la maison et deploiement Raspberry Pi**. Le serveur ecoute sur le reseau, la page derive l'adresse du serveur de sa propre origine, script de demarrage + unites systemd + installateur Linux. **Mot de passe obligatoire pour tout client non-local** (403 tant qu'il n'est pas defini, puis HTTP Basic). **Defaut grave corrige** : la detection de processus du verrou anti-doublon ne connaissait que `tasklist` (Windows) et aurait juge tout verrou perime sur Linux - deux instances d'un meme bot auraient pu tourner sur le Pi. Verifie via l'IP reseau du poste. Projet commite et pousse sur GitHub |
+| 0.75 | CT-15bis (§3.66) : **correction mineure du re-optimiseur** - `propose_reoptimization()` n'avancait pas `last_checked_at` quand le bot etait ignore pour position ouverte, si bien qu'un bot souvent en position restait "due" en continu et etait reevalue a chaque lancement de `run_all`/`--all` au lieu d'attendre le prochain intervalle. Corrige : l'etat avance desormais aussi dans ce cas, en conservant un `pending_candidate` deja en attente. Sans consequence sur les propositions deja emises, uniquement sur la frequence des verifications inutiles |
 
 ---
 
@@ -530,7 +531,7 @@ Ce garde-fou est actif par defaut (contrairement au multi-positions lui-meme) ca
 **Changements** :
 - Nouveau module `reoptimizer.py`, qui **reutilise integralement** `optimize.py` (memes fonctions : `build_sma_cross_candidates`, `build_scalp_dip_candidates`, `split_train_test`, `run_one_backtest`, `TOP_N_FOR_VALIDATION`, `format_candidate`, `result_to_config_yaml`) - aucune nouvelle logique de backtest, seulement une orchestration ciblee sur UNE instance a la fois plutot qu'une grille exploratoire sur plusieurs paires.
 - **Garde-fou 1 (validation out-of-sample obligatoire)** : `is_better_out_of_sample(current, candidate)` - un candidat ne devient une proposition QUE s'il bat la config ACTUELLEMENT DEPLOYEE sur sa performance de VALIDATION (jamais vue pendant la recherche), jamais sur sa seule performance d'entrainement. `candidate_from_config()` reconstruit un `Candidate` a partir de la config YAML deployee, pour la re-backtester avec EXACTEMENT le meme decoupage train/test que les nouveaux candidats - comparaison equitable, pas un chiffre recycle d'un ancien rapport.
-- **Garde-fou 2 (frequence lente)** : `is_due_for_reoptimization(last_checked_at, now, interval_days=30)` - 30 jours par defaut entre deux verifications, meme si aucune proposition n'en resulte (l'etat `last_checked_at` avance dans tous les cas, y compris "no_improvement" - sinon le garde-fou ne servirait a rien, on re-testerait a chaque appel). Etat persiste dans `proposals/reoptimize_state.json` (cle = nom de l'instance).
+- **Garde-fou 2 (frequence lente)** : `is_due_for_reoptimization(last_checked_at, now, interval_days=30)` - 30 jours par defaut entre deux verifications, meme si aucune proposition n'en resulte (l'etat `last_checked_at` avance dans tous les cas, y compris "no_improvement" et, depuis le correctif CT-15bis du 2026-09-20, "position ouverte" - sinon le garde-fou ne servirait a rien, on re-testerait a chaque appel). Etat persiste dans `proposals/reoptimize_state.json` (cle = nom de l'instance).
 - **Garde-fou 3 (jamais sur position ouverte)** : `has_open_position(name)` relit la table `open_positions` (EF-27, §3.18) de l'instance - coherent avec CT-10 de la STB (modifier la config d'une instance a position ouverte rendrait le cash reconstruit incoherent au redemarrage). Verifie DEUX fois : une fois par `propose_reoptimization()` avant de chercher un candidat, une seconde fois par `control_server._handle_apply_proposal()` au moment d'appliquer (l'etat a pu changer entre la proposition et la decision de l'utilisateur).
 - **Garde-fou 4 (semi-automatique - l'humain valide)** : le resultat est ecrit dans `proposals/{nom}_proposal.json` (comparaison lisible actuel vs propose) et `proposals/{nom}_proposed_config.yml` (config prete a l'emploi) - **rien n'est ecrit dans `config/`, rien n'est redemarre**. Nouvelles routes sur le Control Server : `GET /api/list-proposals` (liste les propositions en attente), `POST /api/apply-proposal` (n'ecrase que `strategy`/`risk`/`trend_filter` du fichier de config existant - conserve `capital_allocated`/`warmup_candles`/`flatten_on_start` deja choisis par l'utilisateur pour cette instance - puis arrete/relance le bot s'il tournait), `POST /api/dismiss-proposal` (supprime la proposition sans y toucher). Section "Propositions de reoptimisation" ajoutee dans l'onglet "Gerer les bots" du dashboard, avec boutons Appliquer/Rejeter.
 - **Limite resolue le 2026-09-12** : le module lui-meme ne planifie rien (pas de boucle/thread interne) - `run_reoptimizer_weekly.bat` (`.venv/Scripts/python.exe -m tradingbot.reoptimizer --all`, journalise dans `logs/reoptimizer_weekly.log`) est desormais invoque chaque semaine par une tache planifiee Windows (`TradingBot-Reoptimizer-Weekly`, vendredi 3h). Coherent avec le principe "semi-automatique pour commencer" - le declenchement est externe au code, mais bien reel desormais plutot que suppose.
@@ -1545,6 +1546,16 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Validation** : 7 tests d'acces reseau sur un vrai serveur HTTP (client distant simule en faisant mentir le handler sur l'adresse, tout le reste reel) et 4 tests de la branche POSIX du verrou. Suite complete : **759 tests**. Scripts shell verifies par `bash -n`.
 
 **Depot** : le projet etait sur `github.com/jaksinro/trading-bot` (prive) avec un seul commit du 16/09 ; quatre jours de travail (EF-63 a EF-81) commites en un premier commit d'etat, puis ce lot dans un commit distinct, pousses.
+
+---
+
+### 3.66 CT-15bis : le re-optimiseur ne faisait pas avancer `last_checked_at` sur position ouverte
+
+**Constat, note dans docs/FEUILLE_DE_ROUTE_PERFORMANCE.md pendant le diagnostic de l'etape 5** : quand `propose_reoptimization()` ignorait une instance pour position ouverte, elle retournait `status: skipped` SANS ecrire l'etat `last_checked_at`. Consequence : une instance frequemment en position ouverte au moment du check (typiquement un bot avec un temps de detention long) restait "due" en continu au sens de `is_due_for_reoptimization()`, et etait donc re-testee (verification de position, quasi instantanee) a chaque lancement de `run_all`/`--all` plutot que d'attendre le prochain intervalle configure - contrairement au cas "no_improvement", ou l'etat avance deja dans tous les cas (§3.55, Garde-fou 2).
+
+**Correction** : la branche "position ouverte" de `propose_reoptimization()` ecrit desormais `state[name] = {**existing_entry, "last_checked_at": now.isoformat()}` avant de retourner - `existing_entry` est fusionne pour ne pas perdre un `pending_candidate` deja enregistre par un cycle precedent (etape 6, piste 3 - confirmation sur deux verifications consecutives, §3.\* "Etape 6"). Sans impact sur les garde-fous existants : la position ouverte reste verifiee deux fois (ici, et a l'application - Garde-fou 3, §3.55) et aucune proposition n'est jamais ecrite dans ce cas.
+
+**Validation** : nouveau test `test_propose_reoptimization_updates_last_checked_at_when_position_open` dans `tests/test_reoptimizer.py`, qui verifie que `last_checked_at` avance ET qu'un `pending_candidate` existant est conserve. Suite complete : **760 tests**.
 
 ---
 

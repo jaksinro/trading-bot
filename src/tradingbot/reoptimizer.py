@@ -271,6 +271,13 @@ def propose_reoptimization(config_path: Path, now: datetime | None = None) -> di
         return {"status": "skipped", "reason": "derniere verification trop recente", "name": name}
 
     if has_open_position(name):
+        # CT-15bis : on doit quand meme avancer last_checked_at, sinon
+        # is_due_for_reoptimization() reste "due" en continu tant que la
+        # position reste ouverte et le bot est reevalue a chaque cycle au
+        # lieu d'attendre le prochain intervalle de reoptimisation.
+        existing_entry = state.get(name, {})
+        state[name] = {**existing_entry, "last_checked_at": now.isoformat()}
+        save_state(state)
         return {"status": "skipped", "reason": "position ouverte, nouvelle tentative au prochain cycle", "name": name}
 
     candles = fetch_historical_candles(

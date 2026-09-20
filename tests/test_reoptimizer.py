@@ -468,6 +468,29 @@ def test_propose_reoptimization_skips_when_position_open(isolated_proposals_dir,
     assert "position" in result["reason"]
 
 
+def test_propose_reoptimization_updates_last_checked_at_when_position_open(isolated_proposals_dir, monkeypatch):
+    """CT-15bis : meme ignore (position ouverte), le bot doit avancer
+    last_checked_at, sinon il reste "due" en continu et est reevalue a
+    chaque cycle au lieu d'attendre le prochain intervalle."""
+    monkeypatch.setattr(reoptimizer, "has_open_position", lambda name: True)
+    monkeypatch.setattr(reoptimizer, "fetch_historical_candles", lambda **kw: _oscillating_candles())
+    old_check = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    reoptimizer.save_state({"bot_x": {"last_checked_at": old_check, "pending_candidate": "keep-me"}})
+    config_path = isolated_proposals_dir.parent / "bot.yml"
+    config_path.write_text(
+        "name: bot_x\nsymbol: BTC/USDT\nstrategy:\n  type: sma_cross\n  short_window: 100\n  long_window: 200\nrisk: {}\n",
+        encoding="utf-8",
+    )
+    now = datetime.now(timezone.utc)
+
+    result = reoptimizer.propose_reoptimization(config_path, now=now)
+
+    assert result["status"] == "skipped"
+    updated_state = reoptimizer.load_state()
+    assert updated_state["bot_x"]["last_checked_at"] == now.isoformat()
+    assert updated_state["bot_x"]["pending_candidate"] == "keep-me"
+
+
 def test_propose_reoptimization_skips_when_not_due(isolated_proposals_dir, monkeypatch):
     monkeypatch.setattr(reoptimizer, "has_open_position", lambda name: False)
     now = datetime.now(timezone.utc)
