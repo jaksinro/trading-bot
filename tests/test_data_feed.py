@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from tradingbot.data_feed import fetch_funding_rate_history, fetch_historical_candles
 
@@ -64,6 +65,87 @@ def test_fetch_historical_candles_keeps_cache_when_since_cannot_be_parsed(tmp_pa
 
     assert len(candles) == 2
     assert fake.calls == []
+
+
+def _fake_yfinance_download(rows):
+    """`rows` : liste de (date_iso, open, high, low, close, volume) - imite
+    le DataFrame renvoye par `yfinance.download` (colonnes capitalisees,
+    index de dates nomme "Date"), sans MultiIndex (comme un vrai appel
+    reussi le renvoie pour un seul ticker sur les versions recentes de la
+    librairie observees, mais le code aplatit un MultiIndex si present)."""
+    calls = []
+
+    def download_fn(symbol, start=None, interval=None, auto_adjust=None, progress=None):
+        calls.append({"symbol": symbol, "start": start, "interval": interval})
+        df = pd.DataFrame(
+            [{"Date": pd.Timestamp(r[0]), "Open": r[1], "High": r[2], "Low": r[3], "Close": r[4], "Volume": r[5]} for r in rows]
+        ).set_index("Date")
+        return df
+
+    download_fn.calls = calls
+    return download_fn
+
+
+def test_fetch_historical_candles_yfinance_maps_daily_bars_to_candles(tmp_path, monkeypatch):
+    import tradingbot.data_feed as data_feed
+    monkeypatch.setattr(data_feed, "CACHE_DIR", tmp_path)
+    download_fn = _fake_yfinance_download([
+        ("2026-09-14", 79.5, 80.09, 79.0, 79.53, 3641360),
+        ("2026-09-15", 79.14, 80.55, 78.94, 80.49, 3047143),
+    ])
+
+    candles = fetch_historical_candles(
+        "yfinance", "TTE.PA", "1d", "2026-09-01T00:00:00Z", exchange=None, yf_download_fn=download_fn,
+    )
+
+    assert len(candles) == 2
+    assert candles[0].open == 79.5
+    assert candles[0].close == 79.53
+    assert candles[1].volume == 3047143
+    assert candles[0].timestamp < candles[1].timestamp
+    assert download_fn.calls[0]["symbol"] == "TTE.PA"
+    assert download_fn.calls[0]["interval"] == "1d"
+
+
+def test_fetch_historical_candles_yfinance_rejects_non_daily_timeframe():
+    download_fn = _fake_yfinance_download([])
+    with pytest.raises(ValueError):
+        fetch_historical_candles("yfinance", "TTE.PA", "1h", "2026-09-01T00:00:00Z", yf_download_fn=download_fn)
+    assert download_fn.calls == []  # rejete avant tout appel reseau
+
+
+def test_fetch_historical_candles_yfinance_uses_cache_when_it_covers_the_requested_period(tmp_path, monkeypatch):
+    import tradingbot.data_feed as data_feed
+    monkeypatch.setattr(data_feed, "CACHE_DIR", tmp_path)
+    cache_path = tmp_path / "yfinance_TTE.PA_1d.parquet"
+    tmp_path.mkdir(exist_ok=True)
+    pd.DataFrame(_ohlcv_rows(5, start_ms=1_700_000_000_000), columns=["timestamp", "open", "high", "low", "close", "volume"]).to_parquet(cache_path)
+
+    download_fn = _fake_yfinance_download([])
+    candles = fetch_historical_candles(
+        "yfinance", "TTE.PA", "1d", "2023-11-15T00:00:00Z", yf_download_fn=download_fn,
+    )
+
+    assert len(candles) == 5
+    assert download_fn.calls == []  # cache suffisant, aucun appel reseau
+
+
+def test_fetch_historical_candles_yfinance_bypasses_a_cache_narrower_than_the_requested_period(tmp_path, monkeypatch):
+    import tradingbot.data_feed as data_feed
+    monkeypatch.setattr(data_feed, "CACHE_DIR", tmp_path)
+    cache_path = tmp_path / "yfinance_TTE.PA_1d.parquet"
+    tmp_path.mkdir(exist_ok=True)
+    # cache existant ne couvre que depuis une date recente - une periode plus ancienne est demandee.
+    pd.DataFrame(_ohlcv_rows(5, start_ms=1_800_000_000_000), columns=["timestamp", "open", "high", "low", "close", "volume"]).to_parquet(cache_path)
+
+    download_fn = _fake_yfinance_download([("2020-01-02", 50.0, 51.0, 49.0, 50.5, 1000)])
+    candles = fetch_historical_candles(
+        "yfinance", "TTE.PA", "1d", "2020-01-01T00:00:00Z", yf_download_fn=download_fn,
+    )
+
+    assert len(candles) == 1
+    assert candles[0].open == 50.0
+    assert len(download_fn.calls) == 1  # cache ignore, une vraie recuperation a eu lieu
 
 
 class FakeFundingExchange:

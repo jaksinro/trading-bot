@@ -30,7 +30,10 @@ CONFIG_DIR = ROOT / "config"
 LOG_DIR = ROOT / "logs"
 PROPOSALS_DIR = ROOT / "proposals"
 
-VALID_STRATEGIES = {"sma_cross", "scalp_dip", "dip_bounce_hourly", "dip_bounce_minute", "buy_and_hold"}
+VALID_STRATEGIES = {
+    "sma_cross", "scalp_dip", "dip_bounce_hourly", "dip_bounce_minute",
+    "mean_dip", "slope_dip", "dip_bounce_daily", "trend_regime", "buy_and_hold",
+}
 VALID_TIMEFRAMES = {"1m", "5m", "15m", "1h", "4h", "1d"}
 
 # EF-56 : barre de progression du backtest (onglet Test/Backtest du dashboard).
@@ -61,6 +64,21 @@ PRICE_HISTORY_RANGES: dict[str, tuple[str, int]] = {
 PRICE_HISTORY_CACHE_TTL_SECONDS = 60.0
 _price_history_cache: dict[tuple[str, str], tuple[float, list]] = {}
 _public_exchange = ccxt.binance()
+
+
+_manual_price_cache: dict[str, tuple[float, float]] = {}
+
+
+def manual_last_price(symbol: str, exchange=None) -> float:
+    """Dernier cours PUBLIC (aucune cle), mis en cache 5 s : le panier manuel
+    rafraichit ses positions souvent, inutile de marteler l'exchange."""
+    now = time.time()
+    cached = _manual_price_cache.get(symbol)
+    if cached is not None and now - cached[0] < 5:
+        return cached[1]
+    price = float((exchange or _public_exchange).fetch_ticker(symbol)["last"])
+    _manual_price_cache[symbol] = (now, price)
+    return price
 
 
 def fetch_price_history(symbol: str, range_key: str, exchange=None) -> list[list]:
@@ -171,6 +189,13 @@ def list_known_configs() -> list[dict]:
             cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError:
             continue
+        # Les bots d'investissement regulier (EF-67) vivent dans config/dca/
+        # et se reconnaissent a leur allocation `weights`. Ce filtre defensif
+        # evite qu'une telle config deposee ici par erreur soit listee comme
+        # un bot classique : Supervision proposerait de la lancer via
+        # `run_paper.py`, qui planterait (ni `symbol` ni `strategy`).
+        if cfg.get("weights") is not None:
+            continue
         name = cfg.get("name", path.stem)
         configs.append({
             "name": name,
@@ -263,21 +288,37 @@ def build_config(payload: dict) -> dict:
     if not name or not all(c.isalnum() or c == "_" for c in name):
         raise ValueError("nom invalide (lettres, chiffres, underscore uniquement)")
 
-    symbol = payload.get("symbol", "").strip().upper()
-    if "/" not in symbol or len(symbol.split("/")) != 2 or "" in symbol.split("/"):
-        raise ValueError("symbole invalide (format attendu: BASE/QUOTE, ex: ETH/USDT)")
+    # EF-65 : "ibkr_paper" cree un bot actions (paper trading Interactive
+    # Brokers) au lieu d'un bot crypto (testnet Binance) - symbole en format
+    # ticker (ex: "RNO.PA"), pas BASE/QUOTE, et aucun sens a valider contre
+    # les marches Binance.
+    account_type = payload.get("account_type", "crypto")
+    is_ibkr = account_type == "ibkr_paper"
 
-    markets = get_binance_markets()
-    if markets is not None and symbol not in markets:
-        import difflib
-        base, quote = symbol.split("/")
-        same_quote_bases = [m.split("/")[0] for m in markets if m.endswith(f"/{quote}")]
-        suggestions = difflib.get_close_matches(base, same_quote_bases, n=1)
-        hint = f" (peut-etre {suggestions[0]}/{quote} ?)" if suggestions else ""
-        raise ValueError(f"symbole '{symbol}' introuvable sur Binance{hint} - verifie l'orthographe")
+    symbol = payload.get("symbol", "").strip().upper()
+    if is_ibkr:
+        if not symbol:
+            raise ValueError("symbole invalide (ticker IBKR attendu, ex: RNO.PA)")
+    else:
+        if "/" not in symbol or len(symbol.split("/")) != 2 or "" in symbol.split("/"):
+            raise ValueError("symbole invalide (format attendu: BASE/QUOTE, ex: ETH/USDT)")
+
+        markets = get_binance_markets()
+        if markets is not None and symbol not in markets:
+            import difflib
+            base, quote = symbol.split("/")
+            same_quote_bases = [m.split("/")[0] for m in markets if m.endswith(f"/{quote}")]
+            suggestions = difflib.get_close_matches(base, same_quote_bases, n=1)
+            hint = f" (peut-etre {suggestions[0]}/{quote} ?)" if suggestions else ""
+            raise ValueError(f"symbole '{symbol}' introuvable sur Binance{hint} - verifie l'orthographe")
 
     timeframe = payload.get("timeframe", "1h")
-    if timeframe not in VALID_TIMEFRAMES:
+    if is_ibkr:
+        # Bougies journalieres uniquement pour les actions IBKR (STC §3.46/
+        # §3.48) - force independamment de ce que le formulaire a soumis,
+        # meme logique que les presets a granularite fixe (mean_dip, etc.).
+        timeframe = "1d"
+    elif timeframe not in VALID_TIMEFRAMES:
         raise ValueError(f"timeframe invalide, doit etre l'un de : {', '.join(sorted(VALID_TIMEFRAMES))}")
 
     strategy_type = payload.get("strategy_type")
@@ -305,6 +346,43 @@ def build_config(payload: dict) -> dict:
         )
         strategy = {"type": "scalp_dip", "lookback": lookback, "dip_threshold_pct": dip_threshold_pct}
         warmup_minimum = lookback
+    elif strategy_type == "mean_dip":
+        # 2026-09-16, idee proposee par l'utilisateur : detecte un creux
+        # comme un ECART a la moyenne recente (pas une proximite a un plus
+        # bas glissant comme dip_bounce), sur une granularite fine pour
+        # capter les pics descendants brefs invisibles a l'echelle 24h.
+        # `timeframe` FORCE a 5 minutes, meme logique que dip_bounce_hourly/
+        # minute : la coherence entre le preset et sa granularite ne doit
+        # jamais dependre du champ timeframe libre du formulaire.
+        window = _to_int(payload, "window", "Fenetre")
+        if window < 2:
+            raise ValueError("la fenetre doit etre >= 2")
+        num_std = _require_positive(
+            _to_float(payload, "num_std", "Largeur des bandes"), "la largeur des bandes"
+        )
+        timeframe = "5m"
+        strategy = {"type": "mean_dip", "window": window, "num_std": num_std}
+        warmup_minimum = window
+    elif strategy_type == "slope_dip":
+        # 2026-09-16, idee proposee par l'utilisateur : detecte une chute
+        # BRUTALE entre 2 bougies consecutives (vitesse du mouvement, pas
+        # une position par rapport a une moyenne/un plus bas) - parie qu'une
+        # chute soudaine et prononcee a plus de chances de rebondir qu'une
+        # derive lente. `timeframe` FORCE a 1 minute (meme logique que les
+        # autres presets a granularite fixe).
+        slope_threshold_pct = _require_positive(
+            _to_float(payload, "slope_threshold_pct", "Seuil de pente"), "le seuil de pente"
+        )
+        candles_window = _to_int(payload, "candles_window", "Nombre de bougies")
+        if candles_window < 2:
+            raise ValueError("le nombre de bougies doit etre >= 2")
+        one_buy_per_slope = bool(payload.get("one_buy_per_slope"))
+        timeframe = "1m"
+        strategy = {
+            "type": "slope_dip", "slope_threshold_pct": slope_threshold_pct,
+            "candles_window": candles_window, "one_buy_per_slope": one_buy_per_slope,
+        }
+        warmup_minimum = candles_window - 1
     elif strategy_type in ("dip_bounce_hourly", "dip_bounce_minute"):
         # Etape 9 (feuille de route performance) : 2 PRESETS du meme
         # `strategy.type = "dip_bounce"` (voir strategies/dip_bounce.py,
@@ -341,11 +419,64 @@ def build_config(payload: dict) -> dict:
             "force_trade_after_hours": force_trade_after_hours,
         }
         warmup_minimum = trend_ma_period
+    elif strategy_type == "dip_bounce_daily":
+        # Ajoute pour les actions IBKR (EF-65) - contrairement aux presets
+        # horaire/minute (verrou de gain oblige, trend_ma_period fige), la
+        # recherche empirique menee sur plusieurs actions (STC §3.47) a
+        # montre que la fenetre de tendance optimale varie fortement d'une
+        # action a l'autre (10 jours pour Renault, 40 pour Air France-KLM) -
+        # laissee reglable ici. Verrou de gain volontairement absent : les
+        # meilleurs reglages trouves n'en utilisaient aucun, seulement
+        # stop-loss/trailing (deja optionnels via la branche generique plus
+        # bas, comme dip_bounce_hourly/minute).
+        trend_ma_period = _to_int(payload, "trend_ma_period", "Fenetre de tendance (jours)")
+        if trend_ma_period < 2:
+            raise ValueError("la fenetre de tendance doit etre >= 2 jours")
+        dip_threshold_pct = _require_positive(
+            _to_float(payload, "dip_threshold_pct", "Seuil de creux"), "le seuil de creux"
+        )
+        timeframe = "1d"
+        strategy = {
+            "type": "dip_bounce", "trend_ma_period": trend_ma_period, "dip_threshold_pct": dip_threshold_pct,
+            "force_trade_after_hours": None,
+        }
+        warmup_minimum = trend_ma_period
+    elif strategy_type == "trend_regime":
+        # EF-68 : investi tant que la tendance est haussiere, TOUT en
+        # liquidites des qu'elle casse. Contrairement au `trend_filter`
+        # optionnel (qui bloque seulement les nouveaux achats), cette
+        # strategie emet son propre signal de VENTE - c'est ce qui permet de
+        # ne pas subir un marche baissier. Timeframe laisse libre : la
+        # robustesse mesuree sur ETH tient de 3 semaines a 5,5 mois de
+        # fenetre, donc a plusieurs granularites (voir STC).
+        ema_period = _to_int(payload, "ema_period", "Fenetre de tendance (bougies)")
+        if ema_period < 2:
+            raise ValueError("la fenetre de tendance doit etre >= 2 bougies")
+        entry_buffer_pct = _to_float(payload, "entry_buffer_pct", "Marge d'entree")
+        exit_buffer_pct = _to_float(payload, "exit_buffer_pct", "Marge de sortie")
+        if entry_buffer_pct < 0 or exit_buffer_pct < 0:
+            raise ValueError("les marges d'entree et de sortie ne peuvent pas etre negatives")
+        strategy = {
+            "type": "trend_regime", "ema_period": ema_period,
+            "entry_buffer_pct": entry_buffer_pct, "exit_buffer_pct": exit_buffer_pct,
+        }
+        warmup_minimum = ema_period
     else:  # buy_and_hold
         # Strategie passive (etape 9) : achete une fois, ne revend jamais -
         # aucun parametre, pas de sortie donc pas de fenetre a rechauffer.
         strategy = {"type": "buy_and_hold"}
         warmup_minimum = 0
+
+    if is_ibkr and timeframe != "1d":
+        # mean_dip/slope_dip/dip_bounce_hourly/dip_bounce_minute forcent
+        # tous un timeframe incompatible avec le paper trading IBKR (qui ne
+        # gere que des bougies journalieres, voir run_paper.py::ib_*) - un
+        # bot cree avec l'une de ces strategies planterait au demarrage.
+        raise ValueError(
+            f"la strategie '{strategy_type}' impose le timeframe {timeframe}, incompatible avec les actions IBKR "
+            "(bougies journalieres uniquement) - choisis 'dip_bounce_daily', 'trend_regime', 'sma_cross', "
+            "'scalp_dip' ou 'buy_and_hold', qui laissent le timeframe libre ou imposent deja le journalier"
+        )
 
     if strategy_type == "buy_and_hold":
         # Force a 0, jamais deduit du formulaire : `warm_up_strategy`
@@ -384,12 +515,14 @@ def build_config(payload: dict) -> dict:
     # dip_bounce (les 2 presets) : stop-loss reintegre en OPTIONNEL (demande
     # explicite de l'utilisateur, 2026-09-15) - vide reste desactive (defaut
     # historique inchange), une valeur saisie l'active comme pour les autres
-    # strategies.
+    # strategies. slope_dip (2026-09-16) : meme logique - "on garde l'ordre,
+    # seul le trailing vend" est la demande explicite, le stop-loss reste un
+    # filet de securite optionnel, pas impose.
     if strategy_type == "buy_and_hold":
         stop_loss_pct = None
     else:
         stop_loss_raw = payload.get("stop_loss_pct")
-        if strategy_type in ("dip_bounce_hourly", "dip_bounce_minute") and stop_loss_raw in (None, ""):
+        if strategy_type in ("dip_bounce_hourly", "dip_bounce_minute", "slope_dip", "dip_bounce_daily", "trend_regime") and stop_loss_raw in (None, ""):
             stop_loss_pct = None
         else:
             stop_loss_pct = _require_fraction(_to_float(payload, "stop_loss_pct", "Stop-loss"), "le stop-loss")
@@ -455,7 +588,7 @@ def build_config(payload: dict) -> dict:
 
     config = {
         "name": name,
-        "exchange": "binance",
+        "exchange": "ibkr_paper" if is_ibkr else "binance",
         "symbol": symbol,
         "timeframe": timeframe,
         "warmup_candles": warmup_candles,
@@ -569,6 +702,15 @@ class Handler(BaseHTTPRequestHandler):
             "/api/reoptimize-all": self._handle_reoptimize_all,
             "/api/run-backtest": self._handle_run_backtest,
             "/api/restart-all-bots": self._handle_restart_all,
+            "/api/dca-run": self._handle_dca_run,
+            "/api/dca-save": self._handle_dca_save,
+            "/api/dca-delete": self._handle_dca_delete,
+            "/api/dca-sell": self._handle_dca_sell,
+            "/api/dca-reset": self._handle_dca_reset,
+            "/api/dca-contribution": self._handle_dca_contribution,
+            "/api/manual-order": self._handle_manual_order,
+            "/api/manual-deposit": self._handle_manual_deposit,
+            "/api/manual-reset": self._handle_manual_reset,
         }
         handler = routes.get(self.path)
         if handler is None:
@@ -744,9 +886,12 @@ class Handler(BaseHTTPRequestHandler):
             with _backtest_progress_lock:
                 _backtest_progress[job_id] = update
 
+        chart_data: dict = {}
         try:
             args = build_namespace_from_payload(payload)
-            text, report_path = run_backtest_job(args, progress_callback=report_progress if job_id else None)
+            text, report_path = run_backtest_job(
+                args, progress_callback=report_progress if job_id else None, chart_data_out=chart_data,
+            )
         except ValueError as e:
             self._send_json(400, {"error": str(e)})
             return
@@ -757,7 +902,10 @@ class Handler(BaseHTTPRequestHandler):
             if job_id:
                 with _backtest_progress_lock:
                     _backtest_progress.pop(job_id, None)
-        self._send_json(200, {"report": text, "report_path": report_path})
+        response = {"report": text, "report_path": report_path}
+        if chart_data:
+            response["chart"] = chart_data
+        self._send_json(200, response)
 
     def _handle_restart_all(self, payload: dict) -> None:
         """Redemarre (stop puis relance depuis la config sur disque) tous les
@@ -787,12 +935,392 @@ class Handler(BaseHTTPRequestHandler):
         self._kill_by_name(name)
         self._send_json(200, {"status": "arrete", "name": name})
 
+    def _dca_config_or_404(self, name: str):
+        """Retrouve une config de bot d'investissement, ou repond 404 et
+        renvoie None - les trois actions manuelles partagent ce prealable."""
+        from tradingbot.run_dca import list_dca_configs
+
+        config = next((c for c in list_dca_configs() if c.name == name), None)
+        if config is None:
+            self._send_json(404, {"error": f"bot d'investissement '{name}' introuvable"})
+            return None
+        return config
+
+    def _handle_dca_sell(self, payload: dict) -> None:
+        """Vente manuelle, hors du cycle mensuel (EF-78). Engage de vrais
+        ordres sur le compte PAPER : il n'existe pas de variante simulation
+        ici, contrairement au passage mensuel - vendre est une decision
+        ponctuelle de l'utilisateur, pas une routine a previsualiser."""
+        from tradingbot.run_dca import db_path_for, format_run_report, sell_lines
+
+        config = self._dca_config_or_404(payload.get("name", ""))
+        if config is None:
+            return
+
+        raw = payload.get("lines") or {}
+        requests = {}
+        for symbol, quantity in raw.items():
+            if symbol not in config.weights:
+                self._send_json(400, {"error": f"{symbol} ne fait pas partie de ce bot"})
+                return
+            try:
+                requests[symbol] = float(quantity) if quantity not in (None, "", "all") else 0.0
+            except (TypeError, ValueError):
+                self._send_json(400, {"error": f"quantite invalide pour {symbol}"})
+                return
+        if not requests:
+            self._send_json(400, {"error": "aucune ligne a vendre"})
+            return
+
+        try:
+            from tradingbot.execution.ib_multi_symbol_executor import IBMultiSymbolExecutor
+
+            executor = IBMultiSymbolExecutor(
+                symbols=list(config.weights), host=config.ibkr_host,
+                port=config.ibkr_port, client_id=config.ibkr_client_id,
+            )
+        except Exception as e:
+            self._send_json(400, {"error": str(e)})
+            return
+
+        try:
+            report = sell_lines(
+                config, db_path_for(config.name), requests, executor,
+                ignore_position_mismatch=bool(payload.get("ignore_position_mismatch")),
+            )
+        except Exception as e:
+            self._send_json(500, {"error": f"echec de la vente : {e}"})
+            return
+        finally:
+            executor.disconnect()
+
+        self._send_json(200, {"status": "ok", "report": format_run_report(report, config)})
+
+    def _handle_dca_reset(self, payload: dict) -> None:
+        """Remet le registre du bot a zero. **Ne vend rien** : les titres
+        restent chez le courtier, et la reconciliation bloquera donc le bot
+        jusqu'a ce qu'ils soient vendus. L'historique est sauvegarde, jamais
+        supprime."""
+        from tradingbot.run_dca import db_path_for, reset_state
+
+        config = self._dca_config_or_404(payload.get("name", ""))
+        if config is None:
+            return
+        try:
+            backup = reset_state(db_path_for(config.name))
+        except Exception as e:
+            self._send_json(500, {"error": f"echec de la remise a zero : {e}"})
+            return
+        if backup is None:
+            self._send_json(200, {"status": "ok", "message": "Ce bot n'avait jamais tourne : rien a remettre a zero."})
+            return
+        self._send_json(200, {
+            "status": "ok",
+            "message": f"Registre remis a zero. Historique sauvegarde dans {backup.name}. "
+                       "Les titres detenus chez le courtier n'ont PAS ete vendus : "
+                       "vends-les, sinon le bot refusera de passer des ordres (ecart de positions).",
+        })
+
+    def _handle_dca_contribution(self, payload: dict) -> None:
+        """Change le plafond de versement mensuel. Modifie uniquement ce
+        champ du YAML, sans toucher au reste de la config."""
+        from tradingbot.run_dca import DCA_CONFIG_DIR, set_monthly_contribution
+
+        config = self._dca_config_or_404(payload.get("name", ""))
+        if config is None:
+            return
+        config_path = DCA_CONFIG_DIR / f"{config.name}.yml"
+        if not config_path.is_file():
+            self._send_json(404, {"error": f"fichier de config introuvable pour '{config.name}'"})
+            return
+        try:
+            amount = set_monthly_contribution(config_path, float(payload.get("monthly_contribution")))
+        except (TypeError, ValueError) as e:
+            self._send_json(400, {"error": f"montant invalide : {e}"})
+            return
+        except Exception as e:
+            self._send_json(500, {"error": f"echec de l'enregistrement : {e}"})
+            return
+        self._send_json(200, {"status": "ok", "monthly_contribution": amount})
+
+    # ------------------------------------------------------------------
+    # Panier de trading manuel (EF-81) - testnet Binance, argent fictif
+    # ------------------------------------------------------------------
+
+    def _handle_manual_order(self, payload: dict) -> None:
+        """Achat ou vente au marche sur le testnet. L'ordre part REELLEMENT
+        (via `PaperExecutor`, le meme code que les bots) ; seul le registre
+        est propre au panier manuel."""
+        import os
+
+        from dotenv import load_dotenv
+
+        from tradingbot.execution.paper_executor import PaperExecutor
+        from tradingbot.manual_trading import ManualBook
+
+        symbol = str(payload.get("symbol", "")).upper().strip()
+        side = str(payload.get("side", "")).lower()
+        if "/" not in symbol or side not in ("buy", "sell"):
+            self._send_json(400, {"error": "symbole (ex: ETH/USDT) et cote (buy/sell) requis"})
+            return
+
+        load_dotenv()
+        api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
+        api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
+        try:
+            executor = PaperExecutor("binance", symbol, api_key, api_secret)
+            price = float(executor.exchange.fetch_ticker(symbol)["last"])
+        except Exception as e:
+            self._send_json(400, {"error": f"testnet injoignable ou paire inconnue : {e}"})
+            return
+
+        book = ManualBook()
+        try:
+            if side == "buy":
+                amount = float(payload.get("amount", 0) or 0)
+                quote = symbol.split("/")[1]
+                free = executor.exchange.fetch_balance().get(quote, {}).get("free")
+                report = book.buy(symbol, amount, price, executor,
+                                  free_quote_on_exchange=float(free) if free is not None else None)
+            else:
+                raw_qty = payload.get("quantity")
+                quantity = None if raw_qty in (None, "", "all") else float(raw_qty)
+                report = book.sell(symbol, quantity, price, executor)
+        except Exception as e:
+            self._send_json(500, {"error": f"echec de l'ordre : {e}"})
+            return
+
+        self._send_json(200, {
+            "status": report.status, "symbol": report.symbol, "side": report.side,
+            "quantity": report.quantity, "price": report.price, "fee": report.fee,
+            "reason": report.reason, "cash_after": report.cash_after, "warnings": report.warnings,
+        })
+
+    def _handle_manual_deposit(self, payload: dict) -> None:
+        from tradingbot.manual_trading import ManualBook
+
+        try:
+            cash = ManualBook().deposit(float(payload.get("amount", 0)))
+        except (TypeError, ValueError) as e:
+            self._send_json(400, {"error": f"montant invalide : {e}"})
+            return
+        self._send_json(200, {"status": "ok", "cash": cash})
+
+    def _handle_manual_reset(self, payload: dict) -> None:
+        from tradingbot.manual_trading import ManualBook
+
+        backup = ManualBook().reset()
+        self._send_json(200, {
+            "status": "ok",
+            "message": "Le panier n'avait jamais servi : rien a remettre a zero." if backup is None else
+                       f"Panier remis a zero, historique sauvegarde dans {backup.name}. "
+                       "Les cryptos detenues n'ont PAS ete vendues sur le testnet.",
+        })
+
+    def _handle_dca_run(self, payload: dict) -> None:
+        """Lance un bot d'investissement regulier. `execute=false` (defaut)
+        = simulation : rien n'est envoye au courtier, rien n'ecrit en base.
+        Passer de vrais ordres exige `execute=true` ET une connexion
+        TWS/IB Gateway joignable en mode PAPER."""
+        from tradingbot.run_dca import (
+            DcaConfig,
+            db_path_for,
+            format_run_report,
+            list_dca_configs,
+            run_once,
+        )
+
+        name = payload.get("name", "")
+        execute = bool(payload.get("execute"))
+        config = next((c for c in list_dca_configs() if c.name == name), None)
+        if config is None:
+            self._send_json(404, {"error": f"bot d'investissement '{name}' introuvable"})
+            return
+
+        executor = None
+        if execute:
+            try:
+                from tradingbot.execution.ib_multi_symbol_executor import IBMultiSymbolExecutor
+
+                executor = IBMultiSymbolExecutor(
+                    symbols=list(config.weights), host=config.ibkr_host,
+                    port=config.ibkr_port, client_id=config.ibkr_client_id,
+                )
+            except Exception as e:
+                self._send_json(400, {"error": str(e)})
+                return
+        try:
+            report = run_once(
+                config, db_path_for(config.name), executor=executor, dry_run=not execute,
+                ignore_position_mismatch=bool(payload.get("ignore_position_mismatch")),
+            )
+        except Exception as e:
+            self._send_json(500, {"error": f"echec du passage : {e}"})
+            return
+        finally:
+            if executor is not None:
+                executor.disconnect()
+
+        self._send_json(200, {
+            "report": format_run_report(report, config),
+            "dry_run": report.dry_run,
+            "orders": [
+                {"symbol": o.symbol, "side": o.side, "quantity": o.quantity,
+                 "price": o.reference_price, "reason": o.reason}
+                for o in report.planned
+            ],
+            "contribution": report.contribution,
+            "warnings": report.warnings,
+        })
+
+    def _handle_dca_save(self, payload: dict) -> None:
+        from tradingbot.run_dca import DCA_CONFIG_DIR, DcaConfig
+
+        name = str(payload.get("name", "")).strip()
+        if not name or not all(c.isalnum() or c in "_-" for c in name):
+            self._send_json(400, {"error": "nom invalide (lettres, chiffres, tiret et souligne uniquement)"})
+            return
+        try:
+            weights = {
+                str(symbol).strip().upper(): float(weight)
+                for symbol, weight in (payload.get("weights") or {}).items()
+                if str(symbol).strip() and float(weight) > 0
+            }
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "poids invalides"})
+            return
+        if not weights:
+            self._send_json(400, {"error": "il faut au moins une ligne avec un poids positif"})
+            return
+
+        config = {"name": name, "weights": weights}
+        for key, caster in (
+            ("monthly_contribution", float), ("rebalance_band_pct", float),
+            ("min_rebalance_interval_days", int), ("min_order_value", float),
+            ("fee_pct", float), ("fee_fixed", float),
+            ("follow_drift_on_contribution", bool), ("ibkr_host", str),
+            ("ibkr_port", int), ("ibkr_client_id", int),
+        ):
+            if payload.get(key) is not None:
+                try:
+                    config[key] = caster(payload[key])
+                except (TypeError, ValueError):
+                    self._send_json(400, {"error": f"valeur invalide pour {key}"})
+                    return
+        if config.get("ibkr_port") in (7496, 4001):
+            self._send_json(400, {
+                "error": "les ports 7496 et 4001 sont ceux du compte REEL chez Interactive Brokers - "
+                         "ce bot n'est autorise qu'en mode paper (7497 TWS, 4002 IB Gateway)"
+            })
+            return
+
+        try:
+            DcaConfig.from_yaml_dict(config)
+        except (ValueError, TypeError) as e:
+            self._send_json(400, {"error": str(e)})
+            return
+
+        DCA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        path = DCA_CONFIG_DIR / f"{name}.yml"
+        path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        self._send_json(200, {"status": "enregistre", "name": name})
+
+    def _handle_dca_delete(self, payload: dict) -> None:
+        """Supprime la config MAIS conserve la base d'historique : un
+        versement deja effectue sur le compte paper ne disparait pas parce
+        qu'on retire le bot de l'interface."""
+        from tradingbot.run_dca import DCA_CONFIG_DIR, db_path_for
+
+        name = str(payload.get("name", "")).strip()
+        path = DCA_CONFIG_DIR / f"{name}.yml"
+        if not name or not path.is_file():
+            self._send_json(404, {"error": "bot d'investissement introuvable"})
+            return
+        path.unlink()
+        self._send_json(200, {
+            "status": "supprime", "name": name,
+            "note": f"historique conserve dans {db_path_for(name)}",
+        })
+
     def _kill_by_name(self, name: str) -> None:
         kill_by_name(name)
 
     def do_GET(self) -> None:
         if self.path == "/api/list-configs":
             self._send_json(200, {"configs": list_known_configs()})
+            return
+
+        if self.path == "/api/dca-bots":
+            from tradingbot.run_dca import db_path_for, list_dca_configs, read_state_summary
+
+            bots = []
+            for config in list_dca_configs():
+                summary = read_state_summary(config, db_path_for(config.name))
+                summary["config"] = {
+                    "name": config.name,
+                    "weights": config.weights,
+                    "monthly_contribution": config.monthly_contribution,
+                    "rebalance_band_pct": config.rebalance_band_pct,
+                    "min_rebalance_interval_days": config.min_rebalance_interval_days,
+                    "min_order_value": config.min_order_value,
+                    "fee_pct": config.fee_pct,
+                    "fee_fixed": config.fee_fixed,
+                    "follow_drift_on_contribution": config.follow_drift_on_contribution,
+                    "ibkr_host": config.ibkr_host,
+                    "ibkr_port": config.ibkr_port,
+                    "ibkr_client_id": config.ibkr_client_id,
+                }
+                bots.append(summary)
+            self._send_json(200, {"bots": bots})
+            return
+
+        if self.path.startswith("/api/dca-price-history"):
+            # PAS d'import local de `parse_qs` ici : un `from urllib.parse
+            # import parse_qs` dans cette fonction en ferait une variable
+            # LOCALE de tout `do_GET`, et la route /api/price-history plus
+            # bas (qui ne passe pas par ce bloc) planterait en
+            # UnboundLocalError sans repondre - c'est exactement ce qui a
+            # casse le graphique des cryptos (EF-80). Le module importe deja
+            # `parse_qs` et `urlsplit` en tete de fichier.
+            from tradingbot.run_dca import db_path_for, list_dca_configs, read_price_history
+
+            params = parse_qs(urlsplit(self.path).query)
+            name = (params.get("name") or [""])[0]
+            try:
+                days = max(7, min(1825, int((params.get("days") or ["180"])[0])))
+            except ValueError:
+                days = 180
+            config = next((c for c in list_dca_configs() if c.name == name), None)
+            if config is None:
+                self._send_json(404, {"error": f"bot d'investissement '{name}' introuvable"})
+                return
+            try:
+                self._send_json(200, read_price_history(config, db_path_for(config.name), days=days))
+            except Exception as e:
+                self._send_json(500, {"error": f"historique indisponible : {e}"})
+            return
+
+        if self.path == "/api/manual-book":
+            from tradingbot.manual_trading import ManualBook
+
+            book = ManualBook()
+            held = list(book.positions())
+            prices = {}
+            for symbol in held:
+                try:
+                    prices[symbol] = manual_last_price(symbol)
+                except Exception:
+                    pass  # une paire sans cours reste affichee, sans valorisation
+            self._send_json(200, book.summary(prices))
+            return
+
+        if self.path.startswith("/api/manual-price"):
+            query = parse_qs(urlsplit(self.path).query)
+            symbol = unquote(query.get("symbol", [""])[0]).upper()
+            try:
+                self._send_json(200, {"symbol": symbol, "price": manual_last_price(symbol)})
+            except Exception as e:
+                self._send_json(400, {"error": f"cours indisponible pour {symbol} : {e}"})
             return
 
         if self.path == "/api/list-proposals":

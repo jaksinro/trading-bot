@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import webbrowser
+import zlib
 from collections import deque
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from tradingbot.analysis.price_level_sizer import PriceLevelSizer
 from tradingbot.analysis.probability_gate import ProbabilityGate
 from tradingbot.analysis.trend_filter import TrendFilter
 from tradingbot.engine import Engine
+from tradingbot.execution.ib_paper_executor import IBPaperExecutor
 from tradingbot.execution.paper_executor import PaperExecutor
 from tradingbot.mm_engine import MarketMakingEngine
 from tradingbot.process_lock import acquire_lock
@@ -38,6 +40,8 @@ from tradingbot.risk.risk_manager import MarketMakingConfig, RiskConfig, RiskMan
 from tradingbot.run_backtest import build_strategy
 from tradingbot.shared_pool import SharedPool
 from tradingbot.types import Candle
+
+IBKR_SHARED_POOL_DB_PATH = "data/shared_pool_ibkr.db"  # panier de capital SEPARE du panier crypto (EF-65)
 
 DEFAULT_WARMUP_CANDLES = 50
 MAX_RECENT_LOGS = 10
@@ -186,6 +190,43 @@ def _row_to_candle(row) -> Candle:
     )
 
 
+EXCHANGE_OHLCV_PAGE_LIMIT = 1000
+
+
+def _fetch_ohlcv_paginated(exchange, symbol: str, timeframe: str, total: int) -> list:
+    """Recupere les `total` dernieres bougies, en plusieurs requetes si besoin.
+
+    BUG CORRIGE : Binance plafonne a 1000 bougies par requete (verifie
+    empiriquement - demander 2001 en renvoie 1000). L'ancienne version faisait
+    UNE seule requete, si bien que toute config avec `warmup_candles` > 999
+    demarrait avec une strategie SOUS-RECHAUFFEE, sans erreur ni
+    avertissement : son EMA restait influencee par sa valeur d'amorce et ses
+    decisions en direct divergeaient de tout backtest. Le defaut etait
+    silencieux, donc invisible.
+
+    En dessous du plafond, on garde exactement l'ancien chemin a une requete :
+    les bots existants (rechauffement de 100 a 500 bougies) ne changent pas
+    de comportement."""
+    if total <= EXCHANGE_OHLCV_PAGE_LIMIT:
+        return exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=total)
+
+    step_ms = exchange.parse_timeframe(timeframe) * 1000
+    since = exchange.milliseconds() - total * step_ms
+    rows: list = []
+    seen: set[int] = set()
+    while len(rows) < total:
+        page = exchange.fetch_ohlcv(
+            symbol, timeframe=timeframe, since=since, limit=EXCHANGE_OHLCV_PAGE_LIMIT,
+        )
+        fresh = [row for row in page if row[0] not in seen]
+        if not fresh:
+            break  # l'exchange ne renvoie plus rien de nouveau : on s'arrete
+        rows.extend(fresh)
+        seen.update(row[0] for row in fresh)
+        since = fresh[-1][0] + step_ms
+    return rows[-total:]
+
+
 def warm_up_strategy(
     exchange, symbol: str, timeframe: str, strategy, warmup_candles: int,
     price_history: deque | None = None, trend_filter: TrendFilter | None = None,
@@ -206,7 +247,7 @@ def warm_up_strategy(
         trend_filter.ema_period if trend_filter else 0,
         atr_sizer.baseline_period if atr_sizer else 0,
     )
-    history = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=warmup_needed + 1)
+    history = _fetch_ohlcv_paginated(exchange, symbol, timeframe, warmup_needed + 1)
     closed_history = history[:-1]  # on exclut la bougie en cours de formation
     for row in closed_history:
         candle = _row_to_candle(row)
@@ -227,6 +268,127 @@ def warm_up_strategy(
     return int(closed_history[-1][0]) if closed_history else None
 
 
+def _derive_ib_client_id(instance_name: str) -> int:
+    """Chaque bot IBKR lance en sous-processus separe doit avoir un
+    identifiant de connexion TWS UNIQUE - `zlib.crc32` (deterministe,
+    contrairement au `hash()` natif de Python qui est aleatoire par
+    processus depuis PYTHONHASHSEED) derive un entier stable a partir du nom
+    du bot, evitant toute collision entre bots lances simultanement sans
+    configuration manuelle. Surchargeable via `ibkr_client_id` dans la
+    config si une collision se produit malgre tout (tres improbable a
+    quelques bots)."""
+    return (zlib.crc32(instance_name.encode()) % 9000) + 100
+
+
+def _ib_row_to_candle(bar) -> Candle:
+    bar_date = bar.date
+    if hasattr(bar_date, "timestamp"):
+        ts_ms = int(bar_date.timestamp() * 1000)
+    else:  # bougie journaliere : ib_async renvoie un datetime.date, pas datetime.datetime
+        ts_ms = int(datetime.datetime.combine(bar_date, datetime.time(tzinfo=datetime.timezone.utc)).timestamp() * 1000)
+    return Candle(
+        timestamp=ts_ms, open=float(bar.open), high=float(bar.high),
+        low=float(bar.low), close=float(bar.close), volume=float(bar.volume),
+    )
+
+
+def ib_poll_new_closed_candle(ib, contract, last_seen_ts: int | None) -> Candle | None:
+    """Equivalent de `poll_new_closed_candle` (ccxt) pour IBKR - BOUGIES
+    JOURNALIERES uniquement (voir STC §3.46/§3.48 : simplification assumee,
+    evite toute logique explicite d'heures de marche).
+
+    L'affirmation precedente de cette docstring - "`reqHistoricalData` ne
+    renvoie que des bougies deja closes, pas besoin d'exclure la derniere
+    ligne" - etait **FAUSSE**, et refutee empiriquement le 2026-09-18
+    (EF-75) : en pleine seance sur Euronext Paris, trois lectures successives
+    de `TTE.PA` ont renvoye la MEME bougie du jour avec un volume qui
+    montait (5 227 648 -> 5 241 433) et une cloture qui bougeait
+    (79,505 -> 79,44 -> 79,48). La bougie du jour est bien incluse, et en
+    cours de formation.
+
+    La derniere ligne est donc exclue, **comme le faisait deja
+    `ib_warm_up_strategy`** - les deux fonctions se contredisaient sur le
+    comportement de la meme API, et c'est celle-ci qui avait tort.
+
+    CONSEQUENCE ASSUMEE : le bot agit sur la derniere cloture COMPLETE, donc
+    celle de la veille, et passe son ordre au prix du jour. Un backtest, lui,
+    achete au cours de cloture qui a produit le signal - un prix qu'on ne
+    peut connaitre qu'apres coup. Le paper est donc ici plus honnete que le
+    backtest, et un ecart entre les deux est attendu (voir STC §3.58)."""
+    bars = ib.reqHistoricalData(
+        contract, endDateTime="", durationStr="5 D", barSizeSetting="1 day", whatToShow="TRADES", useRTH=True,
+    )
+    closed = bars[:-1]
+    if not closed:
+        return None
+    candle = _ib_row_to_candle(closed[-1])
+    if last_seen_ts is not None and candle.timestamp <= last_seen_ts:
+        return None
+    return candle
+
+
+def ib_warm_up_strategy(
+    ib, contract, strategy, warmup_candles: int,
+    price_history: deque | None = None, trend_filter: TrendFilter | None = None,
+    atr_sizer: AtrSizer | None = None, price_level_sizer: PriceLevelSizer | None = None,
+) -> int | None:
+    """Equivalent de `warm_up_strategy` (ccxt) pour IBKR - meme role, memes
+    parametres, seule la source de l'historique change (`reqHistoricalData`
+    au lieu de `fetch_ohlcv`)."""
+    warmup_needed = max(
+        warmup_candles,
+        trend_filter.ema_period if trend_filter else 0,
+        atr_sizer.baseline_period if atr_sizer else 0,
+    )
+    # +10 jours de marge : les jours non ouvres (week-ends/feries) ne
+    # produisent aucune bougie, il faut demander plus de jours calendaires
+    # que de bougies voulues pour etre sur d'en obtenir assez.
+    bars = ib.reqHistoricalData(
+        contract, endDateTime="", durationStr=f"{warmup_needed + 10} D",
+        barSizeSetting="1 day", whatToShow="TRADES", useRTH=True,
+    )
+    closed_history = bars[-(warmup_needed + 1):-1] if len(bars) > warmup_needed else bars[:-1]
+    for bar in closed_history:
+        candle = _ib_row_to_candle(bar)
+        if hasattr(strategy, "on_candle"):
+            strategy.on_candle(candle)
+        if price_history is not None:
+            price_history.append([candle.timestamp, candle.close])
+        if trend_filter is not None:
+            trend_filter.update(candle.close)
+        if atr_sizer is not None:
+            atr_sizer.update(candle)
+        if price_level_sizer is not None:
+            price_level_sizer.update(candle)
+    if not closed_history:
+        # EF-75 : ce cas renvoyait None SANS RIEN DIRE. Un bot demarrait donc
+        # sur une strategie non rechauffee - donc prete a signaler n'importe
+        # quoi - et n'echouait que bien plus loin, sur un message sans
+        # rapport avec la cause reelle (contrat non qualifie, abonnement de
+        # donnees absent, ticker mal traduit). Zero bougie journaliere n'est
+        # jamais un etat de demarrage normal pour une action : on echoue ici.
+        raise ValueError(
+            f"IBKR n'a renvoye aucune bougie journaliere exploitable pour {contract.symbol} "
+            f"({warmup_needed + 10} jours demandes, {len(bars)} bougie(s) recue(s)). Causes "
+            "habituelles : contrat mal qualifie, ou abonnement aux donnees de marche absent "
+            "pour cette place. Lance `python -m tradingbot.diagnose_ibkr` pour situer le probleme."
+        )
+    return _ib_row_to_candle(closed_history[-1]).timestamp
+
+
+def ib_fetch_last_price(ib, contract) -> float:
+    """Prix "actuel" pour IBKR en mode journalier : la cloture de la
+    derniere bougie journaliere disponible (pas un flux temps reel, qui
+    demanderait un abonnement aux donnees de marche IBKR meme en paper) -
+    coherent avec le choix assume de bougies journalieres uniquement."""
+    bars = ib.reqHistoricalData(
+        contract, endDateTime="", durationStr="5 D", barSizeSetting="1 day", whatToShow="TRADES", useRTH=True,
+    )
+    if not bars:
+        raise ValueError(f"Aucune bougie IBKR renvoyee pour {contract.symbol} - impossible d'en deduire un prix.")
+    return float(bars[-1].close)
+
+
 def main(config_path: str) -> None:
     load_dotenv()
 
@@ -238,14 +400,25 @@ def main(config_path: str) -> None:
     acquire_lock(lock_path)
     dashboard_already_existed = MASTER_DASHBOARD_PATH.exists()
 
-    api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
-    api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
+    # EF-65 : "ibkr_paper" bascule sur le paper trading actions (Interactive
+    # Brokers) au lieu du testnet Binance - meme esprit (argent fictif),
+    # broker different. Voir STC §3.48 pour le detail de ce qui differe.
+    is_ibkr = config["exchange"] == "ibkr_paper"
 
     strategy = build_strategy(config)
     is_market_making = config["strategy"]["type"] == "market_making"
     risk_manager = None if is_market_making else RiskManager(RiskConfig(**config["risk"]))
     mm_config = MarketMakingConfig(**config["risk"]) if is_market_making else None
-    executor = PaperExecutor(config["exchange"], config["symbol"], api_key, api_secret)
+
+    if is_ibkr:
+        ib_host = os.environ.get("IBKR_HOST", "127.0.0.1")
+        ib_port = int(os.environ.get("IBKR_PORT", "7497"))
+        client_id = config.get("ibkr_client_id") or _derive_ib_client_id(instance_name)
+        executor = IBPaperExecutor(config["symbol"], host=ib_host, port=ib_port, client_id=client_id)
+    else:
+        api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
+        api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
+        executor = PaperExecutor(config["exchange"], config["symbol"], api_key, api_secret)
     logger = TradeLogger(config["name"])
     recent_logs: deque[list] = deque(maxlen=MAX_RECENT_LOGS)
     price_history: deque[list] = deque(maxlen=MAX_PRICE_HISTORY_POINTS)
@@ -331,7 +504,9 @@ def main(config_path: str) -> None:
             capital_allocated, executor.portfolio.realized_pnl, executor.portfolio.positions
         )
 
-    shared_pool = SharedPool()
+    # Panier SEPARE pour les bots actions IBKR (EF-65) - ne jamais melanger
+    # le capital crypto et le capital actions dans le meme fichier.
+    shared_pool = SharedPool(IBKR_SHARED_POOL_DB_PATH) if is_ibkr else SharedPool()
     shared_pool.seed_if_empty(capital_allocated)  # sans effet si le panier existe deja (cas normal)
     known_order_costs = [o["quantity"] * o["price"] for o in logger.load_recent_buy_orders()]
     shared_pool.reconcile_orphaned_reservations(instance_name, known_order_costs)
@@ -370,22 +545,40 @@ def main(config_path: str) -> None:
         )
         print(f"Reprise de session : {len(executor.portfolio.positions)} position(s) ouverte(s) restauree(s).")
 
-    baseline_price = executor.exchange.fetch_ticker(config["symbol"])["last"]
+    # A partir d'ici, `fetch_current_price()`/`fetch_closed_candle(last_ts)`
+    # abstraient la source de donnees (ccxt vs IBKR, EF-65) - le reste de la
+    # boucle ne connait plus la difference. Cote ccxt, ce sont EXACTEMENT
+    # les memes appels qu'avant (aucun changement de comportement crypto).
+    if is_ibkr:
+        fetch_current_price = lambda: ib_fetch_last_price(executor.ib, executor.contract)
+        fetch_closed_candle = lambda last_ts: ib_poll_new_closed_candle(executor.ib, executor.contract, last_ts)
+        timeframe_seconds = 86_400  # bougies journalieres uniquement pour IBKR (STC §3.46/§3.48)
+    else:
+        exchange = executor.exchange
+        fetch_current_price = lambda: exchange.fetch_ticker(config["symbol"])["last"]
+        fetch_closed_candle = lambda last_ts: poll_new_closed_candle(exchange, config["symbol"], config["timeframe"], last_ts)
+        timeframe_seconds = exchange.parse_timeframe(config["timeframe"])
+
+    baseline_price = fetch_current_price()
 
     # Etat de depart persiste immediatement : si le PC s'eteint avant meme la
     # premiere bougie traitee, une reprise ulterieure retrouve quand meme cet
     # etat (plutot qu'un open_positions vide venant d'un run precedent).
     logger.save_open_positions(executor.portfolio.positions)
 
-    exchange = executor.exchange
     warmup_candles = config.get("warmup_candles", DEFAULT_WARMUP_CANDLES)
-    last_seen_ts = warm_up_strategy(
-        exchange, config["symbol"], config["timeframe"], strategy, warmup_candles,
-        price_history, trend_filter, atr_sizer, price_level_sizer,
-    )
+    if is_ibkr:
+        last_seen_ts = ib_warm_up_strategy(
+            executor.ib, executor.contract, strategy, warmup_candles,
+            price_history, trend_filter, atr_sizer, price_level_sizer,
+        )
+    else:
+        last_seen_ts = warm_up_strategy(
+            exchange, config["symbol"], config["timeframe"], strategy, warmup_candles,
+            price_history, trend_filter, atr_sizer, price_level_sizer,
+        )
     print(f"Strategie rechauffee avec {warmup_candles} bougies d'historique.")
 
-    timeframe_seconds = exchange.parse_timeframe(config["timeframe"])
     poll_interval_seconds = min(60, timeframe_seconds)
 
     # Surveillance des sorties a granularite fine (EF-53) - demande de
@@ -394,11 +587,14 @@ def main(config_path: str) -> None:
     # attendre la bougie suivante. Reutilise le prix deja recupere via le
     # ticker a chaque cycle de sondage (aucun appel reseau supplementaire).
     # Sans objet pour le market making (pas de `process_price_update`,
-    # cotation continue par nature) - `exit_check_timeframe` y est ignore.
+    # cotation continue par nature) ni pour IBKR (bougies journalieres
+    # uniquement, une surveillance plus fine n'aurait pas de sens la ou le
+    # choix assume est justement d'eviter toute granularite intrajournaliere) -
+    # `exit_check_timeframe` y est ignore dans les 2 cas.
     exit_check_timeframe = config.get("exit_check_timeframe")
     exit_check_interval_seconds = (
         exchange.parse_timeframe(exit_check_timeframe)
-        if exit_check_timeframe and not is_market_making
+        if exit_check_timeframe and not is_market_making and not is_ibkr
         else None
     )
     last_exit_check_ts = time.time()
@@ -436,8 +632,8 @@ def main(config_path: str) -> None:
 
     try:
         while True:
-            candle = poll_new_closed_candle(exchange, config["symbol"], config["timeframe"], last_seen_ts)
-            current_price = candle.close if candle is not None else exchange.fetch_ticker(config["symbol"])["last"]
+            candle = fetch_closed_candle(last_seen_ts)
+            current_price = candle.close if candle is not None else fetch_current_price()
 
             if candle is not None:
                 engine.process_candle(candle)

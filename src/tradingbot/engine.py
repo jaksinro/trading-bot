@@ -12,6 +12,7 @@ vente de la strategie cloture TOUS les lots ouverts (sortie de tendance
 complete, pas une sortie partielle).
 """
 
+from datetime import datetime, timezone
 from typing import Callable
 
 from tradingbot.analysis.atr_sizer import AtrSizer
@@ -65,8 +66,22 @@ class Engine:
         self.instance_name = instance_name
         self.capital_cap = capital_cap
         self._last_price: float | None = None
+        self._current_day = None  # journee UTC en cours, pour la remise a zero du compteur
+
+    def _roll_daily_counters_if_new_day(self, candle: Candle) -> None:
+        """Remet a zero le compteur de perte journaliere au changement de jour
+        UTC. Base sur l'horodatage de la BOUGIE et non sur l'horloge systeme :
+        un backtest doit rester reproductible, et rejouer la meme periode doit
+        toujours donner le meme resultat."""
+        day = datetime.fromtimestamp(candle.timestamp / 1000, tz=timezone.utc).date()
+        if self._current_day is None:
+            self._current_day = day
+        elif day != self._current_day:
+            self._current_day = day
+            self.risk_manager.reset_daily_counters()
 
     def process_candle(self, candle: Candle) -> None:
+        self._roll_daily_counters_if_new_day(candle)
         if self.trend_filter is not None:
             self.trend_filter.update(candle.close)  # mis a jour a chaque bougie, achat ou non
         if self.atr_sizer is not None:
@@ -92,6 +107,7 @@ class Engine:
         sous le seuil de declenchement sur un grand timeframe. Ne fait
         JAMAIS avancer l'etat de la strategie (fenetre glissante, etc.) -
         reste coherent avec les entrees decidees sur le timeframe large."""
+        self._roll_daily_counters_if_new_day(candle)
         messages = self.check_lot_exits(candle)
         delta_note = self._price_delta_note(candle.close)
 
@@ -246,7 +262,21 @@ class Engine:
     def _place_order(
         self, side: Side, quantity: float, candle: Candle, reason: str = "", lot_id: int | None = None
     ) -> OrderResult:
+        realized_before = self.portfolio.realized_pnl
         order = self.executor.place_order(side, quantity, candle.close, candle.timestamp, reason=reason, lot_id=lot_id)
+
+        # Alimente le garde-fou de perte journaliere (EF-71). Sans cet appel,
+        # `max_daily_loss_pct` etait une configuration MORTE : presente dans
+        # toutes les configs, annoncee dans le README, testee unitairement, et
+        # jamais alimentee - donc `_halted_for_today` ne passait jamais a True.
+        # Reference : le capital de depart, seule base stable d'un trade a
+        # l'autre (meme raisonnement que `size_for_signal`).
+        realized_delta = self.portfolio.realized_pnl - realized_before
+        if realized_delta and self.portfolio.starting_capital:
+            self.risk_manager.record_realized_pnl_pct(
+                realized_delta / self.portfolio.starting_capital
+            )
+
         if self.shared_pool is not None and side == Side.SELL:
             # Vente : quantite/prix deja connus, pas de reservation prealable
             # necessaire (contrairement a l'achat) - on reverse directement

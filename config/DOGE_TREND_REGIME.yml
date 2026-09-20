@@ -1,0 +1,54 @@
+# Modele de regime de tendance sur DOGE (EF-68) - ajoute apres validation
+# du transfert depuis ETH : les parametres ci-dessous sont EXACTEMENT ceux
+# choisis sur l'entrainement d'ETH, non reoptimises sur DOGE. C'est
+# volontaire : reoptimiser par actif serait du surajustement, et le fait que
+# le reglage transfere tel quel est precisement ce qui a ete mesure.
+#
+# Resultat sur la tranche de test de DOGE : +141,32 % en test contre -38,47 % pour le buy and hold, mediane de grille +82,93 %, 35 reglages sur 45 battant le buy and hold.
+#
+# Conditions exigees avant d'ajouter cet actif (les 4 remplies) : le reglage
+# d'ETH bat le buy and hold, la MEDIANE des 45 reglages de la grille le bat
+# aussi, une majorite de la grille le bat, et le rendement est positif EN
+# ABSOLU - cette derniere condition a ete ajoutee apres avoir constate que
+# "battre le buy and hold" etait souvent satisfait en perdant moins (SOL, LINK
+# et AVAX battaient le marche tout en perdant de l'argent : ecartes).
+#
+# FENETRE DIVERSIFIEE (2000 bougies, ~83 jours) : les trois bots partagent
+# le meme modele sur des actifs fortement correles - avec des reglages
+# identiques ils basculaient dans le MEME etat 72,5 % du temps (mesure).
+# Repartir les fenetres validees (500/1000/2000, toutes battant le buy and
+# hold sur les 3 actifs) ramene ce chiffre a 66,7 % : gain modeste mais reel,
+# et surtout les 3 bots ne se trompent plus ensemble si une fenetre s'avere
+# mauvaise. L'attribution est NEUTRE (ordre d'ajout des bots), pas optimisee
+# par actif - ce serait de la selection sur le test.
+# Diversifier les MARGES avait ete teste d'abord : 72,5 % -> 71,9 %, cosmetique.
+#
+# Long-only : gagner pendant une baisse est hors de portee, l'objectif est de
+# rester en liquidites au lieu de subir. Voir STC section EF-68.
+name: DOGE_TREND_REGIME
+exchange: binance
+symbol: DOGE/USDT
+timeframe: 1h
+warmup_candles: 2000
+flatten_on_start: true
+capital_allocated: 200
+
+strategy:
+  type: trend_regime
+  ema_period: 2000
+  entry_buffer_pct: 0.03
+  exit_buffer_pct: 0.0
+
+risk:
+  max_position_size_pct: 1.0
+  stop_loss_pct: null
+  take_profit_pct: null
+  trailing_stop_pct: null
+  profit_lock_arm_pct: null
+  profit_lock_trigger_pct: null
+  max_daily_loss_pct: 0.05
+  max_concurrent_positions: 1
+
+backtest:
+  starting_capital: 1000
+  since: '2019-01-01T00:00:00Z'

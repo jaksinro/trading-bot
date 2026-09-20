@@ -144,9 +144,14 @@ class RiskManager:
         """Retourne True si le signal peut etre transmis a l'execution.
         `open_positions`/`current_price` sont optionnels : necessaires
         uniquement pour la regle anti-accumulation (EF-23) sur un achat."""
-        if self._halted_for_today:
-            return False
         if signal.side == Side.BUY:
+            # L'arret journalier ne bloque QUE les achats. Bloquer une vente
+            # enfermerait dans une position perdante le jour meme ou la perte
+            # max est atteinte : un garde-fou qui aggrave le risque qu'il
+            # pretend reduire. Meme choix, meme raison, que dans
+            # `execution/live_executor.py`.
+            if self._halted_for_today:
+                return False
             if open_positions_count >= self.config.max_concurrent_positions:
                 return False
             if self.config.block_buy_if_any_position_losing and open_positions and current_price is not None:
@@ -165,9 +170,9 @@ class RiskManager:
     ) -> str:
         """Message lisible expliquant pourquoi `validate` a refuse ce signal
         (utilise pour le journal des decisions affiche sur le dashboard)."""
-        if self._halted_for_today:
-            return "trading suspendu pour aujourd'hui (perte journaliere max atteinte)"
         if signal.side == Side.BUY:
+            if self._halted_for_today:
+                return "trading suspendu pour aujourd'hui (perte journaliere max atteinte)"
             if open_positions_count >= self.config.max_concurrent_positions:
                 return (
                     f"limite de {self.config.max_concurrent_positions} position(s) simultanee(s) "

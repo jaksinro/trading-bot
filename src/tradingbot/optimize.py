@@ -94,13 +94,25 @@ DIP_BOUNCE_DIP_THRESHOLDS = [0.003, 0.005, 0.01]
 DIP_BOUNCE_PROFIT_LOCK_ARM = [0.005, 0.01]
 DIP_BOUNCE_PROFIT_LOCK_GIVEBACK = [0.0007, 0.002]  # ecart sous le seuil d'armement avant de vendre
 
+# EF-57 (2026-09-16) : stop-loss et trailing stop ajoutes a la grille - le
+# stop-loss est devenu optionnel pour dip_bounce (EF-55, plus tot ce soir) et
+# n'avait donc jamais ete teste en recherche ; le trailing stop est le levier
+# qui a permis de laisser courir les grosses tendances (BTC) sans etre
+# plafonne par le seul verrou de gain, decouvert en testant a la main avant
+# d'automatiser la recherche ici. None = desactive dans les deux cas.
+DIP_BOUNCE_STOP_LOSS_OPTIONS: list[float | None] = [None, 0.10]
+DIP_BOUNCE_TRAILING_STOP_OPTIONS: list[float | None] = [None, 0.05, 0.08]
+
 MAX_POSITION_SIZE_PCT = 0.10
 MAX_DAILY_LOSS_PCT = 0.05
 MIN_DRAWDOWN_FLOOR = 0.01  # plancher pour BacktestResult.risk_adjusted_return (etape 6, piste 4)
 
 # Feuille de route performance, etape 1 (voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md) :
 # None = filtre de tendance desactive, sinon la periode de l'EMA testee.
-TREND_FILTER_EMA_OPTIONS: list[int | None] = [None, 50, 100, 200]
+# 300 ajoute le 2026-09-16 suite a un constat empirique sur ETH/dip_bounce
+# (EMA300 plus regulier et moins de drawdown que 200 sur 3 fenetres testees a
+# la main) - beneficie aussi a sma_cross/scalp_dip qui partagent cette liste.
+TREND_FILTER_EMA_OPTIONS: list[int | None] = [None, 50, 100, 200, 300]
 
 # Feuille de route performance, etape 2 : False = sizing ATR desactive, True =
 # active avec les parametres par defaut (memes que le formulaire dashboard).
@@ -313,6 +325,13 @@ def build_market_making_candidates() -> list[Candidate]:
 
 
 def build_dip_bounce_candidates() -> list[Candidate]:
+    """EF-57 (2026-09-16) : grille etendue suite a la recherche manuelle de
+    ce soir - stop_loss/trailing_stop (optionnels depuis EF-55) et filtre de
+    tendance EMA croises en plus des 4 dimensions d'origine. `force_trade_after_hours`
+    fixe a None (jamais varie - aucune preuve empirique a ce jour qu'il faille
+    l'activer par defaut, pas la peine de multiplier la grille sur une
+    dimension non validee). Pas de croisement ATR (idem, aucune preuve pour
+    cette strategie precise)."""
     candidates = []
     for trend_period in DIP_BOUNCE_TREND_MA_PERIODS:
         for dip in DIP_BOUNCE_DIP_THRESHOLDS:
@@ -321,18 +340,27 @@ def build_dip_bounce_candidates() -> list[Candidate]:
                     trigger = arm - giveback
                     if trigger <= 0:
                         continue
-                    candidates.append(Candidate(
-                        strategy_type="dip_bounce",
-                        params={"trend_ma_period": trend_period, "dip_threshold_pct": dip},
-                        risk={
-                            "max_position_size_pct": MAX_POSITION_SIZE_PCT,
-                            "stop_loss_pct": None,
-                            "take_profit_pct": None,
-                            "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
-                            "profit_lock_arm_pct": arm,
-                            "profit_lock_trigger_pct": trigger,
-                        },
-                    ))
+                    for stop_loss in DIP_BOUNCE_STOP_LOSS_OPTIONS:
+                        for trailing_stop in DIP_BOUNCE_TRAILING_STOP_OPTIONS:
+                            for trend_ema in TREND_FILTER_EMA_OPTIONS:
+                                candidates.append(Candidate(
+                                    strategy_type="dip_bounce",
+                                    params={
+                                        "trend_ma_period": trend_period,
+                                        "dip_threshold_pct": dip,
+                                        "force_trade_after_hours": None,
+                                    },
+                                    risk={
+                                        "max_position_size_pct": MAX_POSITION_SIZE_PCT,
+                                        "stop_loss_pct": stop_loss,
+                                        "take_profit_pct": None,
+                                        "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
+                                        "trailing_stop_pct": trailing_stop,
+                                        "profit_lock_arm_pct": arm,
+                                        "profit_lock_trigger_pct": trigger,
+                                    },
+                                    trend_filter_ema_period=trend_ema,
+                                ))
     return candidates
 
 
@@ -402,6 +430,14 @@ def _format_atr_sizing(candidate: Candidate) -> str:
     return ", atr_sizing=on" if candidate.atr_sizing_enabled else ""
 
 
+def _format_stop_loss(risk: dict) -> str:
+    return f"{risk['stop_loss_pct']:.0%}" if risk.get("stop_loss_pct") is not None else "aucun"
+
+
+def _format_trailing_stop(risk: dict) -> str:
+    return f", trailing={risk['trailing_stop_pct']:.0%}" if risk.get("trailing_stop_pct") else ""
+
+
 def format_candidate(candidate: Candidate) -> str:
     p = candidate.params
     r = candidate.risk
@@ -421,7 +457,7 @@ def format_candidate(candidate: Candidate) -> str:
         return (
             f"dip_bounce(fenetre={p['trend_ma_period']}, seuil_creux={p['dip_threshold_pct']:.2%}, "
             f"verrou_armement={r['profit_lock_arm_pct']:.2%}, verrou_declenchement={r['profit_lock_trigger_pct']:.2%}, "
-            f"stop_loss=aucun)"
+            f"stop_loss={_format_stop_loss(r)}{_format_trailing_stop(r)}{_format_trend_filter(candidate)})"
         )
     return (
         f"scalp_dip(lookback={p['lookback']}, seuil={p['dip_threshold_pct']:.1%}, "

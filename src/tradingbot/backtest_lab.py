@@ -35,7 +35,7 @@ import ccxt
 from tradingbot.analysis.atr_sizer import AtrSizer
 from tradingbot.analysis.price_level_sizer import PriceLevelSizer
 from tradingbot.analysis.trend_filter import TrendFilter
-from tradingbot.data_feed import fetch_historical_candles
+from tradingbot.data_feed import fetch_historical_candles, filter_candles
 from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
 from tradingbot.mm_engine import MarketMakingEngine
@@ -107,6 +107,25 @@ PRESETS: dict[str, StrategyPreset] = {
         ],
         risk_param_specs=[], supports_stop_loss=True,
     ),
+    "mean_dip": StrategyPreset(
+        key="mean_dip", label="Creux vs moyenne mobile (5 min, ~1h, stop-loss + trailing uniquement)",
+        strategy_type="mean_dip", engine="standard", timeframe="5m",
+        param_specs=[
+            ParamSpec("window", "Fenetre (bougies)", 12, int),
+            ParamSpec("num_std", "Largeur des bandes (ecarts-types)", 2.0, float),
+        ],
+        risk_param_specs=[], supports_stop_loss=True, default_stop_loss_pct=0.02,
+    ),
+    "slope_dip": StrategyPreset(
+        key="slope_dip", label="Detecteur de pente (1 min, trailing stop uniquement)",
+        strategy_type="slope_dip", engine="standard", timeframe="1m",
+        param_specs=[
+            ParamSpec("slope_threshold_pct", "Seuil de pente entre 2 bougies (%)", 0.005, float, unit="%"),
+            ParamSpec("candles_window", "Nombre de bougies pour mesurer la pente", 2, int),
+            ParamSpec("one_buy_per_slope", "Limiter a 1 achat par pente continue (0=non, 1=oui)", 0, int),
+        ],
+        risk_param_specs=[], supports_stop_loss=True, default_stop_loss_pct=None,
+    ),
     "market_making": StrategyPreset(
         key="market_making", label="Market making (cotation bid/ask continue)",
         strategy_type="market_making", engine="market_making", timeframe=None,
@@ -142,6 +161,17 @@ PRESETS: dict[str, StrategyPreset] = {
             ParamSpec("profit_lock_arm_pct", "Armement du verrou de gain", 0.005, float, unit="%"),
             ParamSpec("profit_lock_trigger_pct", "Declenchement du verrou de gain", 0.0043, float, unit="%"),
         ],
+        supports_stop_loss=True, default_stop_loss_pct=None,
+    ),
+    "trend_regime": StrategyPreset(
+        key="trend_regime", label="Regime de tendance (investi en hausse, liquidites en baisse)",
+        strategy_type="trend_regime", engine="standard", timeframe=None,
+        param_specs=[
+            ParamSpec("ema_period", "Fenetre de tendance (en bougies)", 500, int),
+            ParamSpec("entry_buffer_pct", "Marge au-dessus de la tendance pour entrer", 0.03, float, unit="%"),
+            ParamSpec("exit_buffer_pct", "Marge sous la tendance pour sortir", 0.0, float, unit="%"),
+        ],
+        risk_param_specs=[],
         supports_stop_loss=True, default_stop_loss_pct=None,
     ),
     "buy_and_hold": StrategyPreset(
@@ -352,10 +382,6 @@ def build_strategy_instance(preset: StrategyPreset, params: dict):
     return strategy_cls(**params)
 
 
-def filter_candles(candles: list[Candle], since_ms: int, until_ms: int | None) -> list[Candle]:
-    return [c for c in candles if c.timestamp >= since_ms and (until_ms is None or c.timestamp <= until_ms)]
-
-
 def split_periods(since_ms: int, until_ms: int, n: int) -> list[tuple[int, int]]:
     """Decoupe [since_ms, until_ms] en n sous-periodes contigues de meme
     duree (pas glissantes/chevauchantes - un simple decoupage egal suffit
@@ -476,6 +502,38 @@ def merge_dual_timeframe(
     return [timeline[key] for key in sorted(timeline)]
 
 
+def build_chart_payload(candles: list[Candle], portfolio, max_candles: int = 1500) -> dict:
+    """EF-60 : donnees pretes a tracer un graphique en chandelles avec les
+    achats/ventes du backtest - onglet Test/Backtest du dashboard. Sous-
+    echantillonne au-dela de `max_candles` (regroupe par paquets, en
+    conservant open/high/low/close corrects du paquet) pour rester leger cote
+    navigateur meme sur des mois de bougies 1 minute ; les horodatages des
+    trades restent les vrais horodatages (pas des index), pour un alignement
+    correct avec le regroupement cote client si besoin."""
+    step = max(1, len(candles) // max_candles)
+    bucketed = []
+    for i in range(0, len(candles), step):
+        chunk = candles[i:i + step]
+        bucketed.append({
+            "t": chunk[0].timestamp, "o": chunk[0].open,
+            "h": max(c.high for c in chunk), "l": min(c.low for c in chunk),
+            "c": chunk[-1].close,
+        })
+    closed_trades = [
+        {
+            "buy_t": t["entry_timestamp"], "buy_p": t["entry_price"],
+            "sell_t": t["timestamp"], "sell_p": t["exit_price"],
+            "pnl": t["pnl"], "reason": t["reason"],
+        }
+        for t in portfolio.trade_history
+    ]
+    open_positions = [
+        {"buy_t": p.entry_timestamp, "buy_p": p.avg_entry_price}
+        for p in portfolio.positions
+    ]
+    return {"candles": bucketed, "closed_trades": closed_trades, "open_positions": open_positions}
+
+
 def run_one_period(
     preset: StrategyPreset, params: dict, risk_kwargs: dict, capital: float, candles: list[Candle],
     price_level_sizer_kwargs: dict | None = None, exit_check_candles: list[Candle] | None = None,
@@ -530,7 +588,7 @@ def run_one_period(
     report = compute_report(portfolio)
     benchmark_pct = compute_buy_and_hold_return_pct(candles)
     trade_stats = compute_trade_stats(portfolio, candles[-1].close)
-    return report, benchmark_pct, trade_stats
+    return report, benchmark_pct, trade_stats, portfolio
 
 
 def build_risk_kwargs_and_summary(preset: StrategyPreset, args: argparse.Namespace, risk_params: dict) -> tuple[dict, dict]:
@@ -789,6 +847,7 @@ def build_namespace_from_payload(payload: dict) -> argparse.Namespace:
 
 def run_backtest_job(
     args: argparse.Namespace, progress_callback: Callable[[dict], None] | None = None,
+    chart_data_out: dict | None = None,
 ) -> tuple[str, str]:
     """Coeur du test (validation, telechargement, execution, rapport) -
     reutilise a la fois par le CLI (`main`) et par le serveur de controle
@@ -798,7 +857,14 @@ def run_backtest_job(
     `progress_callback` (optionnel, EF-56 - barre de progression du
     dashboard) : appele a chaque etape notable avec un petit dict d'etat
     ({"stage": "download"|"running", ...}) - jamais requis par le CLI ni les
-    tests existants (None par defaut, aucun effet)."""
+    tests existants (None par defaut, aucun effet).
+
+    `chart_data_out` (optionnel, EF-60 - graphique en chandelles du dashboard) :
+    dict mutable rempli en place avec {"candles": [...], "closed_trades": [...],
+    "open_positions": [...]} pour tracer le prix et les achats/ventes - UNIQUEMENT
+    en mode periode unique (`--repeat 1`, valeur par defaut) : avec plusieurs
+    sous-periodes, il faudrait un graphique par sous-periode, hors perimetre de
+    ce lot. Reste `None` (aucun effet) sinon, comme `progress_callback`."""
 
     def report(update: dict) -> None:
         if progress_callback is not None:
@@ -868,7 +934,7 @@ def run_backtest_job(
             print(f"{len(exit_check_candles)} bougies de surveillance ({exit_check_timeframe}) chargees pour les sorties")
 
         report({"stage": "running", "current": 0, "total": 1, "message": "Simulation en cours..."})
-        result, benchmark_pct, trade_stats = run_one_period(
+        result, benchmark_pct, trade_stats, portfolio = run_one_period(
             preset, params, risk_kwargs, args.capital, candles, price_level_sizer_kwargs, exit_check_candles,
             timeframe, exit_check_timeframe, trend_filter_kwargs, atr_sizer_kwargs,
         )
@@ -881,6 +947,8 @@ def run_backtest_job(
             benchmark_pct=benchmark_pct, trade_stats=trade_stats,
         )
         filename = f"{preset.key}_{safe_symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        if chart_data_out is not None and preset.engine != "market_making":
+            chart_data_out.update(build_chart_payload(candles, portfolio))
     else:
         effective_until_ms = until_ms if until_ms is not None else int(datetime.now(tz=timezone.utc).timestamp() * 1000)
         windows = split_periods(since_ms, effective_until_ms, repeat)
@@ -896,7 +964,7 @@ def run_backtest_job(
             window_exit_check_candles = (
                 filter_candles(all_exit_check_candles, start_ms, end_ms) if all_exit_check_candles is not None else None
             )
-            result, benchmark_pct, trade_stats = run_one_period(
+            result, benchmark_pct, trade_stats, _portfolio = run_one_period(
                 preset, params, risk_kwargs, args.capital, window_candles, price_level_sizer_kwargs,
                 window_exit_check_candles, timeframe, exit_check_timeframe, trend_filter_kwargs, atr_sizer_kwargs,
             )

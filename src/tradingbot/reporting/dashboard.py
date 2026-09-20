@@ -116,6 +116,7 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trading Bot - Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b8def'/%3E%3Cpath d='M7 21l5-6 4 3 4-7 5 5' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -169,6 +170,8 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   h1, h2, h3 { font-family: 'Inter', sans-serif; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
   h1 { font-size: 21px; margin: 0 0 4px 0; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); font-weight: 600; margin: 0 0 12px 0; }
+  .section-block > h2 { display: flex; align-items: center; gap: 9px; }
+  .section-block > h2::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: linear-gradient(var(--accent), var(--accent-2)); flex-shrink: 0; }
   code { font-family: 'JetBrains Mono', ui-monospace, monospace; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 5px; font-size: 12px; color: #c9d2ea; }
   .muted { color: var(--text-dim); font-size: 13px; }
   .app-header { max-width: 1360px; margin: 0 auto 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -178,16 +181,16 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .live-pill { display: inline-flex; align-items: center; gap: 7px; background: var(--surface); border: 1px solid var(--border); padding: 7px 13px; border-radius: 999px; font-size: 12.5px; color: var(--text-dim); }
   .live-pill .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(47,214,153,0.6); animation: pulse 2s infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(47,214,153,0.55); } 70% { box-shadow: 0 0 0 7px rgba(47,214,153,0); } 100% { box-shadow: 0 0 0 0 rgba(47,214,153,0); } }
-  .card { background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); border-radius: var(--radius-lg); padding: 24px 26px; max-width: 900px; margin: 0 auto; }
+  .card { background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-card); border-radius: var(--radius-lg); padding: 26px 30px; max-width: 1360px; margin: 0 auto; }
   .tabs { display: flex; gap: 6px; margin: 18px 0 22px 0; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
   .tab { background: transparent; color: var(--text-dim); border: 1px solid transparent; border-radius: var(--radius-sm); padding: 7px 13px; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: background .15s ease, color .15s ease, border-color .15s ease; font-family: inherit; }
   .tab:hover { background: var(--surface-hover); color: var(--text); }
   .tab.active { background: var(--accent-soft); color: #a9c6ff; border-color: rgba(91,141,239,0.35); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 12px; margin-top: 20px; }
-  .grid > div { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 13px 15px; transition: border-color .15s ease, transform .15s ease; }
+  .grid > div { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 15px 17px; transition: border-color .15s ease, transform .15s ease; }
   .grid > div:hover { border-color: var(--border-strong); }
   .stat-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-  .stat-value { font-size: 22px; font-weight: 600; margin-top: 6px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .stat-value { font-size: 26px; font-weight: 600; margin-top: 7px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
   .badge { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); border-radius: 999px; padding: 3px 11px; font-size: 11.5px; font-weight: 500; }
   .status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 11px; font-size: 11.5px; font-weight: 500; margin-left: 8px; }
   .status.running { background: var(--green-soft); color: var(--green); }
@@ -198,8 +201,16 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .logs li { padding: 8px 2px; border-bottom: 1px solid var(--border); color: #c7cdd6; line-height: 1.5; }
   .logs li:last-child { border-bottom: none; }
   .logs .ts { color: var(--text-faint); margin-right: 10px; }
-  table.bi { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12.5px; }
-  table.bi th, table.bi td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  table.bi { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13px; }
+  table.bi th, table.bi td { text-align: left; padding: 11px 13px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  table.bi tbody tr:nth-child(even) { background: rgba(255,255,255,0.018); }
+  table.bi td { font-variant-numeric: tabular-nums; }
+  /* Une valeur coupee en deux lignes ("+0.00" puis "%") est illisible : on
+     empeche le retour a la ligne dans les cellules, et la premiere colonne
+     (nom du bot) absorbe la largeur restante. Un conteneur defilant evite
+     tout debordement horizontal de la page si les colonnes sont nombreuses. */
+  table.bi th:first-child, table.bi td:first-child { min-width: 180px; }
+  .table-scroll { overflow-x: auto; }
   table.bi th { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; background: var(--surface); position: sticky; top: 0; }
   table.bi tbody tr { transition: background .12s ease; }
   table.bi tbody tr:hover { background: var(--surface-hover); }
@@ -210,7 +221,8 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .alert-banner { background: var(--red-soft); border: 1px solid rgba(255,107,107,0.3); color: #ffb4b4; border-radius: var(--radius-md); padding: 11px 15px; font-size: 13px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .alert-banner button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; opacity: .7; }
   .alert-banner button:hover { opacity: 1; }
-  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 13px; margin-top: 14px; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin-top: 14px; max-width: 1120px; }
+  .card > p.muted, .card > .adv-hint { max-width: 78ch; }
   .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; font-weight: 500; }
   .field input, .field select { width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--border-strong); color: var(--text); border-radius: var(--radius-sm); padding: 9px 11px; font-size: 13px; font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
   .field input:hover, .field select:hover { border-color: var(--text-faint); }
@@ -245,8 +257,71 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .adv-section[open] summary .chev { transform: rotate(90deg); }
   .adv-section summary:hover { background: var(--surface-hover); }
   .adv-body { padding: 4px 14px 16px; border-top: 1px solid var(--border); }
-  .adv-hint { font-size: 12px; color: var(--text-dim); margin: 10px 0 0; line-height: 1.55; }
+  .adv-hint { font-size: 12px; color: var(--text-dim); margin: 12px 0 0; line-height: 1.6; background: rgba(91,141,239,0.05); border-left: 2px solid rgba(91,141,239,0.35); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 10px 13px; }
   .section-block { margin-top: 22px; }
+  .dot-legend { display: inline-flex; align-items: center; gap: 12px; margin-left: auto; padding-left: 14px; font-size: 11.5px; color: var(--text-faint); }
+  .dot-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+  .dot-legend .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .dot-legend-count { color: var(--text-dim); border-left: 1px solid var(--border); padding-left: 12px; }
+  span.adv-hint { display: block; margin-top: 5px; }
+  /* --- Onglet Manuel (EF-81) --- */
+  .manual-layout { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; margin-top: 14px; }
+  @media (max-width: 900px) { .manual-layout { grid-template-columns: 1fr; } }
+  .order-panel { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; display: flex; flex-direction: column; gap: 12px; align-self: start; }
+  .order-panel label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); font-weight: 600; }
+  .order-panel input, .order-panel select { font-size: 14px; padding: 9px 11px; }
+  .side-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px; }
+  .side-toggle button { padding: 8px; border: none; background: transparent; color: var(--text-dim); font-weight: 600; }
+  .side-toggle button.active-buy { background: var(--green-soft); color: var(--green); }
+  .side-toggle button.active-sell { background: var(--red-soft); color: var(--red); }
+  .quick-row { display: flex; gap: 6px; }
+  .quick-row button { flex: 1; font-size: 11.5px; padding: 6px 4px; }
+  .live-price { display: flex; align-items: baseline; gap: 8px; }
+  .live-price .px { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .live-price .sym { color: var(--text-dim); font-size: 13px; }
+  .submit-buy { background: var(--green); color: #05130d; font-weight: 700; font-size: 15px; padding: 12px; }
+  .submit-sell { background: var(--red); color: #fff; font-weight: 700; font-size: 15px; padding: 12px; }
+  .order-estimate { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .manual-msg { margin-top: 10px; font-size: 13px; }
+  /* --- Onglet Investissement : cartes de position et graphiques (EF-78) --- */
+  .invest-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 16px 0 4px 0;
+    padding: 12px 14px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); }
+  .invest-toolbar .tb-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-faint); font-weight: 600; }
+  .invest-toolbar .tb-value { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
+  .step-btn { width: 34px; height: 34px; padding: 0; font-size: 17px; line-height: 1; font-weight: 600;
+    border-radius: var(--radius-sm); }
+  .tb-sep { flex: 1 1 auto; }
+
+  .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 14px; margin-top: 16px; }
+  .pos-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .pos-card.empty { opacity: 0.62; }
+  .pos-head { display: flex; align-items: baseline; gap: 8px; }
+  .pos-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .pos-sym { font-weight: 650; font-size: 14px; letter-spacing: 0.01em; }
+  .pos-qty { margin-left: auto; font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .pos-price { display: flex; align-items: baseline; gap: 9px; }
+  .pos-price .now { font-size: 25px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .pos-price .chg { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pos-rows { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 12px; }
+  .pos-rows dt { color: var(--text-faint); }
+  .pos-rows dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .alloc { margin-top: 2px; }
+  .alloc-track { position: relative; height: 7px; background: rgba(255,255,255,0.07); border-radius: 4px; overflow: visible; }
+  .alloc-fill { height: 100%; border-radius: 4px; }
+  .alloc-target { position: absolute; top: -3px; width: 2px; height: 13px; background: var(--text-dim); border-radius: 1px; }
+  .alloc-legend { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-faint);
+    margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .pos-actions { display: flex; gap: 7px; margin-top: auto; padding-top: 4px; }
+  .pos-actions button { flex: 1; font-size: 12px; padding: 7px 9px; }
+
+  .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; }
+  .chart-legend .li { display: flex; align-items: center; gap: 6px; }
+  .chart-legend .sw { width: 11px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  .chart-legend .val { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .dca-report { margin-top: 14px; }
+  .dca-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   hr.sep { border: none; border-top: 1px solid var(--border); margin: 22px 0; }
 </style>
 </head>
@@ -269,10 +344,17 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
 <script>
-let currentMainTab = "home"; // "home" | "bot" | "config" | "test" - Accueil par defaut au demarrage
+let currentMainTab = "home"; // "home" | "bot" | "invest" | "config" | "test" - Accueil par defaut au demarrage
 let currentBotName = null;
 let currentConfigSubTab = "creation"; // "creation" | "supervision"
 let currentTestSubTab = "backtest";
+let currentInvestSubTab = "suivi"; // "suivi" | "reglages"
+let currentInvestBot = null;
+let investBotsCache = [];
+// Rapports de passage deja affiches, conserves par bot : le rafraichissement
+// automatique du dashboard reconstruit l'onglet toutes les 15 s et effacerait
+// sinon le rapport que l'utilisateur vient de demander.
+let lastDcaReports = {};
 let previousRunningStatus = {};
 
 if (window.Notification && Notification.permission === "default") {
@@ -538,22 +620,33 @@ const CONTROL_SERVER = "http://localhost:8765";
 // avec une echappatoire "Autre" pour ne pas bloquer un symbole hors liste.
 // Types de bot creables depuis le formulaire de Creation (§5.1) - mean_reversion
 // et market_making restent YAML uniquement, pas encore promus au formulaire.
-const CREATABLE_STRATEGY_TYPES = new Set(["sma_cross", "scalp_dip", "dip_bounce_hourly", "dip_bounce_minute", "buy_and_hold"]);
+const CREATABLE_STRATEGY_TYPES = new Set(["sma_cross", "scalp_dip", "dip_bounce_hourly", "dip_bounce_minute", "dip_bounce_daily", "mean_dip", "slope_dip", "trend_regime", "buy_and_hold"]);
 
 const TOP10_SYMBOLS = [
   "BTC/USDT", "ETH/USDT", "XRP/USDT", "BNB/USDT", "SOL/USDT",
   "DOGE/USDT", "ADA/USDT", "TRX/USDT", "LINK/USDT", "AVAX/USDT",
 ];
 
-function symbolSelectHtml(id, selectedValue) {
-  const isKnown = TOP10_SYMBOLS.includes(selectedValue);
-  const options = TOP10_SYMBOLS.map(s => `<option value="${s}"${s === selectedValue ? " selected" : ""}>${s}</option>`).join("");
+// EF-65 (2026-09-17, demande de l'utilisateur : "selectionner les actions
+// avec une liste") - actions Euronext deja testees en session (voir STC
+// §3.47) + quelques grandes capitalisations frequentes, memes tickers
+// Interactive Brokers/Yahoo Finance (suffixe ".PA" = Paris, ".AS" = Amsterdam).
+const TOP_STOCKS = [
+  "TTE.PA", "ORA.PA", "GLE.PA", "RNO.PA", "AF.PA", "MT.AS",
+  "AI.PA", "MC.PA", "OR.PA", "SAN.PA", "BNP.PA",
+];
+
+function symbolSelectHtml(id, selectedValue, options, otherPlaceholder) {
+  const list = options || TOP10_SYMBOLS;
+  const placeholder = otherPlaceholder || "ex: MATIC/USDT";
+  const isKnown = list.includes(selectedValue);
+  const optionsHtml = list.map(s => `<option value="${s}"${s === selectedValue ? " selected" : ""}>${s}</option>`).join("");
   return `
     <select id="${id}" onchange="onSymbolSelectChange('${id}')">
-      ${options}
+      ${optionsHtml}
       <option value="__other__"${isKnown ? "" : " selected"}>Autre...</option>
     </select>
-    <input id="${id}_other" type="text" placeholder="ex: MATIC/USDT" style="margin-top:6px; ${isKnown ? "display:none;" : ""}" value="${isKnown ? "" : (selectedValue || "")}">
+    <input id="${id}_other" type="text" placeholder="${placeholder}" style="margin-top:6px; ${isKnown ? "display:none;" : ""}" value="${isKnown ? "" : (selectedValue || "")}">
   `;
 }
 
@@ -567,9 +660,10 @@ function symbolValueOf(id) {
   return select === "__other__" ? document.getElementById(`${id}_other`).value.trim() : select;
 }
 
-function setSymbolValue(id, value) {
+function setSymbolValue(id, value, list) {
+  const options = list || TOP10_SYMBOLS;
   const select = document.getElementById(id);
-  const isKnown = TOP10_SYMBOLS.includes(value);
+  const isKnown = options.includes(value);
   select.value = isKnown ? value : "__other__";
   document.getElementById(`${id}_other`).value = isKnown ? "" : (value || "");
   document.getElementById(`${id}_other`).style.display = isKnown ? "none" : "block";
@@ -578,6 +672,8 @@ function setSymbolValue(id, value) {
 const MAIN_TABS = [
   { id: "home", label: "🏠 Accueil" },
   { id: "bot", label: "🤖 Bot" },
+  { id: "invest", label: "💰 Investissement" },
+  { id: "manual", label: "🖐 Manuel" },
   { id: "config", label: "⚙ Configuration" },
   { id: "test", label: "🧪 Test" },
 ];
@@ -603,14 +699,48 @@ function renderSubTabsAndContent() {
       const d = (window.BOT_INSTANCES || {})[name];
       const isRunning = d && d.updated_at_ts && (Date.now() - d.updated_at_ts) < STALE_AFTER_MS;
       const dotColor = isRunning ? "var(--green)" : "var(--red)";
-      return `<button class="tab ${name === currentBotName ? "active" : ""}" data-name="${name}">
-        <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:${dotColor}; margin-right:7px; vertical-align:1px;"></span>${name}
+      const dotTitle = isRunning
+        ? "Bot actif : donnees recues il y a moins de 3 minutes"
+        : "Bot a l'arret ou silencieux depuis plus de 3 minutes";
+      return `<button class="tab ${name === currentBotName ? "active" : ""}" data-name="${name}" title="${dotTitle}">
+        <span title="${dotTitle}" style="display:inline-block; width:6px; height:6px; border-radius:50%; background:${dotColor}; margin-right:7px; vertical-align:1px;"></span>${name}
       </button>`;
     }).join("");
     subtabsEl.querySelectorAll(".tab").forEach(btn => {
       btn.onclick = () => { currentBotName = btn.dataset.name; renderSubTabsAndContent(); };
     });
+    if (names.length) {
+      const running = names.filter(n => {
+        const d = (window.BOT_INSTANCES || {})[n];
+        return d && d.updated_at_ts && (Date.now() - d.updated_at_ts) < STALE_AFTER_MS;
+      }).length;
+      subtabsEl.insertAdjacentHTML("beforeend",
+        `<span class="dot-legend" title="Un bot est considere actif s'il a envoye des donnees il y a moins de 3 minutes">
+          <span class="dot-legend-item"><i class="dot" style="background:var(--green)"></i>actif</span>
+          <span class="dot-legend-item"><i class="dot" style="background:var(--red)"></i>arrete</span>
+          <span class="dot-legend-count">${running}/${names.length} en marche</span>
+        </span>`);
+    }
     renderBotContent();
+    return;
+  }
+
+  if (currentMainTab === "invest") {
+    const subtabs = [{ id: "suivi", label: "Suivi" }, { id: "reglages", label: "Reglages" }];
+    subtabsEl.style.display = "flex";
+    subtabsEl.innerHTML = subtabs.map(s =>
+      `<button class="tab ${s.id === currentInvestSubTab ? "active" : ""}" data-id="${s.id}">${s.label}</button>`
+    ).join("");
+    subtabsEl.querySelectorAll(".tab").forEach(btn => {
+      btn.onclick = () => { currentInvestSubTab = btn.dataset.id; renderSubTabsAndContent(); };
+    });
+    renderInvestContent();
+    return;
+  }
+
+  if (currentMainTab === "manual") {
+    subtabsEl.style.display = "none";
+    renderManualTab();
     return;
   }
 
@@ -784,6 +914,36 @@ function strategyFieldsHtml(type) {
       <p class="adv-hint" style="grid-column:1/-1;">Fenetre glissante fixe : ${windowLabel}. Achete des que le prix est proche du plus bas de la fenetre (aucune condition de tendance requise) ; hold jusqu'a etre rentable, sortie normale : le verrou de gain (arme au-dela du 1er seuil, vend si le gain retombe au 2e). <strong>Stop-loss optionnel</strong> (champ "Gestion du risque" ci-dessous, vide par defaut) : sans lui, une position peut rester ouverte longtemps en perte latente si elle n'atteint jamais le seuil d'armement - voir le manuel utilisateur. "Forcer un trade" assouplit progressivement (double a chaque periode supplementaire) le seuil de creux si aucun achat n'a eu lieu depuis N heures - idee proposee par l'utilisateur, desactive par defaut.</p>
     `;
   }
+  if (type === "dip_bounce_daily") {
+    return `
+      <div class="field"><label>Fenetre de tendance (jours)</label><input id="f_trend_ma_period" type="number" step="1" min="2" value="20"></div>
+      <div class="field"><label>Seuil de creux (%, proximite du plus bas de la fenetre)</label><input id="f_dip_threshold_pct" type="number" step="0.01" value="2"></div>
+      <p class="adv-hint" style="grid-column:1/-1;">2026-09-16, ajoute pour les actions (paper trading IBKR, "Type de compte" ci-dessus) - meme strategie "Rebond de creux" que les presets crypto, mais en bougies JOURNALIERES avec une fenetre de tendance REGLABLE : contrairement aux presets horaire/minute, la recherche empirique sur plusieurs actions (voir le manuel utilisateur) montre que la fenetre optimale varie fortement d'une action a l'autre (10 jours pour Renault, 40 pour Air France-KLM par exemple) - pas de valeur universelle a figer. <strong>Pas de verrou de gain</strong> pour ce preset (les meilleurs reglages trouves n'en utilisaient aucun) : seuls le Stop-loss (optionnel, "Gestion du risque" ci-dessous) et le Trailing stop ferment une position. <strong>Constat honnete</strong> : aucun edge demontre sur des actions en tendance haussiere forte (TotalEnergies, Orange...) ; plus credible (protection de capital, pas alpha) sur des actions en baisse ou chahutees.</p>
+    `;
+  }
+  if (type === "mean_dip") {
+    return `
+      <div class="field"><label>Fenetre (bougies 5 min, ~1h = 12)</label><input id="f_window" type="number" step="1" min="2" value="12"></div>
+      <div class="field"><label>Largeur des bandes (ecarts-types)</label><input id="f_num_std" type="number" step="0.1" value="2.0"></div>
+      <p class="adv-hint" style="grid-column:1/-1;">2026-09-16, idee proposee par l'utilisateur : detecte un creux comme un ECART a la moyenne mobile recente (bandes de Bollinger), pas une proximite a un plus bas glissant comme "Rebond de creux" - capte les pics descendants brefs (quelques dizaines de minutes) invisibles a l'echelle 24h. Achete des que le prix passe sous la bande basse (moyenne - N ecarts-types) ; <strong>aucune sortie geree par la strategie elle-meme</strong> (pas de verrou de gain, pas de retour a la moyenne) - seuls le Stop-loss et le Trailing stop (ci-dessous, "Gestion du risque") ferment une position. Stop-loss <strong>obligatoire</strong> ici (contrairement a "Rebond de creux") : sans lui ni verrou de gain, rien ne fermerait jamais une position perdante. <strong>"Positions simultanees max" pre-rempli a 10</strong> (au lieu de 1) : teste empiriquement le 2026-09-16, avec 1 seule position la strategie reste quasi inactive (une position bloque toute nouvelle entree pendant potentiellement plusieurs jours). Reglages testes sur plusieurs periodes sans edge robuste demontre - voir le manuel utilisateur.</p>
+    `;
+  }
+  if (type === "slope_dip") {
+    return `
+      <div class="field"><label>Seuil de pente (%)</label><input id="f_slope_threshold_pct" type="number" step="0.01" value="0.5"></div>
+      <div class="field"><label>Nombre de bougies pour mesurer la pente</label><input id="f_candles_window" type="number" step="1" min="2" value="2"></div>
+      <div class="field"><label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input id="f_one_buy_per_slope" type="checkbox"> Limiter a 1 achat par pente continue</label></div>
+      <p class="adv-hint" style="grid-column:1/-1;">2026-09-16, idee proposee par l'utilisateur : "detecteur de pente" - compare la cloture de la bougie courante a celle d'il y a N bougies 1 minute (2 par defaut = la bougie precedente immediate) ; si la chute depasse le seuil, achete immediatement. <strong>Aucune sortie geree par la strategie elle-meme</strong> : "on garde l'ordre" (demande explicite), seul le Trailing stop (ci-dessous, "Gestion du risque", suggere a 5% comme demande) ferme normalement une position ; Stop-loss <strong>optionnel</strong> en filet de securite (vide par defaut, comme "Rebond de creux"). <strong>Elargir a 5 bougies</strong> (teste le 2026-09-16) augmente le rendement moyen sur plusieurs periodes mais aussi fortement la variance (pire cas ~4x plus large) - pas un edge demontre, a essayer au cas par cas. <strong>"Limiter a 1 achat par pente continue"</strong> (2026-09-16, constat reel de l'utilisateur : "sa foire pendant les longues pentes") : sur une derive baissiere continue, la condition de pente reste vraie a chaque bougie - sans cette case, la strategie empile un achat par bougie sur la MEME tendance au lieu d'un seul. Cochee, un seul achat par episode de chute continue (se rearme des que la chute s'interrompt, meme brievement). Desactivee par defaut (comportement d'origine).</p>
+    `;
+  }
+  if (type === "trend_regime") {
+    return `
+      <div class="field"><label>Fenetre de tendance (bougies)</label><input id="f_ema_period" type="number" step="1" min="2" value="500"></div>
+      <div class="field"><label>Marge pour entrer (%)</label><input id="f_entry_buffer_pct" type="number" step="0.1" min="0" value="3"></div>
+      <div class="field"><label>Marge pour sortir (%)</label><input id="f_exit_buffer_pct" type="number" step="0.1" min="0" value="0"></div>
+      <p class="adv-hint" style="grid-column:1/-1;">2026-09-17, demande de l'utilisateur ("un modele rentable en haussier, et si possible en baissier") : reste investi tant que le cours est au-dessus de sa tendance de fond, et passe <strong>tout en liquidites</strong> des qu'il repasse dessous. C'est la difference avec le "Filtre de tendance" ci-dessous, qui bloque seulement les nouveaux achats sans jamais fermer une position ouverte - on traversait donc tout le marche baissier en portefeuille. <strong>Mesure sur ETH/USDT, 6,7 ans de bougies 1h</strong>, reglee sur les 70% d'entrainement puis evaluee une seule fois sur les 30% restants : <strong>+34,8% en test (execution decalee, realiste) contre -35,1% pour le buy &amp; hold</strong>, et 41 reglages sur 45 battent le buy &amp; hold - l'effet ne depend pas d'un reglage precis. Par regime sur tout l'historique : <strong>+61% par semestre haussier, +0,7% par semestre baissier</strong> (contre +83% / -41% pour le buy &amp; hold) : on cede un peu de hausse pour ne plus subir la baisse. <strong>Gagner de l'argent en baissier reste hors de portee</strong> (long-only, pas de vente a decouvert) : l'objectif est de rester plat. Les marges evitent le va-et-vient couteux autour de la ligne de tendance ; une fenetre trop courte (~200 bougies) se fait hacher et perd. Stop-loss <strong>optionnel</strong> : la sortie normale est le retournement de tendance.</p>
+    `;
+  }
   if (type === "buy_and_hold") {
     return `
       <p class="adv-hint" style="grid-column:1/-1;">Achete UNE SEULE FOIS a son premier cycle, avec "Taille position max" du "Plafond de mise", puis ne revend jamais - pas de stop-loss, pas de take-profit, pas de rechauffement necessaire. Bot passif, comparable au benchmark "buy &amp; hold" utilise pour juger les autres strategies.</p>
@@ -795,16 +955,42 @@ function strategyFieldsHtml(type) {
   `;
 }
 
+function onAccountTypeChange(value) {
+  // EF-65 (2026-09-17, demande de l'utilisateur : "selectionner les actions
+  // avec une liste") - "Actions" bascule le Symbole sur une liste deroulante
+  // d'actions Euronext (TOP_STOCKS) au lieu des cryptos (TOP10_SYMBOLS),
+  // avec le meme mecanisme "Autre..." en texte libre pour un ticker non
+  // liste. Rappelle aussi le prealable non-code (TWS/IB Gateway) - le reste
+  // du formulaire (risque, strategie) ne change pas, seules les strategies
+  // imposant un timeframe incompatible sont refusees cote serveur
+  // (build_config).
+  const isIbkr = value === "ibkr_paper";
+  const hint = document.getElementById("f_account_type_hint");
+  const symbolWrap = document.getElementById("f_symbol_wrap");
+  symbolWrap.innerHTML = isIbkr
+    ? `<label>Symbole</label>${symbolSelectHtml("f_symbol", TOP_STOCKS[0], TOP_STOCKS, "ex: RNO.PA (Renault, Euronext Paris)")}`
+    : `<label>Symbole</label>${symbolSelectHtml("f_symbol", "ETH/USDT")}`;
+  if (isIbkr) {
+    hint.innerHTML = "Necessite TWS ou IB Gateway installe et connecte en mode <strong>PAPER</strong> (voir le manuel utilisateur) - aucun argent reel n'est engage. Strategies compatibles : &quot;Rebond de creux - journalier&quot;, &quot;Croisement de moyennes&quot;, &quot;Scalp sur creux&quot;, &quot;Buy &amp; hold&quot;.";
+    hint.style.display = "block";
+  } else {
+    hint.style.display = "none";
+  }
+}
+
 function onStrategyTypeChange(type) {
   document.getElementById("f_strategy_fields").innerHTML = strategyFieldsHtml(type);
 
   const isDipBounce = type === "dip_bounce_hourly" || type === "dip_bounce_minute";
+  const isDipBounceDaily = type === "dip_bounce_daily";
+  const isMeanDip = type === "mean_dip";
+  const isSlopeDip = type === "slope_dip";
   const noStopLoss = type === "buy_and_hold";
 
   const timeframeSelect = document.getElementById("f_timeframe");
   const timeframeHint = document.getElementById("f_timeframe_hint");
-  if (isDipBounce) {
-    timeframeSelect.value = type === "dip_bounce_hourly" ? "1h" : "1m";
+  if (isDipBounce || isDipBounceDaily || isMeanDip || isSlopeDip) {
+    timeframeSelect.value = isDipBounceDaily ? "1d" : (isMeanDip ? "5m" : (isSlopeDip ? "1m" : (type === "dip_bounce_hourly" ? "1h" : "1m")));
     timeframeSelect.disabled = true;
     timeframeHint.textContent = "Fixe par la strategie choisie.";
     timeframeHint.style.display = "block";
@@ -825,7 +1011,7 @@ function onStrategyTypeChange(type) {
     stopLossInput.placeholder = "";
     stopLossHint.textContent = "Desactive : cette strategie n'a pas de stop-loss (decision assumee).";
     stopLossHint.style.display = "block";
-  } else if (isDipBounce) {
+  } else if (isDipBounce || isDipBounceDaily || isSlopeDip) {
     stopLossInput.disabled = false;
     stopLossInput.placeholder = "vide = desactive";
     if (stopLossInput.value === "2") stopLossInput.value = "";  // n'herite pas du defaut des autres strategies
@@ -836,6 +1022,25 @@ function onStrategyTypeChange(type) {
     stopLossInput.placeholder = "";
     if (!stopLossInput.value) stopLossInput.value = "2";
     stopLossHint.style.display = "none";
+  }
+
+  // 2026-09-16 : constat empirique en testant "Creux vs moyenne" sur
+  // plusieurs periodes - avec 1 seule position autorisee (defaut generique),
+  // la position ouverte bloque toute nouvelle entree jusqu'a son stop-loss,
+  // ce qui revient a n'ouvrir qu'un seul trade par semaine environ (la
+  // strategie devient quasi inactive). Suggestion de 10 uniquement si le
+  // champ est encore a sa valeur par defaut (jamais touche par l'utilisateur).
+  const maxConcurrentInput = document.getElementById("f_max_concurrent_positions");
+  if (isMeanDip && maxConcurrentInput.value === "1") {
+    maxConcurrentInput.value = "10";
+  }
+
+  // Suggestion demandee explicitement par l'utilisateur ("on vend sur le
+  // trailing a 5%") - pre-remplie uniquement si le champ est encore vide
+  // (jamais touche), jamais ecrasee si l'utilisateur a deja saisi une valeur.
+  const trailingInput = document.getElementById("f_trailing_stop_pct");
+  if (isSlopeDip && !trailingInput.value) {
+    trailingInput.value = "5";
   }
 }
 
@@ -1033,6 +1238,992 @@ async function startExistingBot(configPath) {
   }
 }
 
+// --- Onglet Manuel : panier de trading manuel en paper (EF-81) ----------------
+//
+// Le formulaire d'ordre n'est construit qu'UNE fois (garde sur son id) : le
+// rafraichissement automatique toutes les 15 s ne doit jamais effacer un
+// montant en cours de saisie. Seuls les blocs de chiffres (resume,
+// positions, historique) sont redessines.
+let manualSide = "buy";
+let manualBookCache = null;
+let manualPriceTimer = null;
+
+async function renderManualTab() {
+  const contentEl = document.getElementById("content");
+  if (!document.getElementById("manual-root")) {
+    contentEl.innerHTML = `<div id="manual-root">
+      <h1>Trading manuel</h1>
+      <p class="muted">Un panier <strong>a part</strong> : son capital est celui que tu y verses, il ne touche pas
+      au panier commun des bots. Les ordres partent <strong>reellement</strong> sur le testnet Binance
+      (argent fictif, prix reels), avec les memes arrondis et limites de paire que les bots.</p>
+      <div id="manual-summary"></div>
+      <div class="manual-layout">
+        <div class="order-panel" id="manual-order-panel">${renderManualOrderForm()}</div>
+        <div>
+          <div id="manual-positions"></div>
+          <div id="manual-orders"></div>
+        </div>
+      </div>
+    </div>`;
+    refreshManualPrice();
+  }
+  await refreshManualBook();
+}
+
+async function refreshManualBook() {
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-book`);
+    manualBookCache = await resp.json();
+  } catch (e) {
+    document.getElementById("manual-summary").innerHTML = investServerDownHtml();
+    return;
+  }
+  renderManualSummary(manualBookCache);
+  renderManualPositions(manualBookCache);
+  renderManualOrders(manualBookCache);
+}
+
+function renderManualSummary(b) {
+  const el = document.getElementById("manual-summary");
+  if (!el) return;
+  const pnlColor = b.pnl >= 0 ? "var(--green)" : "var(--red)";
+  const pct = b.pnl_pct === null || b.pnl_pct === undefined ? "" : ` (${b.pnl_pct >= 0 ? "+" : ""}${b.pnl_pct.toFixed(2)} %)`;
+  el.innerHTML = `<div class="section-block">
+    <div class="grid">
+      <div><div class="stat-label">Verse dans le panier</div><div class="stat-value">${b.deposited.toFixed(2)}</div></div>
+      <div><div class="stat-label">Cash disponible</div><div class="stat-value">${b.cash.toFixed(2)}</div></div>
+      <div><div class="stat-label">Investi (valeur)</div><div class="stat-value">${b.invested.toFixed(2)}</div></div>
+      <div><div class="stat-label">Valeur totale</div><div class="stat-value">${b.value.toFixed(2)}</div></div>
+      <div><div class="stat-label">Gain / perte</div><div class="stat-value" style="color:${pnlColor};">${b.pnl >= 0 ? "+" : ""}${b.pnl.toFixed(2)}${pct}</div></div>
+      <div><div class="stat-label">Frais payes</div><div class="stat-value">${b.fees.toFixed(2)}</div></div>
+    </div>
+    <div class="invest-toolbar" style="margin-top:14px;">
+      <span class="tb-label">Verser (USDT fictifs)</span>
+      <input id="manual-deposit-amount" type="number" min="1" step="50" value="500" style="width:110px; padding:7px 9px;">
+      <button class="primary" onclick="manualDeposit()">Verser</button>
+      <span class="tb-sep"></span>
+      <button onclick="manualReset()" style="border-color:var(--red); color:var(--red);">Remettre le panier a zero</button>
+    </div>
+    <div id="manual-msg" class="manual-msg"></div>
+  </div>`;
+}
+
+function renderManualOrderForm() {
+  const options = TOP10_SYMBOLS.map(s => `<option value="${s}">${s}</option>`).join("");
+  return `
+    <div class="side-toggle">
+      <button id="manual-side-buy" class="active-buy" onclick="setManualSide('buy')">Acheter</button>
+      <button id="manual-side-sell" onclick="setManualSide('sell')">Vendre</button>
+    </div>
+    <label>Paire
+      <select id="manual-symbol" onchange="refreshManualPrice()">${options}</select>
+    </label>
+    <div class="live-price"><span class="px" id="manual-price">-</span><span class="sym" id="manual-price-sym">USDT</span></div>
+    <label id="manual-amount-label">Montant a acheter (USDT)
+      <input id="manual-amount" type="number" min="0" step="10" value="50" oninput="updateManualEstimate()">
+    </label>
+    <div class="quick-row" id="manual-quick">
+      <button onclick="manualQuick(0.25)">25 %</button><button onclick="manualQuick(0.5)">50 %</button>
+      <button onclick="manualQuick(0.75)">75 %</button><button onclick="manualQuick(1)">Tout</button>
+    </div>
+    <div class="order-estimate" id="manual-estimate"></div>
+    <button id="manual-submit" class="submit-buy" onclick="submitManualOrder()">Acheter au marche</button>
+    <p class="muted" style="font-size:11px; margin:0;">Ordre au marche sur le testnet. Frais 0,1 % comptes dans le panier.
+    Le prix affiche est le dernier cours public ; l'execution reelle peut differer legerement.</p>`;
+}
+
+function setManualSide(side) {
+  manualSide = side;
+  const buy = side === "buy";
+  document.getElementById("manual-side-buy").className = buy ? "active-buy" : "";
+  document.getElementById("manual-side-sell").className = buy ? "" : "active-sell";
+  document.getElementById("manual-amount-label").firstChild.textContent = buy ? "Montant a acheter (USDT)" : "Quantite a vendre";
+  const input = document.getElementById("manual-amount");
+  input.step = buy ? "10" : "any";
+  const submit = document.getElementById("manual-submit");
+  submit.className = buy ? "submit-buy" : "submit-sell";
+  submit.textContent = buy ? "Acheter au marche" : "Vendre au marche";
+  updateManualEstimate();
+}
+
+function manualHeld(symbol) {
+  const line = ((manualBookCache || {}).positions || []).find(p => p.symbol === symbol);
+  return line ? line.quantity : 0;
+}
+
+function manualQuick(fraction) {
+  const symbol = document.getElementById("manual-symbol").value;
+  const input = document.getElementById("manual-amount");
+  if (manualSide === "buy") {
+    const cash = (manualBookCache || {}).cash || 0;
+    // Le frais de 0,1 % est retenu pour que "Tout" passe reellement.
+    input.value = (Math.floor(cash * fraction / 1.001 * 100) / 100).toFixed(2);
+  } else {
+    input.value = String(manualHeld(symbol) * fraction);
+  }
+  updateManualEstimate();
+}
+
+async function refreshManualPrice() {
+  const symbol = document.getElementById("manual-symbol").value;
+  document.getElementById("manual-price-sym").textContent = symbol.split("/")[1];
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-price?symbol=${encodeURIComponent(symbol)}`);
+    const data = await resp.json();
+    document.getElementById("manual-price").textContent = data.error ? "-" : Number(data.price).toLocaleString("fr-FR", { maximumFractionDigits: 6 });
+    document.getElementById("manual-price").dataset.value = data.error ? "" : data.price;
+  } catch (e) {
+    document.getElementById("manual-price").textContent = "-";
+  }
+  updateManualEstimate();
+  clearTimeout(manualPriceTimer);
+  manualPriceTimer = setTimeout(refreshManualPrice, 10000);
+}
+
+function updateManualEstimate() {
+  const el = document.getElementById("manual-estimate");
+  if (!el) return;
+  const price = parseFloat(document.getElementById("manual-price").dataset.value || "0");
+  const raw = parseFloat(document.getElementById("manual-amount").value || "0");
+  const symbol = document.getElementById("manual-symbol").value;
+  if (!price || !raw) { el.textContent = ""; return; }
+  if (manualSide === "buy") {
+    el.textContent = `~ ${(raw / price).toFixed(6)} ${symbol.split("/")[0]} + ${(raw * 0.001).toFixed(2)} USDT de frais`;
+  } else {
+    el.textContent = `~ ${(raw * price).toFixed(2)} USDT (detenu : ${manualHeld(symbol)})`;
+  }
+}
+
+async function submitManualOrder() {
+  const symbol = document.getElementById("manual-symbol").value;
+  const raw = parseFloat(document.getElementById("manual-amount").value || "0");
+  const msg = document.getElementById("manual-msg");
+  if (!raw || raw <= 0) { msg.innerHTML = '<span style="color:var(--red);">Montant ou quantite manquant.</span>'; return; }
+  const what = manualSide === "buy" ? `acheter pour ${raw} USDT de ${symbol}` : `vendre ${raw} ${symbol.split("/")[0]}`;
+  if (!confirm(`Passer REELLEMENT un ordre au marche pour ${what} sur le testnet Binance ?\\n\\nArgent fictif, mais l'ordre est bien envoye a l'exchange.`)) return;
+  msg.innerHTML = '<span class="muted">Ordre en cours...</span>';
+  document.getElementById("manual-submit").disabled = true;
+  try {
+    const body = manualSide === "buy" ? { symbol, side: "buy", amount: raw } : { symbol, side: "sell", quantity: raw };
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-order`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const d = await resp.json();
+    if (d.error) {
+      msg.innerHTML = `<span style="color:var(--red);">${d.error}</span>`;
+    } else if (d.status === "filled") {
+      msg.innerHTML = `<span style="color:var(--green);">Execute : ${d.side === "buy" ? "achat" : "vente"} de ${d.quantity} ${symbol.split("/")[0]} a ${d.price} (frais ${d.fee.toFixed(2)})</span>`
+        + (d.warnings.length ? `<br><span class="muted">${d.warnings.join(" - ")}</span>` : "");
+    } else {
+      msg.innerHTML = `<span style="color:var(--amber);">Non execute : ${d.reason}</span>`;
+    }
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--red);">Serveur de controle injoignable : ${e}</span>`;
+  } finally {
+    document.getElementById("manual-submit").disabled = false;
+  }
+  await refreshManualBook();
+  updateManualEstimate();
+}
+
+async function manualSellAll(symbol) {
+  if (!confirm(`Vendre TOUTE la position ${symbol} au marche sur le testnet ?`)) return;
+  const msg = document.getElementById("manual-msg");
+  msg.innerHTML = '<span class="muted">Vente en cours...</span>';
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-order`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol, side: "sell", quantity: "all" }),
+    });
+    const d = await resp.json();
+    msg.innerHTML = d.error ? `<span style="color:var(--red);">${d.error}</span>`
+      : d.status === "filled" ? `<span style="color:var(--green);">Vendu ${d.quantity} ${symbol.split("/")[0]} a ${d.price}</span>`
+      : `<span style="color:var(--amber);">Non execute : ${d.reason}</span>`;
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--red);">Serveur de controle injoignable : ${e}</span>`;
+  }
+  await refreshManualBook();
+}
+
+async function manualDeposit() {
+  const amount = parseFloat(document.getElementById("manual-deposit-amount").value || "0");
+  const msg = document.getElementById("manual-msg");
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-deposit`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }),
+    });
+    const d = await resp.json();
+    msg.innerHTML = d.error ? `<span style="color:var(--red);">${d.error}</span>` : `<span class="muted">Verse. Cash : ${d.cash.toFixed(2)} USDT.</span>`;
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--red);">Serveur de controle injoignable : ${e}</span>`;
+  }
+  await refreshManualBook();
+}
+
+async function manualReset() {
+  if (!confirm("Remettre le panier manuel a zero ?\\n\\nL'historique est sauvegarde dans un fichier .bak.\\nATTENTION : cela ne vend rien sur le testnet - vends d'abord si tu veux repartir sans position.")) return;
+  const msg = document.getElementById("manual-msg");
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/manual-reset`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const d = await resp.json();
+    msg.innerHTML = `<span class="muted">${d.message || d.error}</span>`;
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--red);">Serveur de controle injoignable : ${e}</span>`;
+  }
+  await refreshManualBook();
+}
+
+function renderManualPositions(b) {
+  const el = document.getElementById("manual-positions");
+  if (!el) return;
+  if (!b.positions.length) {
+    el.innerHTML = `<div class="section-block"><div class="section-header"><h2>Positions</h2></div>
+      <p class="muted">Aucune position. Verse du capital, choisis une paire et achete.</p></div>`;
+    return;
+  }
+  const rows = b.positions.map(p => {
+    const c = (p.pnl || 0) >= 0 ? "var(--green)" : "var(--red)";
+    return `<tr>
+      <td><strong>${p.symbol}</strong></td>
+      <td style="text-align:right;">${p.quantity}</td>
+      <td style="text-align:right;">${p.avg_price.toFixed(4)}</td>
+      <td style="text-align:right;">${p.price ? p.price.toFixed(4) : "-"}</td>
+      <td style="text-align:right;">${p.value ? p.value.toFixed(2) : "-"}</td>
+      <td style="text-align:right; color:${c};">${p.pnl === null ? "-" : `${p.pnl >= 0 ? "+" : ""}${p.pnl.toFixed(2)} (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct.toFixed(2)} %)`}</td>
+      <td><button onclick="manualSellAll('${p.symbol}')" style="background:var(--red); color:#fff; font-size:11.5px; padding:5px 9px;">Tout vendre</button></td>
+    </tr>`;
+  }).join("");
+  el.innerHTML = `<div class="section-block"><div class="section-header"><h2>Positions</h2></div>
+    <table class="bi"><thead><tr><th>Paire</th><th style="text-align:right;">Quantite</th><th style="text-align:right;">Prix de revient</th>
+    <th style="text-align:right;">Cours</th><th style="text-align:right;">Valeur</th><th style="text-align:right;">Gain / perte</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <p class="muted" style="font-size:11.5px;">Prix de revient frais inclus. Cours public rafraichi a chaque passage.</p></div>`;
+}
+
+function renderManualOrders(b) {
+  const el = document.getElementById("manual-orders");
+  if (!el) return;
+  if (!b.orders.length) { el.innerHTML = ""; return; }
+  const rows = b.orders.map(o => `<tr>
+    <td class="muted">${o.ts.replace("T", " ").replace("+00:00", " UTC")}</td>
+    <td><strong>${o.symbol}</strong></td>
+    <td style="color:${o.side === "buy" ? "var(--green)" : "var(--red)"};">${o.side === "buy" ? "achat" : "vente"}</td>
+    <td style="text-align:right;">${o.quantity}</td>
+    <td style="text-align:right;">${o.price ? o.price.toFixed(4) : "-"}</td>
+    <td style="text-align:right;">${o.fee.toFixed(2)}</td>
+    <td>${o.status === "filled" ? '<span style="color:var(--green);">execute</span>' : `<span style="color:var(--amber);" title="${o.reason || ""}">${o.status}</span>`}</td>
+  </tr>`).join("");
+  el.innerHTML = `<div class="section-block"><div class="section-header"><h2>Historique des ordres</h2></div>
+    <table class="bi"><thead><tr><th>Quand</th><th>Paire</th><th>Cote</th><th style="text-align:right;">Quantite</th>
+    <th style="text-align:right;">Prix</th><th style="text-align:right;">Frais</th><th>Statut</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderInvestContent() {
+  if (currentInvestSubTab === "reglages") {
+    renderInvestSettingsTab();
+  } else {
+    renderInvestTrackingTab();
+  }
+}
+
+async function fetchInvestBots() {
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-bots`);
+    const data = await resp.json();
+    investBotsCache = data.bots || [];
+  } catch (e) {
+    investBotsCache = null; // serveur injoignable
+  }
+  return investBotsCache;
+}
+
+function investServerDownHtml() {
+  return `<div class="section-block"><p class="muted">Serveur de controle injoignable.
+    Lance <code>python -m tradingbot.control_server</code> puis recharge cette page.</p></div>`;
+}
+
+// --- Investissement : visualisation des lignes (EF-78) -----------------------
+//
+// Palette CATEGORIELLE de 6 teintes, validee sur les cinq controles du skill
+// dataviz en mode sombre (bande de luminosite, chroma, separation en vision
+// des couleurs deficiente, plancher vision normale, contraste sur le fond).
+// Un premier jeu choisi a l'oeil avait ECHOUE : rose et turquoise se
+// confondent en deuteranopie (delta E 3,0). Ne pas remplacer ces valeurs sans
+// repasser le validateur.
+//
+// Le vert et le rouge du theme sont volontairement ABSENTS : ils portent le
+// sens gain/perte dans cette interface et ne doivent pas designer aussi une
+// ligne du panier.
+const INVEST_SERIES_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300"];
+
+// La couleur suit la LIGNE, jamais son rang a l'affichage : trier ou masquer
+// une ligne ne doit pas repeindre les autres.
+function investColorFor(bot, symbol) {
+  const symbols = Object.keys(bot.config.weights).sort();
+  const i = symbols.indexOf(symbol);
+  return INVEST_SERIES_COLORS[(i < 0 ? 0 : i) % INVEST_SERIES_COLORS.length];
+}
+
+const INVEST_RANGES = [
+  { id: 30, label: "1M" }, { id: 90, label: "3M" }, { id: 180, label: "6M" },
+  { id: 365, label: "1 an" }, { id: 1825, label: "5 ans" },
+];
+let investRangeDays = {};      // nom du bot -> nombre de jours affiches
+let investHistoryCache = {};   // "nom|jours" -> reponse du serveur
+let investHistoryLoading = {};
+
+function investRangeFor(name) {
+  return investRangeDays[name] || 180;
+}
+
+async function fetchInvestHistory(name, days) {
+  const key = name + "|" + days;
+  if (investHistoryCache[key]) return investHistoryCache[key];
+  if (investHistoryLoading[key]) return null;
+  investHistoryLoading[key] = true;
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-price-history?name=${encodeURIComponent(name)}&days=${days}`);
+    const data = await resp.json();
+    if (!data.error) investHistoryCache[key] = data;
+  } catch (e) {
+    // Silencieux : le graphique affiche simplement son etat "indisponible".
+  } finally {
+    investHistoryLoading[key] = false;
+  }
+  return investHistoryCache[key] || null;
+}
+
+function selectInvestRange(name, days) {
+  investRangeDays[name] = days;
+  renderInvestTrackingTab();
+}
+
+function investRangeSelector(name) {
+  const active = investRangeFor(name);
+  const buttons = INVEST_RANGES.map(r =>
+    `<button class="range-btn ${r.id === active ? "active" : ""}" onclick="selectInvestRange('${name}',${r.id})">${r.label}</button>`
+  ).join("");
+  return `<div class="range-selector">${buttons}</div>`;
+}
+
+function niceStep(raw) {
+  const mag = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-9))));
+  const n = raw / mag;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+}
+
+// Graphique COMPARATIF : toutes les lignes ramenees a 0 % a leur premier
+// point. Comparer des cours bruts de 7 EUR et 400 EUR sur le meme axe
+// n'apprendrait rien ; ramenes en pourcentage d'evolution, ils partagent un
+// axe UNIQUE et se comparent reellement (jamais deux echelles superposees).
+function investComparisonSvg(bot, history) {
+  const W = 760, H = 260, padL = 46, padR = 14, padT = 14, padB = 26;
+  const symbols = Object.keys(bot.config.weights).sort()
+    .filter(s => (history.series[s] || {}).points && history.series[s].points.length > 1);
+  if (symbols.length === 0) {
+    return '<p class="muted">Aucun historique de cours disponible pour cette periode.</p>';
+  }
+
+  const normalised = {};
+  let lo = Infinity, hi = -Infinity;
+  symbols.forEach(s => {
+    const pts = history.series[s].points;
+    const base = pts[0].close;
+    const vals = pts.map(pt => ({ t: pt.t, v: base ? (pt.close / base - 1) * 100 : 0 }));
+    normalised[s] = vals;
+    vals.forEach(o => { if (o.v < lo) lo = o.v; if (o.v > hi) hi = o.v; });
+  });
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const margin = (hi - lo) * 0.08;
+  lo -= margin; hi += margin;
+
+  const tMin = Math.min.apply(null, symbols.map(s => normalised[s][0].t));
+  const tMax = Math.max.apply(null, symbols.map(s => normalised[s][normalised[s].length - 1].t));
+  const x = t => padL + (tMax === tMin ? 0 : (t - tMin) / (tMax - tMin)) * (W - padL - padR);
+  const y = v => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+
+  // Graduations rondes, chacune nommant une valeur que le graphique atteint.
+  const step = niceStep((hi - lo) / 4);
+  const ticks = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+
+  const grid = ticks.map(v => {
+    const isZero = Math.abs(v) < step / 100;
+    return `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${W - padR}" y2="${y(v).toFixed(1)}"
+      stroke="${isZero ? "var(--border-strong)" : "var(--border)"}" stroke-width="1" />
+      <text x="${padL - 7}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" font-size="10"
+        fill="var(--text-faint)">${v >= 0 ? "+" : ""}${Math.round(v)}%</text>`;
+  }).join("");
+
+  const lines = symbols.map(s => {
+    const color = investColorFor(bot, s);
+    const coords = normalised[s].map(o => `${x(o.t).toFixed(1)},${y(o.v).toFixed(1)}`).join(" ");
+    const last = normalised[s][normalised[s].length - 1];
+    return `<polyline points="${coords}" fill="none" stroke="${color}" stroke-width="2"
+        stroke-linejoin="round" stroke-linecap="round"><title>${s} : ${last.v >= 0 ? "+" : ""}${last.v.toFixed(1)} % sur la periode</title></polyline>`;
+  }).join("");
+
+  const firstDay = new Date(tMin).toISOString().slice(0, 10);
+  const lastDay = new Date(tMax).toISOString().slice(0, 10);
+
+  const legend = symbols.map(s => {
+    const last = normalised[s][normalised[s].length - 1].v;
+    return `<span class="li"><span class="sw" style="background:${investColorFor(bot, s)};"></span>
+      <strong>${s}</strong> <span class="val">${last >= 0 ? "+" : ""}${last.toFixed(1)} %</span></span>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
+      aria-label="Evolution comparee des lignes du panier, en pourcentage depuis le debut de la periode"
+      style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md);">
+      ${grid}${lines}
+      <text x="${padL}" y="${H - 8}" font-size="10" fill="var(--text-faint)">${firstDay}</text>
+      <text x="${W - padR}" y="${H - 8}" font-size="10" fill="var(--text-faint)" text-anchor="end">${lastDay}</text>
+    </svg>
+    <div class="chart-legend">${legend}</div>
+    <p class="muted" style="font-size:11.5px; margin-top:8px;">Chaque ligne part de 0 % au debut de la periode :
+      c'est la seule facon de comparer sur un axe unique des cours qui vont de 7 EUR a 400 EUR.
+      Survole une courbe pour son nom.</p>`;
+}
+
+// Courbe miniature d'une ligne, avec son PRIX DE REVIENT en trait tire : un
+// cours de 79 EUR ne dit rien tant qu'on ne sait pas qu'on a paye 82.
+function investSparkSvg(points, costBasis, color) {
+  const W = 240, H = 54;
+  if (!points || points.length < 2) {
+    return `<div class="muted" style="font-size:11px; height:${H}px; display:flex; align-items:center;">Pas d'historique</div>`;
+  }
+  const closes = points.map(pt => pt.close);
+  let lo = Math.min.apply(null, closes), hi = Math.max.apply(null, closes);
+  if (costBasis) { lo = Math.min(lo, costBasis); hi = Math.max(hi, costBasis); }
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const span = (hi - lo) * 1.1, mid = (hi + lo) / 2;
+  lo = mid - span / 2; hi = mid + span / 2;
+  const x = i => (i / (points.length - 1)) * W;
+  const y = v => H - ((v - lo) / (hi - lo)) * H;
+
+  const coords = points.map((pt, i) => `${x(i).toFixed(1)},${y(pt.close).toFixed(1)}`).join(" ");
+  const area = `${x(0).toFixed(1)},${H} ${coords} ${x(points.length - 1).toFixed(1)},${H}`;
+  const basisLine = costBasis
+    ? `<line x1="0" y1="${y(costBasis).toFixed(1)}" x2="${W}" y2="${y(costBasis).toFixed(1)}"
+        stroke="var(--text-dim)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"><title>Prix de revient ${costBasis.toFixed(2)}</title></line>`
+    : "";
+  const lastY = y(closes[closes.length - 1]);
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none"
+      role="img" aria-label="Evolution du cours sur la periode">
+      <polygon points="${area}" fill="${color}" opacity="0.13" />
+      ${basisLine}
+      <polyline points="${coords}" fill="none" stroke="${color}" stroke-width="1.8"
+        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
+      <circle cx="${(W - 3).toFixed(1)}" cy="${lastY.toFixed(1)}" r="2.6" fill="${color}" />
+    </svg>`;
+}
+
+function renderPositionCard(bot, line, history) {
+  const color = investColorFor(bot, line.symbol);
+  const serie = (history && history.series[line.symbol]) || {};
+  const basis = (history && history.cost_basis[line.symbol]) || null;
+  const costPrice = basis ? basis.avg_price : null;
+  const held = line.quantity > 0;
+  // Avant le premier passage du bot, sa base n'a aucun prix : on retombe sur
+  // la derniere cloture du graphique, pour que la carte affiche un cours des
+  // la creation du panier plutot qu'un tiret.
+  const pts = serie.points || [];
+  const price = line.price || (pts.length ? pts[pts.length - 1].close : null);
+  const lineValue = line.value || (price && held ? price * line.quantity : 0);
+
+  // Gain latent calcule sur le PRIX DE REVIENT reel (frais inclus), pas sur
+  // le prix planifie : c'est ce que la ligne a effectivement coute.
+  let gainHtml = '<span class="chg muted">-</span>';
+  if (held && costPrice && price) {
+    const pct = (price / costPrice - 1) * 100;
+    const euros = (price - costPrice) * line.quantity;
+    const c = pct >= 0 ? "var(--green)" : "var(--red)";
+    gainHtml = `<span class="chg" style="color:${c};">${pct >= 0 ? "+" : ""}${pct.toFixed(2)} %
+      <span style="opacity:0.75; font-weight:500;">(${euros >= 0 ? "+" : ""}${euros.toFixed(2)} EUR)</span></span>`;
+  }
+
+  const drift = line.actual_pct - line.target_pct;
+  const band = bot.config.rebalance_band_pct || 5;
+  const driftColor = Math.abs(drift) > band ? "var(--amber)" : "var(--text-faint)";
+  const allocPct = Math.max(0, Math.min(100, line.actual_pct));
+
+  return `<div class="pos-card ${held ? "" : "empty"}">
+    <div class="pos-head">
+      <span class="pos-dot" style="background:${color};"></span>
+      <span class="pos-sym">${line.symbol}</span>
+      <span class="pos-qty">${held ? line.quantity.toFixed(0) + " titre(s)" : "aucun titre"}</span>
+    </div>
+    <div class="pos-price">
+      <span class="now">${price ? price.toFixed(2) : "-"}</span>
+      ${gainHtml}
+    </div>
+    ${investSparkSvg(serie.points, costPrice, color)}
+    <dl class="pos-rows">
+      <dt>Prix de revient</dt><dd>${costPrice ? costPrice.toFixed(2) + " EUR" : "-"}</dd>
+      <dt>Valeur de la ligne</dt><dd>${lineValue ? lineValue.toFixed(2) + " EUR" : "-"}</dd>
+    </dl>
+    <div class="alloc">
+      <div class="alloc-track">
+        <div class="alloc-fill" style="width:${allocPct.toFixed(1)}%; background:${color};"></div>
+        <div class="alloc-target" style="left:calc(${Math.min(100, line.target_pct).toFixed(1)}% - 1px);"
+          title="Cible ${line.target_pct.toFixed(1)} %"></div>
+      </div>
+      <div class="alloc-legend">
+        <span>reel ${line.actual_pct.toFixed(1)} %</span>
+        <span style="color:${driftColor};">${drift >= 0 ? "+" : ""}${drift.toFixed(1)} pts vs cible ${line.target_pct.toFixed(1)} %</span>
+      </div>
+    </div>
+    <div class="pos-actions">
+      <button ${held ? "" : "disabled"} onclick="sellInvestLine('${bot.name}','${line.symbol}','half')">Vendre la moitie</button>
+      <button ${held ? "" : "disabled"} style="${held ? "background:var(--red); color:#fff;" : ""}"
+        onclick="sellInvestLine('${bot.name}','${line.symbol}','all')">Tout vendre</button>
+    </div>
+  </div>`;
+}
+
+function renderInvestToolbar(bot) {
+  const monthly = bot.config.monthly_contribution;
+  return `<div class="invest-toolbar">
+    <span class="tb-label">Plafond mensuel</span>
+    <button class="step-btn" onclick="stepInvestContribution('${bot.name}',-50)" title="Diminuer de 50 EUR">&minus;</button>
+    <span class="tb-value">${monthly.toFixed(0)} EUR</span>
+    <button class="step-btn" onclick="stepInvestContribution('${bot.name}',50)" title="Augmenter de 50 EUR">+</button>
+    <button onclick="promptInvestContribution('${bot.name}')">Montant exact...</button>
+    <span class="tb-sep"></span>
+    <button onclick="resetInvestBasket('${bot.name}')" style="border-color:var(--red); color:var(--red);">Remettre le panier a zero</button>
+  </div>
+  <p class="muted" style="font-size:11.5px; margin-top:6px;">Le plafond s'applique au prochain versement.
+    Un ordre coute <strong>3 EUR minimum</strong> chez le courtier : sur un versement reparti sur plusieurs
+    lignes, les frais montent vite. Verser plus, moins souvent, les dilue.</p>`;
+}
+
+async function sellInvestLine(name, symbol, mode) {
+  const bot = (investBotsCache || []).find(b => b.name === name);
+  const line = bot ? bot.lines.find(l => l.symbol === symbol) : null;
+  if (!line || line.quantity <= 0) return;
+  const quantity = mode === "half" ? Math.floor(line.quantity / 2) : Math.floor(line.quantity);
+  if (quantity < 1) {
+    alert(symbol + " : une seule action detenue, vendre la moitie est impossible. Utilise \\"Tout vendre\\".");
+    return;
+  }
+  const ok = confirm(
+    "Vendre REELLEMENT " + quantity + " " + symbol + " sur le compte paper ?\\n\\n" +
+    "Argent fictif, mais l'ordre part vraiment chez Interactive Brokers et sera enregistre.\\n" +
+    "Hors des heures d'ouverture de la place, l'ordre sera refuse.\\n\\n" +
+    "Vendre ne rend PAS le versement du mois a nouveau disponible."
+  );
+  if (!ok) return;
+
+  const target = document.getElementById("dca_report_" + name);
+  if (target) target.innerHTML = '<p class="muted">Vente en cours...</p>';
+  const lines = {};
+  lines[symbol] = quantity;
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-sell`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, lines }),
+    });
+    const data = await resp.json();
+    if (target) {
+      target.innerHTML = data.error
+        ? `<p style="color:var(--red);">${data.error}</p>`
+        : `<pre class="dca-pre">${data.report}</pre>`;
+    }
+    if (!data.error) renderInvestTrackingTab();
+  } catch (e) {
+    if (target) target.innerHTML = `<p style="color:var(--red);">Serveur de controle injoignable : ${e}</p>`;
+  }
+}
+
+async function resetInvestBasket(name) {
+  const ok = confirm(
+    'Remettre a zero le registre du bot "' + name + '" ?\\n\\n' +
+    "Efface ses positions, ses ordres et ses versements enregistres - le versement du mois redevient disponible.\\n" +
+    "L'historique est SAUVEGARDE dans un fichier .bak, rien n'est perdu definitivement.\\n\\n" +
+    "ATTENTION : cela ne VEND RIEN. Les titres restent chez le courtier, et le bot refusera de passer\\n" +
+    "des ordres tant que l'ecart de positions n'est pas resorbe. Vends d'abord."
+  );
+  if (!ok) return;
+  const target = document.getElementById("dca_report_" + name);
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-reset`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await resp.json();
+    if (target) {
+      target.innerHTML = data.error
+        ? `<p style="color:var(--red);">${data.error}</p>`
+        : `<p class="muted">${data.message}</p>`;
+    }
+    if (!data.error) { investHistoryCache = {}; renderInvestTrackingTab(); }
+  } catch (e) {
+    if (target) target.innerHTML = `<p style="color:var(--red);">Serveur de controle injoignable : ${e}</p>`;
+  }
+}
+
+function stepInvestContribution(name, delta) {
+  const bot = (investBotsCache || []).find(b => b.name === name);
+  if (!bot) return;
+  const next = bot.config.monthly_contribution + delta;
+  if (next < 50) {
+    alert("En dessous de 50 EUR par mois, les 3 EUR de frais par ordre depassent 6 % du versement.\\n" +
+          "Passe par \\"Montant exact...\\" si tu veux quand meme descendre plus bas.");
+    return;
+  }
+  applyInvestContribution(name, next);
+}
+
+function promptInvestContribution(name) {
+  const bot = (investBotsCache || []).find(b => b.name === name);
+  if (!bot) return;
+  const raw = prompt("Versement mensuel, en euros :", bot.config.monthly_contribution.toFixed(0));
+  if (raw === null) return;
+  const value = parseFloat(String(raw).replace(",", "."));
+  if (!isFinite(value) || value <= 0) { alert("Montant invalide."); return; }
+  applyInvestContribution(name, value);
+}
+
+async function applyInvestContribution(name, amount) {
+  const target = document.getElementById("dca_report_" + name);
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-contribution`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, monthly_contribution: amount }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      if (target) target.innerHTML = `<p style="color:var(--red);">${data.error}</p>`;
+      return;
+    }
+    investBotsCache = [];           // la config a change : on la rechargera
+    renderInvestTrackingTab();
+  } catch (e) {
+    if (target) target.innerHTML = `<p style="color:var(--red);">Serveur de controle injoignable : ${e}</p>`;
+  }
+}
+
+function renderInvestLinesTable(bot) {
+  const rows = bot.lines.map(line => {
+    const drift = line.actual_pct - line.target_pct;
+    const driftColor = Math.abs(drift) > (bot.config.rebalance_band_pct || 5) ? "var(--red)" : "var(--muted)";
+    return `<tr>
+      <td><strong>${line.symbol}</strong></td>
+      <td style="text-align:right;">${line.quantity ? line.quantity.toFixed(0) : "-"}</td>
+      <td style="text-align:right;">${line.price ? line.price.toFixed(2) : "-"}</td>
+      <td style="text-align:right;">${line.value ? line.value.toFixed(2) : "-"}</td>
+      <td style="text-align:right;">${line.actual_pct.toFixed(1)} %</td>
+      <td style="text-align:right;" class="muted">${line.target_pct.toFixed(1)} %</td>
+      <td style="text-align:right; color:${driftColor};">${drift >= 0 ? "+" : ""}${drift.toFixed(1)} pts</td>
+    </tr>`;
+  }).join("");
+  return `<table class="bi">
+    <thead><tr>
+      <th>Ligne</th><th style="text-align:right;">Titres</th><th style="text-align:right;">Cours</th>
+      <th style="text-align:right;">Valeur</th><th style="text-align:right;">Reel</th>
+      <th style="text-align:right;">Cible</th><th style="text-align:right;">Ecart</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderInvestBotCard(bot, history) {
+  const gain = bot.value - bot.total_invested;
+  const gainColor = gain >= 0 ? "var(--green)" : "var(--red)";
+  const rate = bot.money_weighted_return_pct === null || bot.money_weighted_return_pct === undefined
+    ? "-" : `${bot.money_weighted_return_pct >= 0 ? "+" : ""}${bot.money_weighted_return_pct.toFixed(2)} %/an`;
+
+  // Un bot qui n'a jamais tourne n'a ni position ni prix de revient - mais le
+  // cours de ses lignes existe deja, et c'est justement ce qu'on veut voir
+  // AVANT d'engager le premier versement.
+  if (!bot.exists) {
+    return `<div class="section-block">
+      <h2>${bot.name}</h2>
+      <p class="muted">Ce bot n'a encore jamais tourne : aucune position, aucun versement consomme.
+      Le graphique ci-dessous montre deja le cours de ses lignes. Utilise &quot;Simuler le passage du jour&quot;
+      pour voir ce qu'il acheterait, sans rien engager.</p>
+      ${renderInvestToolbar(bot)}
+      ${investRangeSelector(bot.name)}
+      ${history ? investComparisonSvg(bot, history) : '<p class="muted">Chargement des cours...</p>'}
+      <div class="pos-grid">${bot.lines.map(l => renderPositionCard(bot, l, history)).join("")}</div>
+      ${renderInvestActions(bot)}
+      <div id="dca_report_${bot.name}" class="dca-report"></div>
+    </div>`;
+  }
+
+  return `<div class="section-block">
+    <h2>${bot.name}</h2>
+    <div class="grid">
+      <div><div class="stat-label">Total verse</div><div class="stat-value">${bot.total_invested.toFixed(2)}</div></div>
+      <div><div class="stat-label">Valeur</div><div class="stat-value">${bot.value.toFixed(2)}</div></div>
+      <div><div class="stat-label">Gain</div><div class="stat-value" style="color:${gainColor};">${gain >= 0 ? "+" : ""}${gain.toFixed(2)}</div></div>
+      <div><div class="stat-label">Rendement / an</div><div class="stat-value">${rate}</div></div>
+      <div><div class="stat-label">Baisse max subie</div><div class="stat-value" style="color:var(--red);">-${bot.max_drawdown_pct.toFixed(2)} %</div></div>
+      <div><div class="stat-label">Frais payes</div><div class="stat-value">${bot.total_fees.toFixed(2)}</div></div>
+    </div>
+    <p class="muted" style="margin-top:10px;">
+      ${bot.contributions} versement(s) | ${bot.orders} ordre(s) | liquidites en attente : ${bot.cash.toFixed(2)}
+      ${bot.last_rebalance_day ? ` | dernier rééquilibrage : ${bot.last_rebalance_day}` : " | aucun rééquilibrage a ce jour"}
+    </p>
+    <p class="muted">
+      Valorisation calculee avec les derniers cours connus${bot.prices_as_of ? ` (${bot.prices_as_of})` : ""},
+      pas en direct : ce bot n'agit qu'une fois par mois. Clique sur &quot;Simuler&quot; pour une photo aux cours du jour.
+    </p>
+    ${renderInvestToolbar(bot)}
+    ${investRangeSelector(bot.name)}
+    ${history ? investComparisonSvg(bot, history) : '<p class="muted">Chargement des cours...</p>'}
+    <div class="pos-grid">${bot.lines.map(l => renderPositionCard(bot, l, history)).join("")}</div>
+    <details style="margin-top:16px;">
+      <summary class="muted" style="cursor:pointer; font-size:12px;">Tableau detaille des lignes</summary>
+      ${renderInvestLinesTable(bot)}
+    </details>
+    ${renderInvestActions(bot)}
+    <div id="dca_report_${bot.name}" class="dca-report"></div>
+  </div>`;
+}
+
+function renderInvestActions(bot) {
+  return `<div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center;">
+    <button class="primary" onclick="runDcaBot('${bot.name}', false)">Simuler le passage du jour</button>
+    <button onclick="runDcaBot('${bot.name}', true)" style="background:var(--red); color:#fff;">Executer reellement (compte paper)</button>
+    <span class="muted" style="font-size:12px;">La simulation n'envoie rien et n'enregistre rien.</span>
+  </div>`;
+}
+
+async function runDcaBot(name, execute) {
+  const target = document.getElementById(`dca_report_${name}`);
+  if (execute) {
+    const ok = confirm(
+      `Passer REELLEMENT les ordres du bot "${name}" sur le compte paper Interactive Brokers ?\\n\\n` +
+      "Argent fictif, mais le versement du mois sera consomme et enregistre.\\n" +
+      "TWS ou IB Gateway doit etre lance et connecte en mode PAPER."
+    );
+    if (!ok) return;
+  }
+  target.innerHTML = '<p class="muted">Passage en cours...</p>';
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, execute }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      target.innerHTML = `<p style="color:var(--red);">${data.error}</p>`;
+      return;
+    }
+    lastDcaReports[name] = data.report;
+    target.innerHTML = `<pre class="dca-pre">${data.report}</pre>`;
+    if (execute) renderInvestTrackingTab();
+  } catch (e) {
+    target.innerHTML = `<p style="color:var(--red);">Serveur de controle injoignable : ${e}</p>`;
+  }
+}
+
+function reinjectDcaReports() {
+  Object.entries(lastDcaReports).forEach(([name, report]) => {
+    const target = document.getElementById(`dca_report_${name}`);
+    if (target && !target.innerHTML) target.innerHTML = `<pre class="dca-pre">${report}</pre>`;
+  });
+}
+
+async function renderInvestTrackingTab() {
+  const contentEl = document.getElementById("content");
+  // Le "Chargement..." ne s'affiche qu'au premier rendu : sur le
+  // rafraichissement automatique (15 s), le faire clignoterait a chaque fois.
+  if (!document.getElementById("invest-root")) {
+    contentEl.innerHTML = '<div id="invest-root"><h1>Investissement regulier</h1><p class="muted">Chargement...</p></div>';
+  }
+  const bots = await fetchInvestBots();
+  if (bots === null) {
+    contentEl.innerHTML = '<div id="invest-root"><h1>Investissement regulier</h1>' + investServerDownHtml() + "</div>";
+    return;
+  }
+  const intro = `<h1>Investissement regulier</h1>
+    <p class="muted">Ces bots versent une somme fixe chaque mois sur une allocation cible et ne vendent
+    jamais sur une baisse (aucun stop-loss, volontairement). Ils ne cherchent pas a predire le marche :
+    aucune strategie testee dans ce projet n'a battu un panier diversifie de facon reproductible.
+    Argent fictif uniquement (compte paper Interactive Brokers).</p>`;
+  // L'historique est charge AVANT de dessiner, et mis en cache par (bot,
+  // periode) : le rafraichissement automatique toutes les 15 s ne doit pas
+  // rappeler Yahoo Finance a chaque passage.
+  const histories = {};
+  for (const bot of bots) {
+    histories[bot.name] = await fetchInvestHistory(bot.name, investRangeFor(bot.name));
+  }
+  const body = bots.length === 0
+    ? `<div class="section-block"><p class="muted">Aucun bot d'investissement configure. Va dans le sous-onglet
+      <strong>Reglages</strong> pour en creer un.</p></div>`
+    : bots.map(bot => renderInvestBotCard(bot, histories[bot.name])).join("");
+  contentEl.innerHTML = `<div id="invest-root">${intro}${body}</div>`;
+  reinjectDcaReports();
+}
+
+function renderInvestWeightRows(weights) {
+  const entries = Object.entries(weights || {});
+  if (entries.length === 0) entries.push(["", 1]);
+  return entries.map(([symbol, weight], i) => `
+    <div class="dca-weight-row" style="display:flex; gap:8px; margin-bottom:6px; align-items:center;">
+      <input type="text" class="dca-symbol" value="${symbol}" placeholder="ex: TTE.PA" style="flex:2;">
+      <input type="number" class="dca-weight" value="${weight}" min="0" step="any" placeholder="poids" style="flex:1;">
+      <button onclick="this.closest('.dca-weight-row').remove()" title="Retirer cette ligne">✕</button>
+    </div>`).join("");
+}
+
+async function renderInvestSettingsTab(force) {
+  const contentEl = document.getElementById("content");
+  // Le rafraichissement automatique (15 s) rappelle cette fonction : sans ce
+  // garde il reconstruirait le formulaire et effacerait une allocation en
+  // cours de saisie. Meme protection que "supervision-root"/"bt_run_btn"
+  // ailleurs dans ce dashboard.
+  if (!force && document.getElementById("dca-settings-root")) return;
+  contentEl.innerHTML = '<div id="dca-settings-root"><h1>Reglages</h1><p class="muted">Chargement...</p></div>';
+  const bots = await fetchInvestBots();
+  if (bots === null) {
+    contentEl.innerHTML = '<div id="dca-settings-root"><h1>Reglages</h1>' + investServerDownHtml() + "</div>";
+    return;
+  }
+  const existing = bots.map(b => b.config);
+  const selected = existing.find(c => c.name === currentInvestBot) || null;
+  const cfg = selected || {
+    name: "", weights: { "TTE.PA": 1, "ORA.PA": 1, "GLE.PA": 1 },
+    monthly_contribution: 200, rebalance_band_pct: 5, min_rebalance_interval_days: 90,
+    min_order_value: 50, fee_pct: 0.001, fee_fixed: 3.0,
+    follow_drift_on_contribution: true, ibkr_host: "127.0.0.1", ibkr_port: 7497, ibkr_client_id: 30,
+  };
+
+  contentEl.innerHTML = `<div id="dca-settings-root"><h1>Reglages</h1>
+  <div class="section-block">
+    <label>Bot a modifier</label>
+    <select id="dca_pick" onchange="currentInvestBot = this.value || null; renderInvestSettingsTab(true);">
+      <option value="">+ Nouveau bot</option>
+      ${existing.map(c => `<option value="${c.name}" ${c.name === cfg.name ? "selected" : ""}>${c.name}</option>`).join("")}
+    </select>
+  </div>
+
+  <div class="section-block">
+    <h2>Allocation cible</h2>
+    <p class="muted">Les poids sont relatifs : 1/1/1 donne trois lignes egales. C'est le choix qui pese
+    le PLUS lourd sur le resultat, bien plus que les reglages ci-dessous. Le panier propose par defaut
+    est tres concentre (grandes capitalisations Euronext) et a subi une baisse de 50 % sur la periode
+    mesuree - a remplacer par le tien.</p>
+    <div id="dca_weights">${renderInvestWeightRows(cfg.weights)}</div>
+    <button onclick="document.getElementById('dca_weights').insertAdjacentHTML('beforeend', renderInvestWeightRows({'': 1}))">+ Ajouter une ligne</button>
+  </div>
+
+  <div class="section-block">
+    <h2>Versements</h2>
+    <div class="form-grid">
+      <div><label>Nom du bot</label><input type="text" id="dca_name" value="${cfg.name}" placeholder="ex: mon_epargne" ${selected ? "readonly" : ""}></div>
+      <div><label>Versement mensuel</label><input type="number" id="dca_monthly" value="${cfg.monthly_contribution}" min="0" step="any"></div>
+      <div><label>Ordre minimum</label><input type="number" id="dca_min_order" value="${cfg.min_order_value}" min="0" step="any">
+        <span class="adv-hint">En dessous, les frais mangent l'operation : le cash attend le mois suivant.</span></div>
+      <div><label>Repartition du versement</label>
+        <select id="dca_follow_drift">
+          <option value="true" ${cfg.follow_drift_on_contribution ? "selected" : ""}>Concentrer sur les lignes en retard (recommande pour de petits versements)</option>
+          <option value="false" ${!cfg.follow_drift_on_contribution ? "selected" : ""}>Repartir selon les poids cibles</option>
+        </select>
+        <span class="adv-hint">Rendement equivalent (mesure sur 6 periodes). Mais repartir 200 EUR sur 6 lignes
+        fait 33 EUR par ligne, souvent moins que le prix d'une action : l'argent dort.</span></div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <h2>Retour a l'allocation cible</h2>
+    <div class="form-grid">
+      <div><label>Bande de tolerance (points de %)</label><input type="number" id="dca_band" value="${cfg.rebalance_band_pct === null ? "" : cfg.rebalance_band_pct}" min="0" step="any">
+        <span class="adv-hint">Vide = ne jamais vendre pour rééquilibrer.</span></div>
+      <div><label>Intervalle minimum (jours)</label><input type="number" id="dca_interval" value="${cfg.min_rebalance_interval_days}" min="1" step="1">
+        <span class="adv-hint">90 = trimestriel. Sans ce plafond, le bot rééquilibre tous les jours et brule les frais.</span></div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <h2>Frais et courtier</h2>
+    <div class="form-grid">
+      <div><label>Frais en % par ordre</label><input type="number" id="dca_fee_pct" value="${cfg.fee_pct * 100}" min="0" step="any"></div>
+      <div><label>Frais MINIMUM par ordre (EUR)</label><input type="number" id="dca_fee_fixed" value="${cfg.fee_fixed}" min="0" step="any">
+        <span class="adv-hint">3,00 EUR chez IBKR sur Euronext Paris, MESURE sur le compte reel le 2026-09-18 (et non estime). C'est lui qui decide tout pour de petits versements : sur un ordre de 200 EUR, il fait 1,5 %.</span></div>
+      <div><label>Hote IBKR</label><input type="text" id="dca_host" value="${cfg.ibkr_host}"></div>
+      <div><label>Port IBKR</label>
+        <select id="dca_port">
+          <option value="7497" ${cfg.ibkr_port === 7497 ? "selected" : ""}>7497 - TWS paper</option>
+          <option value="4002" ${cfg.ibkr_port === 4002 ? "selected" : ""}>4002 - IB Gateway paper</option>
+        </select>
+        <span class="adv-hint">Les ports du compte REEL (7496/4001) sont refuses par le code.</span></div>
+    </div>
+  </div>
+
+  <div class="section-block">
+    <button class="primary" onclick="saveDcaBot()">${selected ? "Enregistrer les modifications" : "Creer le bot"}</button>
+    ${selected ? `<button onclick="deleteDcaBot('${cfg.name}')" style="background:var(--red); color:#fff; margin-left:10px;">Supprimer</button>` : ""}
+    <p class="muted" id="dca_save_status"></p>
+  </div></div>`;
+}
+
+function collectDcaWeights() {
+  const weights = {};
+  document.querySelectorAll("#dca_weights .dca-weight-row").forEach(row => {
+    const symbol = row.querySelector(".dca-symbol").value.trim().toUpperCase();
+    const weight = parseFloat(row.querySelector(".dca-weight").value);
+    if (symbol && weight > 0) weights[symbol] = weight;
+  });
+  return weights;
+}
+
+async function saveDcaBot() {
+  const statusEl = document.getElementById("dca_save_status");
+  const band = document.getElementById("dca_band").value.trim();
+  const payload = {
+    name: document.getElementById("dca_name").value.trim(),
+    weights: collectDcaWeights(),
+    monthly_contribution: parseFloat(document.getElementById("dca_monthly").value),
+    rebalance_band_pct: band === "" ? null : parseFloat(band),
+    min_rebalance_interval_days: parseInt(document.getElementById("dca_interval").value, 10),
+    min_order_value: parseFloat(document.getElementById("dca_min_order").value),
+    fee_pct: parseFloat(document.getElementById("dca_fee_pct").value) / 100,
+    fee_fixed: parseFloat(document.getElementById("dca_fee_fixed").value),
+    follow_drift_on_contribution: document.getElementById("dca_follow_drift").value === "true",
+    ibkr_host: document.getElementById("dca_host").value.trim(),
+    ibkr_port: parseInt(document.getElementById("dca_port").value, 10),
+  };
+  statusEl.textContent = "Enregistrement...";
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/dca-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      statusEl.innerHTML = `<span style="color:var(--red);">${data.error}</span>`;
+      return;
+    }
+    statusEl.innerHTML = `<span style="color:var(--green);">Enregistre. Va dans &quot;Suivi&quot; pour le simuler.</span>`;
+    currentInvestBot = data.name;
+    renderInvestSettingsTab(true);
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--red);">Serveur injoignable : ${e}</span>`;
+  }
+}
+
+async function deleteDcaBot(name) {
+  if (!confirm(`Supprimer le bot d'investissement "${name}" ?\\n\\nSon historique de versements et d'ordres est CONSERVE dans data/, seule la configuration est retiree.`)) return;
+  const resp = await fetch(`${CONTROL_SERVER}/api/dca-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const data = await resp.json();
+  if (data.error) {
+    document.getElementById("dca_save_status").innerHTML = `<span style="color:var(--red);">${data.error}</span>`;
+    return;
+  }
+  currentInvestBot = null;
+  renderInvestSettingsTab(true);
+}
+
 function renderConfigContent() {
   if (currentConfigSubTab === "supervision") {
     renderSupervisionTab();
@@ -1087,7 +2278,14 @@ function renderCreationTab() {
       <h2>General</h2>
       <div class="form-grid">
         <div class="field"><label>Nom (unique, sans espace)</label><input id="f_name" type="text" placeholder="ex: eth_swing_v1"></div>
-        <div class="field"><label>Symbole</label>${symbolSelectHtml("f_symbol", "ETH/USDT")}</div>
+        <div class="field"><label>Type de compte</label>
+          <select id="f_account_type" onchange="onAccountTypeChange(this.value)">
+            <option value="crypto">Crypto (testnet Binance)</option>
+            <option value="ibkr_paper">Actions (paper trading Interactive Brokers)</option>
+          </select>
+          <div id="f_account_type_hint" class="muted" style="font-size:11px; margin-top:4px; display:none;"></div>
+        </div>
+        <div class="field" id="f_symbol_wrap"><label>Symbole</label>${symbolSelectHtml("f_symbol", "ETH/USDT")}</div>
         <div class="field" id="f_timeframe_wrap"><label>Timeframe</label>
           <select id="f_timeframe">
             <option value="1m">1 minute</option>
@@ -1105,6 +2303,10 @@ function renderCreationTab() {
             <option value="scalp_dip">Scalp sur creux (gains rapides)</option>
             <option value="dip_bounce_hourly">Rebond de creux - horaire (24h)</option>
             <option value="dip_bounce_minute">Rebond de creux - minute (1h)</option>
+            <option value="dip_bounce_daily">Rebond de creux - journalier (actions)</option>
+            <option value="mean_dip">Creux vs moyenne (5 min, sans verrou)</option>
+            <option value="slope_dip">Detecteur de pente (1 min, trailing 5%)</option>
+            <option value="trend_regime">Regime de tendance (investi en hausse, liquidites en baisse)</option>
             <option value="buy_and_hold">Buy &amp; hold (passif)</option>
           </select>
         </div>
@@ -1253,9 +2455,11 @@ async function editBot(name) {
 
 function formStrategyTypeFor(cfg) {
   // dip_bounce n'a qu'un seul `strategy.type` reel en config (voir
-  // strategies/dip_bounce.py, agnostique du timeframe) mais 2 presets cote
-  // formulaire - determine par la fenetre (24 = horaire, 60 = minute).
+  // strategies/dip_bounce.py, agnostique du timeframe) mais 3 presets cote
+  // formulaire - determine par le timeframe (1d = actions IBKR, sinon la
+  // fenetre : 24 = horaire, 60 = minute).
   if (cfg.strategy.type === "dip_bounce") {
+    if (cfg.timeframe === "1d") return "dip_bounce_daily";
     return cfg.strategy.trend_ma_period === 60 ? "dip_bounce_minute" : "dip_bounce_hourly";
   }
   return cfg.strategy.type;
@@ -1264,8 +2468,11 @@ function formStrategyTypeFor(cfg) {
 function fillFormWithConfig(name, cfg) {
   editingBotName = name;
   const formType = formStrategyTypeFor(cfg);
+  const accountType = cfg.exchange === "ibkr_paper" ? "ibkr_paper" : "crypto";
   document.getElementById("f_name").value = cfg.name;
-  setSymbolValue("f_symbol", cfg.symbol);
+  document.getElementById("f_account_type").value = accountType;
+  onAccountTypeChange(accountType);  // pose le hint + reconstruit la liste de symboles (actions ou crypto)
+  setSymbolValue("f_symbol", cfg.symbol, accountType === "ibkr_paper" ? TOP_STOCKS : TOP10_SYMBOLS);
   document.getElementById("f_timeframe").value = cfg.timeframe;
   document.getElementById("f_strategy_type").value = formType;
   onStrategyTypeChange(formType);  // pose aussi les champs + verrouille timeframe/stop-loss si besoin
@@ -1276,11 +2483,25 @@ function fillFormWithConfig(name, cfg) {
   } else if (cfg.strategy.type === "scalp_dip") {
     document.getElementById("f_lookback").value = cfg.strategy.lookback;
     document.getElementById("f_dip_threshold_pct").value = cfg.strategy.dip_threshold_pct * 100;
+  } else if (formType === "dip_bounce_daily") {
+    document.getElementById("f_trend_ma_period").value = cfg.strategy.trend_ma_period;
+    document.getElementById("f_dip_threshold_pct").value = cfg.strategy.dip_threshold_pct * 100;
   } else if (cfg.strategy.type === "dip_bounce") {
     document.getElementById("f_dip_threshold_pct").value = cfg.strategy.dip_threshold_pct * 100;
     document.getElementById("f_profit_lock_arm_pct").value = (cfg.risk.profit_lock_arm_pct ?? 0.005) * 100;
     document.getElementById("f_profit_lock_trigger_pct").value = (cfg.risk.profit_lock_trigger_pct ?? 0.0043) * 100;
     document.getElementById("f_force_trade_after_hours").value = cfg.strategy.force_trade_after_hours ?? 0;
+  } else if (cfg.strategy.type === "mean_dip") {
+    document.getElementById("f_window").value = cfg.strategy.window;
+    document.getElementById("f_num_std").value = cfg.strategy.num_std;
+  } else if (cfg.strategy.type === "trend_regime") {
+    document.getElementById("f_ema_period").value = cfg.strategy.ema_period;
+    document.getElementById("f_entry_buffer_pct").value = (cfg.strategy.entry_buffer_pct * 100).toFixed(2);
+    document.getElementById("f_exit_buffer_pct").value = (cfg.strategy.exit_buffer_pct * 100).toFixed(2);
+  } else if (cfg.strategy.type === "slope_dip") {
+    document.getElementById("f_slope_threshold_pct").value = cfg.strategy.slope_threshold_pct * 100;
+    document.getElementById("f_candles_window").value = cfg.strategy.candles_window;
+    document.getElementById("f_one_buy_per_slope").checked = !!cfg.strategy.one_buy_per_slope;
   }
   // buy_and_hold : aucun champ de strategie a peupler.
 
@@ -1397,6 +2618,7 @@ async function submitNewBotForm() {
   const strategyType = document.getElementById("f_strategy_type").value;
   const payload = {
     name: document.getElementById("f_name").value.trim(),
+    account_type: document.getElementById("f_account_type").value,
     symbol: symbolValueOf("f_symbol"),
     timeframe: document.getElementById("f_timeframe").value,
     strategy_type: strategyType,
@@ -1440,6 +2662,20 @@ async function submitNewBotForm() {
     payload.profit_lock_arm_pct = document.getElementById("f_profit_lock_arm_pct").value / 100;
     payload.profit_lock_trigger_pct = document.getElementById("f_profit_lock_trigger_pct").value / 100;
     payload.force_trade_after_hours = document.getElementById("f_force_trade_after_hours").value || "";
+  } else if (strategyType === "dip_bounce_daily") {
+    payload.trend_ma_period = document.getElementById("f_trend_ma_period").value;
+    payload.dip_threshold_pct = document.getElementById("f_dip_threshold_pct").value / 100;
+  } else if (strategyType === "mean_dip") {
+    payload.window = document.getElementById("f_window").value;
+    payload.num_std = document.getElementById("f_num_std").value;
+  } else if (strategyType === "slope_dip") {
+    payload.slope_threshold_pct = document.getElementById("f_slope_threshold_pct").value / 100;
+    payload.candles_window = document.getElementById("f_candles_window").value;
+    payload.one_buy_per_slope = document.getElementById("f_one_buy_per_slope").checked;
+  } else if (strategyType === "trend_regime") {
+    payload.ema_period = document.getElementById("f_ema_period").value;
+    payload.entry_buffer_pct = document.getElementById("f_entry_buffer_pct").value / 100;
+    payload.exit_buffer_pct = document.getElementById("f_exit_buffer_pct").value / 100;
   }
   // buy_and_hold : aucun champ de strategie a envoyer.
   if (editingBotName) {
@@ -1673,6 +2909,19 @@ function onBacktestStrategyChange(key) {
     }
   }
   document.getElementById("bt_max_concurrent_wrap").style.display = isMarketMaking ? "none" : "block";
+  // Meme constat empirique que pour le formulaire de creation (2026-09-16) :
+  // "Creux vs moyenne" a besoin de plusieurs positions simultanees pour
+  // trader normalement, sinon une seule position bloque tout le reste.
+  const maxConcurrentInput = document.getElementById("bt_max_concurrent_positions");
+  if (key === "mean_dip" && maxConcurrentInput.value === "1") {
+    maxConcurrentInput.value = "10";
+  }
+  // Suggestion demandee explicitement par l'utilisateur pour "Detecteur de
+  // pente" ("on vend sur le trailing a 5%") - pre-remplie seulement si vide.
+  const trailingInputBt = document.getElementById("bt_trailing_stop_pct");
+  if (key === "slope_dip" && trailingInputBt && !trailingInputBt.value) {
+    trailingInputBt.value = "5";
+  }
   document.getElementById("bt_risk_generic_wrap").style.display = isMarketMaking ? "none" : "contents";
   document.getElementById("bt_partial_wrap").style.display = isMarketMaking ? "none" : "block";
   document.getElementById("bt_price_level_wrap").style.display = isMarketMaking ? "none" : "block";
@@ -1946,6 +3195,9 @@ async function runBacktestFromForm() {
       reportWrap.innerHTML = `<h2>Rapport</h2><pre style="white-space:pre-wrap; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md); padding:16px; font-family:'JetBrains Mono',monospace; font-size:12px; line-height:1.6;">${escaped}</pre>
       <p class="muted">Egalement enregistre dans <code>${data.report_path}</code>.</p>
       <button class="secondary" onclick="exportBacktestToNewBot()" ${exportable ? "" : 'disabled title="Ce type de bot est seulement disponible en YAML pour le moment"'}>Exporter ces parametres vers un nouveau bot</button>`;
+      if (data.chart) {
+        renderBacktestChart(data.chart);
+      }
     }
   } catch (e) {
     statusEl.textContent = "Serveur de controle non accessible.";
@@ -1957,13 +3209,219 @@ async function runBacktestFromForm() {
   }
 }
 
+let currentBacktestChartData = null;  // EF-60 : donnees brutes (bougies + trades) du dernier backtest, reutilisees a chaque changement de zoom sans re-appeler le serveur
+let chartSlopeSelection = { a: null, b: null };  // EF-61 : 2 bougies cliquees pour mesurer la pente entre elles
+let lastChartLayout = null;  // dernieres bougies affichees + fonctions x()/y() en cours, pour convertir un clic en bougie
+
+function renderBacktestChart(chart) {
+  currentBacktestChartData = chart;
+  chartSlopeSelection = { a: null, b: null };
+  const reportWrap = document.getElementById("bt_report_wrap");
+  const chartHtml = `
+    <div class="section-block" style="margin-top:20px;">
+      <h2>Graphique (prix + achats/ventes)</h2>
+      <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); align-items:end; margin-bottom:10px;">
+        <div class="field"><label>Debut de la fenetre (%)</label><input id="chart_zoom_from" type="range" min="0" max="99" value="0" oninput="updateBacktestChartView()"></div>
+        <div class="field"><label>Fin de la fenetre (%)</label><input id="chart_zoom_to" type="range" min="1" max="100" value="100" oninput="updateBacktestChartView()"></div>
+        <div class="field"><label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input id="chart_show_candles" type="checkbox" checked onchange="updateBacktestChartView()"> Afficher les bougies (sinon courbe)</label></div>
+      </div>
+      <canvas id="bt_chart_canvas" width="1100" height="380" style="width:100%; height:380px; display:block; cursor:crosshair; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);"></canvas>
+      <p class="muted" id="chart_zoom_label" style="font-size:11px; margin-top:6px;"></p>
+      <p class="muted" style="font-size:11px;">Triangle vert = achat, triangle rouge = vente, cercle = position encore ouverte a la fin de la periode. Bougies regroupees si necessaire pour rester lisible (voir le nombre affiche ci-dessus).</p>
+      <p id="chart_slope_result" style="font-size:12.5px; margin-top:8px; padding:9px 12px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);">Clique sur une bougie, puis sur une 2e, pour calculer la pente entre les deux.</p>
+    </div>`;
+  reportWrap.insertAdjacentHTML("beforeend", chartHtml);
+  document.getElementById("bt_chart_canvas").addEventListener("click", handleChartCandleClick);
+  updateBacktestChartView();
+}
+
+function handleChartCandleClick(evt) {
+  if (!lastChartLayout) return;
+  const rect = evt.target.getBoundingClientRect();
+  const clickX = evt.clientX - rect.left;
+  const { candles, minT, maxT, padL, plotW } = lastChartLayout;
+  if (clickX < padL || clickX > padL + plotW) return;
+  const spanT = Math.max(1, maxT - minT);
+  const targetT = minT + ((clickX - padL) / plotW) * spanT;
+  let nearest = candles[0];
+  let bestDiff = Infinity;
+  for (const c of candles) {
+    const diff = Math.abs(c.t - targetT);
+    if (diff < bestDiff) { bestDiff = diff; nearest = c; }
+  }
+  if (!chartSlopeSelection.a || chartSlopeSelection.b) {
+    chartSlopeSelection = { a: nearest, b: null };
+  } else {
+    chartSlopeSelection.b = nearest;
+  }
+  updateChartSlopeResultText();
+  updateBacktestChartView();
+}
+
+function fmtChartTimestamp(t) {
+  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
+}
+
+function updateChartSlopeResultText() {
+  const el = document.getElementById("chart_slope_result");
+  if (!el) return;
+  const { a, b } = chartSlopeSelection;
+  if (!a) {
+    el.textContent = "Clique sur une bougie, puis sur une 2e, pour calculer la pente entre les deux.";
+    return;
+  }
+  if (!b) {
+    el.innerHTML = `Bougie A : <strong>${fmtChartTimestamp(a.t)}</strong>, cloture <strong>${a.c.toFixed(2)}</strong> — clique une 2e bougie pour calculer la pente.`;
+    return;
+  }
+  const [first, second] = a.t <= b.t ? [a, b] : [b, a];
+  const pct = ((second.c - first.c) / first.c) * 100;
+  const sign = pct >= 0 ? "+" : "";
+  const color = pct >= 0 ? "var(--green)" : "var(--red)";
+  el.innerHTML = `Pente de <strong>${fmtChartTimestamp(first.t)}</strong> (${first.c.toFixed(2)}) a <strong>${fmtChartTimestamp(second.t)}</strong> (${second.c.toFixed(2)}) : <strong style="color:${color};">${sign}${pct.toFixed(3)} %</strong> — clique une nouvelle bougie pour recommencer une mesure.`;
+}
+
+function updateBacktestChartView() {
+  if (!currentBacktestChartData) return;
+  const fromEl = document.getElementById("chart_zoom_from");
+  const toEl = document.getElementById("chart_zoom_to");
+  const showCandles = document.getElementById("chart_show_candles").checked;
+  const fromPct = Number(fromEl.value);
+  const toPct = Math.max(Number(toEl.value), fromPct + 1);
+  const all = currentBacktestChartData.candles;
+  const n = all.length;
+  const startIdx = Math.floor((fromPct / 100) * n);
+  const endIdx = Math.min(n, Math.max(startIdx + 2, Math.ceil((toPct / 100) * n)));
+  const visible = all.slice(startIdx, endIdx);
+  drawBacktestCandlestickChart(visible, currentBacktestChartData.closed_trades, currentBacktestChartData.open_positions, showCandles);
+  const label = document.getElementById("chart_zoom_label");
+  if (label) label.textContent = `${visible.length} bougies affichees sur ${n} au total (fenetre ${fromPct}% - ${toPct}%)`;
+}
+
+function drawBacktestCandlestickChart(candles, closedTrades, openPositions, showCandles) {
+  const canvas = document.getElementById("bt_chart_canvas");
+  if (!canvas || !candles || candles.length === 0) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || 1100;
+  canvas.width = cssWidth * dpr;
+  canvas.height = 380 * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = cssWidth, h = 380;
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 58, padR = 12, padT = 12, padB = 22;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const minP = Math.min(...candles.map(c => c.l));
+  const maxP = Math.max(...candles.map(c => c.h));
+  const pricePad = (maxP - minP) * 0.06 || 1;
+  const lo = minP - pricePad, hi = maxP + pricePad;
+  const minT = candles[0].t, maxT = candles[candles.length - 1].t;
+  const spanT = Math.max(1, maxT - minT);
+  const x = t => padL + ((t - minT) / spanT) * plotW;
+  const y = p => padT + (1 - (p - lo) / (hi - lo)) * plotH;
+
+  const styles = getComputedStyle(document.documentElement);
+  const gridColor = (styles.getPropertyValue("--border") || "#333").trim();
+  const inkColor = (styles.getPropertyValue("--text-dim") || "#888").trim();
+  const lineColor = (styles.getPropertyValue("--accent") || "#5b8def").trim();
+  const upColor = (styles.getPropertyValue("--green") || "#2fd699").trim();
+  const downColor = (styles.getPropertyValue("--red") || "#ff6b6b").trim();
+
+  ctx.strokeStyle = gridColor;
+  ctx.fillStyle = inkColor;
+  ctx.font = "10px monospace";
+  ctx.lineWidth = 1;
+  for (let s = 0; s <= 4; s++) {
+    const price = lo + (hi - lo) * (s / 4);
+    const yy = y(price);
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.fillText(price.toFixed(2), 4, yy + 3);
+  }
+  for (let s = 0; s <= 4; s++) {
+    const t = minT + spanT * (s / 4);
+    const xx = x(t);
+    const label = new Date(t).toISOString().slice(0, 16).replace("T", " ");
+    ctx.fillText(label, Math.min(Math.max(xx - 40, padL), w - padR - 80), h - 6);
+  }
+
+  if (showCandles) {
+    const candleW = Math.max(1, Math.min(10, (plotW / candles.length) * 0.7));
+    candles.forEach(c => {
+      const xx = x(c.t);
+      const color = c.c >= c.o ? upColor : downColor;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.moveTo(xx, y(c.h)); ctx.lineTo(xx, y(c.l)); ctx.stroke();
+      const yOpen = y(c.o), yClose = y(c.c);
+      const bodyTop = Math.min(yOpen, yClose), bodyH = Math.max(1, Math.abs(yOpen - yClose));
+      ctx.fillRect(xx - candleW / 2, bodyTop, candleW, bodyH);
+    });
+  } else {
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    candles.forEach((c, i) => {
+      const xx = x(c.t), yy = y(c.c);
+      if (i === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+    });
+    ctx.stroke();
+  }
+
+  function triangleUp(xx, yy, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(xx, yy - 7); ctx.lineTo(xx + 5, yy + 2); ctx.lineTo(xx - 5, yy + 2); ctx.closePath(); ctx.fill();
+  }
+  function triangleDown(xx, yy, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(xx, yy + 7); ctx.lineTo(xx + 5, yy - 2); ctx.lineTo(xx - 5, yy - 2); ctx.closePath(); ctx.fill();
+  }
+  (closedTrades || []).forEach(t => {
+    if (t.buy_t >= minT && t.buy_t <= maxT) triangleUp(x(t.buy_t), y(t.buy_p), upColor);
+    if (t.sell_t >= minT && t.sell_t <= maxT) triangleDown(x(t.sell_t), y(t.sell_p), downColor);
+  });
+  (openPositions || []).forEach(p => {
+    if (p.buy_t >= minT && p.buy_t <= maxT) {
+      triangleUp(x(p.buy_t), y(p.buy_p), upColor);
+      ctx.strokeStyle = inkColor;
+      ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.arc(x(p.buy_t), y(p.buy_p), 9, 0, 2 * Math.PI); ctx.stroke();
+    }
+  });
+
+  lastChartLayout = { candles, x, y, minT, maxT, padL, padR, plotW };
+
+  // EF-61 : 2 bougies cliquees pour mesurer la pente - dessine les 2 points
+  // (s'ils sont dans la fenetre visible actuelle) et le segment entre eux.
+  const accentColor = (styles.getPropertyValue("--accent") || "#5b8def").trim();
+  function drawSelectionDot(xx, yy) {
+    ctx.fillStyle = accentColor;
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(xx, yy, 5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+  }
+  if (chartSlopeSelection.a && chartSlopeSelection.a.t >= minT && chartSlopeSelection.a.t <= maxT) {
+    const ax = x(chartSlopeSelection.a.t), ay = y(chartSlopeSelection.a.c);
+    if (chartSlopeSelection.b && chartSlopeSelection.b.t >= minT && chartSlopeSelection.b.t <= maxT) {
+      const bx = x(chartSlopeSelection.b.t), by = y(chartSlopeSelection.b.c);
+      ctx.strokeStyle = accentColor;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.setLineDash([]);
+      drawSelectionDot(bx, by);
+    }
+    drawSelectionDot(ax, ay);
+  }
+}
+
 function exportBacktestToNewBot() {
   // Reprend les reglages actuels du formulaire Test/Backtest et les reporte
   // dans le formulaire de Creation (§5.1/5.2), demande de l'utilisateur pour
   // ne pas avoir a retaper a la main une config qui a donne un bon resultat
   // en test. Les cles de strategie backtest/creation sont deja identiques
-  // (sma_cross, scalp_dip, dip_bounce_hourly/minute, buy_and_hold) - seuls
-  // mean_reversion/market_making n'ont pas d'equivalent creable (bouton
+  // (sma_cross, scalp_dip, dip_bounce_hourly/minute, mean_dip, buy_and_hold) -
+  // seuls mean_reversion/market_making n'ont pas d'equivalent creable (bouton
   // desactive dans ce cas, voir runBacktestFromForm).
   const strategyKey = document.getElementById("bt_strategy").value;
   if (!CREATABLE_STRATEGY_TYPES.has(strategyKey)) {
@@ -2009,6 +3467,13 @@ function exportBacktestToNewBot() {
     exported.forceTradeAfterHours = val("bt_p_force_trade_after_hours");
     exported.profitLockArmPct = val("bt_r_profit_lock_arm_pct");
     exported.profitLockTriggerPct = val("bt_r_profit_lock_trigger_pct");
+  } else if (strategyKey === "mean_dip") {
+    exported.window = val("bt_p_window");
+    exported.numStd = val("bt_p_num_std");
+  } else if (strategyKey === "slope_dip") {
+    exported.slopeThresholdPct = val("bt_p_slope_threshold_pct");
+    exported.candlesWindow = val("bt_p_candles_window");
+    exported.oneBuyPerSlope = val("bt_p_one_buy_per_slope");
   }
 
   currentMainTab = "config";
@@ -2037,6 +3502,13 @@ function exportBacktestToNewBot() {
     if (exported.forceTradeAfterHours) document.getElementById("f_force_trade_after_hours").value = exported.forceTradeAfterHours;
     if (exported.profitLockArmPct) document.getElementById("f_profit_lock_arm_pct").value = exported.profitLockArmPct;
     if (exported.profitLockTriggerPct) document.getElementById("f_profit_lock_trigger_pct").value = exported.profitLockTriggerPct;
+  } else if (strategyKey === "mean_dip") {
+    if (exported.window) document.getElementById("f_window").value = exported.window;
+    if (exported.numStd) document.getElementById("f_num_std").value = exported.numStd;
+  } else if (strategyKey === "slope_dip") {
+    if (exported.slopeThresholdPct) document.getElementById("f_slope_threshold_pct").value = exported.slopeThresholdPct;
+    if (exported.candlesWindow) document.getElementById("f_candles_window").value = exported.candlesWindow;
+    document.getElementById("f_one_buy_per_slope").checked = exported.oneBuyPerSlope === "1";
   }
 
   if (exported.maxPositionSize) document.getElementById("f_max_position_size_pct").value = exported.maxPositionSize;

@@ -1,0 +1,59 @@
+# Modele de regime de tendance sur ETH (EF-68) - demande de l'utilisateur :
+# "un modele qui permettrait de faire de l'argent sur l'ETH, rentable en
+# haussier, et si possible aussi en baissier".
+#
+# PRINCIPE : investi tant que le cours est au-dessus de sa tendance de fond,
+# TOUT en liquidites des qu'il repasse dessous. Long-only : gagner de
+# l'argent pendant une baisse est hors de portee (pas de vente a decouvert),
+# l'objectif est de rester plat au lieu de la subir.
+#
+# REGLAGE : choisi sur les 70% d'entrainement de 6,7 ans de bougies 1h, puis
+# evalue UNE SEULE FOIS sur les 30% restants. `ema_period=1000` faisait mieux
+# en test (+80% de mediane contre +54%) mais le retenir serait de la
+# selection sur le test - on garde donc celui de l'entrainement. Voir
+# STC section EF-68 pour les chiffres et les deux controles de robustesse.
+#
+# ATTENTION AU BACKTEST DE CETTE CONFIG depuis le dashboard : sans panier de
+# capital commun, `Engine` dimensionne sur `starting_captial` FIGE (voir
+# `Engine._buy_capital_reference`), donc un modele a nombreux allers-retours
+# et `max_position_size_pct: 1.0` peut "acheter" plus que son cash et
+# afficher un resultat gonfle. En paper trading la taille est bornee par le
+# cash reellement disponible dans le panier, donc correcte. Les chiffres
+# publies viennent d'un banc dedie dimensionnant sur l'equite courante.
+name: ETH_TREND_REGIME
+exchange: binance
+symbol: ETH/USDT
+timeframe: 1h
+# La strategie ne decide rien avant d'avoir `ema_period` bougies : sans
+# rechauffement, le bot resterait muet ~3 semaines apres son demarrage.
+warmup_candles: 500
+flatten_on_start: true
+# Plafond propre a ce bot dans le panier commun (7 autres bots y puisent) :
+# `max_position_size_pct: 1.0` signifie "tout SON allocation", pas tout le
+# panier.
+capital_allocated: 200
+
+strategy:
+  type: trend_regime
+  ema_period: 500          # ~21 jours en bougies 1h
+  entry_buffer_pct: 0.03   # n'entre qu'a +3% au-dessus de la tendance
+  exit_buffer_pct: 0.0     # sort des le retour sous la tendance
+
+risk:
+  # Pleinement investi quand le regime est haussier : c'est tout l'interet du
+  # modele, la protection vient de la SORTIE sur retournement, pas d'un stop.
+  max_position_size_pct: 1.0
+  # Volontairement aucun stop-loss, take-profit ni verrou de gain : ils
+  # couperaient les tendances gagnantes que ce modele existe pour capter
+  # (constat mesure deux fois dans ce projet, sur actions puis sur crypto).
+  stop_loss_pct: null
+  take_profit_pct: null
+  trailing_stop_pct: null
+  profit_lock_arm_pct: null
+  profit_lock_trigger_pct: null
+  max_daily_loss_pct: 0.05
+  max_concurrent_positions: 1
+
+backtest:
+  starting_capital: 1000
+  since: '2019-01-01T00:00:00Z'

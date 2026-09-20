@@ -4,9 +4,11 @@ import tradingbot.backtest_lab as backtest_lab_module
 from tradingbot.backtest_lab import (
     PRESETS,
     build_atr_sizer_kwargs,
+    build_chart_payload,
     build_namespace_from_payload,
     build_price_level_sizer_kwargs,
     build_risk_kwargs_and_summary,
+    build_strategy_instance,
     build_trend_filter_kwargs,
     merge_dual_timeframe,
     presets_metadata,
@@ -14,6 +16,9 @@ from tradingbot.backtest_lab import (
     run_one_period,
     split_periods,
 )
+from tradingbot.portfolio import Portfolio
+from tradingbot.strategies.mean_dip import MeanDipStrategy
+from tradingbot.strategies.slope_dip import SlopeDipStrategy
 from tradingbot.types import Candle
 
 
@@ -43,6 +48,46 @@ def test_presets_metadata_lists_every_preset_with_expected_shape():
     assert dip_bounce_hourly["default_stop_loss_pct"] is None
     assert any(p["name"] == "dip_threshold_pct" for p in dip_bounce_hourly["param_specs"])
     assert any(p["name"] == "profit_lock_arm_pct" for p in dip_bounce_hourly["risk_param_specs"])
+
+
+def test_presets_metadata_includes_mean_dip_with_required_stop_loss():
+    """2026-09-16 : contrairement a dip_bounce, mean_dip n'a pas de verrou de
+    gain - le stop-loss est donc actif par defaut (pas optionnel/desactive)."""
+    metadata = presets_metadata()
+    mean_dip = next(m for m in metadata if m["key"] == "mean_dip")
+    assert mean_dip["timeframe"] == "5m"
+    assert mean_dip["supports_stop_loss"] is True
+    assert mean_dip["default_stop_loss_pct"] == 0.02
+    assert {p["name"] for p in mean_dip["param_specs"]} == {"window", "num_std"}
+    assert mean_dip["risk_param_specs"] == []
+
+
+def test_build_strategy_instance_dispatches_mean_dip():
+    preset = PRESETS["mean_dip"]
+    strategy = build_strategy_instance(preset, {"window": 12, "num_std": 2.0})
+    assert isinstance(strategy, MeanDipStrategy)
+    assert strategy.window == 12
+
+
+def test_presets_metadata_includes_slope_dip_with_optional_stop_loss():
+    """2026-09-16 : le trailing stop est la sortie principale (demande
+    explicite de l'utilisateur : 'on vend sur le trailing a 5%'), le
+    stop-loss reste un filet de securite optionnel, comme dip_bounce."""
+    metadata = presets_metadata()
+    slope_dip = next(m for m in metadata if m["key"] == "slope_dip")
+    assert slope_dip["timeframe"] == "1m"
+    assert slope_dip["supports_stop_loss"] is True
+    assert slope_dip["default_stop_loss_pct"] is None
+    assert {p["name"] for p in slope_dip["param_specs"]} == {"slope_threshold_pct", "candles_window", "one_buy_per_slope"}
+    assert slope_dip["risk_param_specs"] == []
+
+
+def test_build_strategy_instance_dispatches_slope_dip():
+    preset = PRESETS["slope_dip"]
+    strategy = build_strategy_instance(preset, {"slope_threshold_pct": 0.005, "candles_window": 5})
+    assert isinstance(strategy, SlopeDipStrategy)
+    assert strategy.slope_threshold_pct == 0.005
+    assert strategy.candles_window == 5
 
 
 def test_build_namespace_from_payload_applies_defaults():
@@ -87,6 +132,49 @@ def test_run_backtest_job_runs_end_to_end_with_fake_candles(monkeypatch, tmp_pat
     assert "Buy & hold" in text
     from pathlib import Path
     assert Path(report_path).exists()
+
+
+def test_build_chart_payload_downsamples_and_preserves_ohlc_extremes():
+    """EF-60 : au-dela de max_candles, regroupe par paquets en conservant le
+    plus haut/plus bas reel du paquet (pas juste un point sur N, qui masquerait
+    des meches)."""
+    candles = [
+        Candle(timestamp=i * 60_000, open=100 + i, high=100 + i + 5, low=100 + i - 5, close=100 + i, volume=1)
+        for i in range(10)
+    ]
+    portfolio = Portfolio(starting_capital=1000.0)
+    payload = build_chart_payload(candles, portfolio, max_candles=2)
+    assert len(payload["candles"]) == 2
+    first_bucket = payload["candles"][0]
+    assert first_bucket["h"] == max(c.high for c in candles[:5])
+    assert first_bucket["l"] == min(c.low for c in candles[:5])
+    assert first_bucket["o"] == candles[0].open
+    assert first_bucket["c"] == candles[4].close
+    assert payload["closed_trades"] == []
+    assert payload["open_positions"] == []
+
+
+def test_run_backtest_job_populates_chart_data_out_for_single_period(monkeypatch, tmp_path):
+    monkeypatch.setattr(backtest_lab_module, "fetch_historical_candles", lambda **kwargs: make_candles(50))
+    monkeypatch.chdir(tmp_path)
+    args = build_namespace_from_payload({
+        "strategy": "buy_and_hold", "symbol": "BTC/USDT", "since": "1970-01-01", "capital": 500,
+    })
+    chart_data: dict = {}
+    run_backtest_job(args, chart_data_out=chart_data)
+    assert len(chart_data["candles"]) > 0
+    assert len(chart_data["open_positions"]) == 1  # buy_and_hold n'achete qu'une fois, jamais de vente
+
+
+def test_run_backtest_job_leaves_chart_data_out_empty_for_multiple_periods(monkeypatch, tmp_path):
+    monkeypatch.setattr(backtest_lab_module, "fetch_historical_candles", lambda **kwargs: make_candles(50))
+    monkeypatch.chdir(tmp_path)
+    args = build_namespace_from_payload({
+        "strategy": "buy_and_hold", "symbol": "BTC/USDT", "since": "1970-01-01", "capital": 500, "repeat": 2,
+    })
+    chart_data: dict = {}
+    run_backtest_job(args, chart_data_out=chart_data)
+    assert chart_data == {}  # pas encore de graphique par sous-periode, hors perimetre
 
 
 def test_merge_dual_timeframe_orders_by_close_time_not_open_time():
@@ -140,7 +228,7 @@ def test_run_one_period_exit_checked_at_fine_granularity_does_not_undershoot_the
         "stop_loss_pct": None, "take_profit_pct": None, "max_concurrent_positions": 1,
         "profit_lock_arm_pct": 0.01, "profit_lock_trigger_pct": 0.007,
     }
-    report, benchmark_pct, trade_stats = run_one_period(
+    report, benchmark_pct, trade_stats, _portfolio = run_one_period(
         preset, {"dip_threshold_pct": 0.01, "force_trade_after_hours": 0}, risk_kwargs, 1000.0,
         entry_candles, None, exit_check_candles, "1h", "5m",
     )

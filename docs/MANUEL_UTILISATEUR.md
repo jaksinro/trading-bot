@@ -18,7 +18,7 @@ Sans ce serveur lancé, le dashboard reste consultable (lecture seule) mais l'on
 
 Ouvre le fichier **`dashboard.html`** (à la racine du projet) dans ton navigateur — double-clic dessus, ou glisser-déposer dans une fenêtre de navigateur.
 
-La page se rafraîchit **automatiquement toutes les 15 secondes**. Pas besoin d'actualiser manuellement, sauf si tu viens de mettre à jour le logiciel lui-même (voir §9).
+La page se rafraîchit **automatiquement toutes les 15 secondes**. Pas besoin d'actualiser manuellement, sauf si tu viens de mettre à jour le logiciel lui-même (voir §10).
 
 ### 1.3 Lancer un bot existant sans passer par le dashboard
 
@@ -169,12 +169,13 @@ Le formulaire est organisé en 3 blocs : **Général** (nom, symbole, timeframe,
 | Champ | Explication |
 |---|---|
 | Nom | Identifiant unique du bot (lettres, chiffres, underscore) |
-| Symbole | Paire à trader. Liste déroulante des 10 cryptos les plus courantes (BTC, ETH, XRP, BNB, SOL, DOGE, ADA, TRX, LINK, AVAX, toutes vs USDT) ; choisir "Autre..." fait apparaître un champ texte libre pour une autre paire (ex. `MATIC/USDT`) — doit alors exister réellement sur Binance, une faute de frappe est détectée avec une suggestion automatique |
-| Timeframe | Durée d'une bougie (1 minute à 1 jour). Court = plus réactif, plus de bruit ; long = plus stable, plus lent |
-| Stratégie | **Croisement de moyennes** (suit une tendance, peu de trades), **Scalp sur creux** (achète les petites baisses, vise des gains rapides et fréquents), **Rebond de creux - horaire/minute** ou **Buy & hold (passif)** — voir §5.3 pour ces 3 dernières |
-| Plafond de mise (panier commun) | Limite haute de ce que ce bot peut viser dans le panier de capital commun — pas un budget qui lui serait réservé (voir §3, onglet Accueil) ; s'ajuste automatiquement selon sa performance récente |
+| Type de compte | **Crypto (testnet Binance)** ou **Actions (paper trading Interactive Brokers)** — voir l'encadré ci-dessous pour ce second mode, ajouté le 2026-09-16 |
+| Symbole | Paire à trader. Liste déroulante des 10 cryptos les plus courantes (BTC, ETH, XRP, BNB, SOL, DOGE, ADA, TRX, LINK, AVAX, toutes vs USDT) ; choisir "Autre..." fait apparaître un champ texte libre pour une autre paire (ex. `MATIC/USDT`) — doit alors exister réellement sur Binance, une faute de frappe est détectée avec une suggestion automatique. **Pour "Actions"**, la liste déroulante propose 11 actions courantes (TotalEnergies, Orange, Société Générale, Renault, Air France-KLM, ArcelorMittal, Air Liquide, LVMH, L'Oréal, Sanofi, BNP Paribas) ; "Autre..." reste disponible pour un ticker non listé (ex. `RNO.PA` pour Renault) |
+| Timeframe | Durée d'une bougie (1 minute à 1 jour). Court = plus réactif, plus de bruit ; long = plus stable, plus lent. **Verrouillé sur "1 jour" pour "Actions"** (voir encadré ci-dessous) |
+| Stratégie | **Croisement de moyennes** (suit une tendance, peu de trades), **Scalp sur creux** (achète les petites baisses, vise des gains rapides et fréquents), **Rebond de creux - horaire/minute/journalier**, **Creux vs moyenne** (5 min, sans verrou), **Détecteur de pente** (1 min, trailing 5%) ou **Buy & hold (passif)** — voir §5.3 pour ces dernières |
+| Plafond de mise (panier commun) | Limite haute de ce que ce bot peut viser dans le panier de capital commun — pas un budget qui lui serait réservé (voir §3, onglet Accueil) ; s'ajuste automatiquement selon sa performance récente. **Pour "Actions"**, ce panier est totalement séparé de celui des bots crypto |
 | Taille position max (%) | Part du capital investie sur un seul trade |
-| Stop-loss (%) | Perte tolérée avant vente automatique. **Absent pour "Buy & hold"** (achat unique, jamais revendu). **Optionnel pour "Rebond de creux"** : vide par défaut (décision historique de cette stratégie — voir §5.3), une valeur saisie l'active exactement comme pour les autres stratégies |
+| Stop-loss (%) | Perte tolérée avant vente automatique. **Absent pour "Buy & hold"** (achat unique, jamais revendu). **Optionnel pour "Rebond de creux" (toutes variantes) et "Détecteur de pente"** : vide par défaut (voir §5.3), une valeur saisie l'active exactement comme pour les autres stratégies. **Obligatoire pour "Creux vs moyenne"** (voir §5.3) — sans verrou de gain pour cette stratégie, un stop-loss est la seule protection contre une position qui ne se fermerait jamais |
 | Take-profit (%) | Gain visé avant vente automatique. **Indispensable pour la stratégie "Scalp sur creux"**, qui n'a pas d'autre moyen de revendre |
 | Perte max journalière (%) | Le bot arrête de trader pour la journée s'il atteint ce seuil de perte cumulée |
 | Positions simultanées max | Par défaut 1 (comportement historique : une seule position à la fois). Au-delà de 1, le bot peut ouvrir plusieurs positions en parallèle au lieu d'attendre que la précédente se clôture — voir l'avertissement ci-dessous |
@@ -187,11 +188,27 @@ Champs spécifiques au **scalp sur creux** :
 - **Lookback** : nombre de bougies utilisées pour calculer la moyenne de référence,
 - **Seuil de creux (%)** : chute de prix (par rapport à cette moyenne) qui déclenche un achat.
 
-### 5.3 Rebond de creux et Buy & hold — 2 nouvelles stratégies, proposée par toi pour la première
+⚠️ **"Type de compte" — Actions via Interactive Brokers (2026-09-16, demandé par l'utilisateur)**
 
-**Rebond de creux (horaire ou minute)** : achète dès que le prix est proche de son plus bas récent — **aucune condition de tendance requise** (plus haussière ni autre) ; puis **hold jusqu'à être rentable** — la seule vente possible est le **verrou de gain** : une fois qu'un premier seuil de gain est dépassé, le bot vend dès que ce gain retombe à un second seuil (plus bas), ça sécurise un gain déjà acquis sans le figer à un montant fixe. *(Corrections du 2026-09-14, à la demande de l'utilisateur : (1) la version initiale vendait aussi dès qu'un nouveau plus haut récent était atteint, ce qui pouvait clôturer la position pour un gain minuscule avant même que le verrou ait la moindre chance de s'armer — retiré, pour un vrai "achète et garde, protégé par le verrou de gain" ; (2) l'entrée exigeait aussi que le prix soit au-dessus de sa propre moyenne glissante — retiré, l'entrée ne dépend plus que de la proximité au plus bas récent.)* Deux variantes au choix dans le menu Stratégie :
+Choisir "Actions (paper trading Interactive Brokers)" permet de créer un bot qui investit sur une vraie action (ex. TotalEnergies, Renault) au lieu d'une crypto — mais **uniquement en argent fictif** (paper trading), jamais en argent réel. Cette option existe parce que la quasi-totalité des courtiers PEA/CTO français (Bourse Direct, BoursoBank, Fortuneo, Degiro...) n'offrent aucune connexion automatisée — seul **Interactive Brokers** en propose une, avec un PEA conforme à la réglementation française depuis juillet 2024.
+
+**Prérequis, à faire toi-même avant de pouvoir lancer un tel bot** (rien de ceci n'est automatisable) :
+1. Ouvrir un compte Interactive Brokers.
+2. Installer TWS ("Trader Workstation") ou IB Gateway (plus léger) sur ce PC.
+3. Le connecter en mode **PAPER** (jamais LIVE tant que tu ne veux pas engager de l'argent réel).
+4. Activer l'API dans Configuration globale → API → Paramètres.
+5. Renseigner `IBKR_HOST`/`IBKR_PORT` dans le fichier `.env` du projet (voir `.env.example`).
+
+Sans ça, un bot "Actions" créé échouera au démarrage avec un message clair indiquant que la connexion à TWS/IB Gateway a échoué — ce n'est pas un bug, c'est le comportement voulu (échouer vite et clairement plutôt que de rester bloqué silencieusement).
+
+**Différences avec un bot crypto** : bougies journalières uniquement (pas d'heures de marché à gérer, un jour non ouvré ne produit simplement aucune bougie), quantités en actions entières (pas de fractions comme en crypto), panier de capital totalement séparé du panier crypto, et seulement 4 stratégies compatibles : "Rebond de creux - journalier", "Croisement de moyennes", "Scalp sur creux", "Buy & hold" (les autres imposent un timeframe trop fin, incompatible).
+
+### 5.3 Rebond de creux, Creux vs moyenne, Détecteur de pente, et Buy & hold — stratégies proposées par toi
+
+**Rebond de creux (horaire, minute, ou journalier)** : achète dès que le prix est proche de son plus bas récent — **aucune condition de tendance requise** (plus haussière ni autre) ; puis **hold jusqu'à être rentable** — la seule vente possible est le **verrou de gain** (sauf variante journalière, voir plus bas) : une fois qu'un premier seuil de gain est dépassé, le bot vend dès que ce gain retombe à un second seuil (plus bas), ça sécurise un gain déjà acquis sans le figer à un montant fixe. *(Corrections du 2026-09-14, à la demande de l'utilisateur : (1) la version initiale vendait aussi dès qu'un nouveau plus haut récent était atteint, ce qui pouvait clôturer la position pour un gain minuscule avant même que le verrou ait la moindre chance de s'armer — retiré, pour un vrai "achète et garde, protégé par le verrou de gain" ; (2) l'entrée exigeait aussi que le prix soit au-dessus de sa propre moyenne glissante — retiré, l'entrée ne dépend plus que de la proximité au plus bas récent.)* Trois variantes au choix dans le menu Stratégie :
 - **Rebond de creux - horaire** : raisonne sur une fenêtre de 24 bougies d'1 heure (24h). Le timeframe se verrouille automatiquement sur "1 heure".
 - **Rebond de creux - minute** : la même logique, mais sur une fenêtre de 60 bougies d'1 minute (1h). Le timeframe se verrouille automatiquement sur "1 minute".
+- **Rebond de creux - journalier** (2026-09-16, pour les actions) : la même logique en bougies journalières, mais **la fenêtre de tendance est réglable** (au lieu d'être fixée à 24/60) — la recherche empirique menée sur plusieurs actions a montré qu'elle varie fortement d'une action à l'autre (10 jours pour Renault, 40 jours pour Air France-KLM par exemple). **Pas de verrou de gain** pour cette variante : seuls le Stop-loss (optionnel) et le Trailing stop ferment une position. **Constat honnête** : aucun edge démontré sur des actions en tendance haussière forte ; plus crédible (ça limite les pertes, ce n'est pas un vrai avantage de sélection) sur des actions en baisse ou chahutées — voir le détail dans STC.md §3.47 si ça t'intéresse.
 
 Champs spécifiques :
 - **Seuil de creux (%)** : à quel point le prix doit être proche du plus bas de la fenêtre pour déclencher un achat,
@@ -202,6 +219,31 @@ Champs spécifiques :
 ⚠️ **Pas de stop-loss par défaut (vide), pas un oubli — mais réintégré en option** (demande explicite de l'utilisateur, 2026-09-15) : si le champ "Stop-loss" (§5.2) reste vide, une position n'a que le verrou de gain comme porte de sortie et peut rester ouverte indéfiniment, même en perte. Validation empirique (variante horaire, 10 cryptos, 3 ans, voir [FEUILLE_DE_ROUTE_PERFORMANCE.md](FEUILLE_DE_ROUTE_PERFORMANCE.md) étape 9, **avant le retrait de la sortie sur nouveau plus haut** — à revalider avec le comportement actuel) : résultat mitigé, et ce risque s'est concrètement matérialisé (un trade a perdu jusqu'à 3,2% du capital de test en une seule fois, une position est restée ouverte à la fin de la période testée). Renseigner le champ "Stop-loss" active une protection classique en plus du verrou de gain, si le risque de blocage prolongé ne convient pas.
 
 **Buy & hold (passif)** : achète une seule fois, dès le premier cycle, avec "Taille position max" du "Plafond de mise", puis ne revend jamais — pas de stop-loss, pas de take-profit, aucun réglage de stratégie à renseigner. C'est la version "bot" du benchmark buy & hold déjà utilisé pour juger les autres stratégies tout au long de ce projet : utile pour comparer directement, en conditions réelles, le trading actif à la simple détention.
+
+**Creux vs moyenne (5 min, sans verrou)** — proposée le 2026-09-16 en observant le graphique de cours en direct, où de nombreux pics descendants brefs (quelques dizaines de minutes) sont visibles sans qu'aucune stratégie existante ne les capte ("Rebond de creux" regarde un plus bas glissant sur 24h, trop large pour ce genre de mouvement). Cette stratégie détecte un creux différemment : **l'écart entre le prix et sa moyenne mobile récente** (même calcul que les bandes de Bollinger) — achète dès que le prix passe sous cette bande basse. Le Timeframe se verrouille automatiquement sur "5 minutes" (fenêtre de 12 bougies ≈ 1 heure).
+
+Champs spécifiques :
+- **Fenêtre (bougies)** : nombre de bougies 5 min utilisées pour calculer la moyenne (12 par défaut ≈ 1h),
+- **Largeur des bandes (écarts-types)** : à quel point le prix doit s'écarter de la moyenne pour compter comme un creux (2,0 par défaut — plus petit = plus sensible, plus de trades).
+
+⚠️ **Aucune sortie gérée par la stratégie elle-même** — contrairement à "Rebond de creux" (verrou de gain) : ici, seuls le **Stop-loss** et le **Trailing stop** (§5.2) peuvent fermer une position. C'est pourquoi le **Stop-loss est obligatoire** pour cette stratégie (actif à 2% par défaut, pas de case pour le désactiver) — sans lui et sans verrou de gain, une position perdante ne se fermerait jamais.
+
+**"Positions simultanées max" pré-rempli à 10** (au lieu de 1) dès que cette stratégie est choisie : testé le 2026-09-16, avec une seule position autorisée, la première position ouverte bloque toute nouvelle entrée jusqu'à son stop-loss (rarement déclenché) — la stratégie devient quasi inactive, un seul trade par semaine environ. **Recherche empirique menée sur plusieurs périodes** : aucun réglage de fenêtre/écarts-types testé n'a démontré un avantage fiable et durable — un résultat qui semblait bon sur 2 mois s'est effondré sur une période de 5,5 mois. À utiliser avec cette limite en tête, comme les autres stratégies de ce projet.
+
+**Détecteur de pente (1 min, trailing 5%)** — proposée le 2026-09-16, idée directe de l'utilisateur : "un détecteur de pente, plus la pente est élevée, plus la baisse va être importante... si entre 2 bougies de 1 min on a une grosse pente alors on achète... on garde l'ordre et on vend sur le trailing à 5%". Compare la clôture de la bougie courante à celle d'il y a N bougies **1 minute** (2 par défaut = la bougie précédente immédiate) : si la baisse dépasse le seuil réglé, achat immédiat. Le Timeframe se verrouille automatiquement sur "1 minute".
+
+Champs spécifiques :
+- **Seuil de pente (%)** : à partir de quelle baisse (en %) entre les 2 bougies comparées l'achat se déclenche (0,5% par défaut — plus petit = plus sensible, plus de trades).
+- **Nombre de bougies pour mesurer la pente** : sur combien de bougies la pente est mesurée (2 par défaut = comparaison à la bougie précédente immédiate). Ajouté le 2026-09-16 après avoir visualisé une journée réelle (voir capture partagée) où plusieurs achats étaient en fait partis sur une tendance baissière continue, pas une chute isolée — élargir cette fenêtre (ex: 5 bougies) lisse le bruit d'une seule minute.
+- **Limiter à 1 achat par pente continue** (case à cocher, décochée par défaut) : sur une dérive baissière continue, la condition de pente peut rester vraie à plusieurs bougies d'affilée — sans cette case, la stratégie rachète à chaque bougie qualifiante et empile plusieurs positions sur la MÊME tendance au lieu d'une seule. Cochée, un seul achat par épisode de chute continue ; se réarme dès que la chute s'interrompt (même brièvement), prêt pour le prochain épisode.
+
+⚠️ **Aucune sortie gérée par la stratégie elle-même** — "garder l'ordre" veut dire que la stratégie n'a pas de logique de vente propre, PAS qu'elle attend longtemps avant de vendre : le **Trailing stop** (§5.2) est armé dès l'achat (il suit le plus haut atteint depuis l'entrée) et vend dès que le prix retombe de ce pourcentage sous ce plus haut — donc dès qu'un gain apparaît et se retourne, la vente peut être immédiate. Le champ "Trailing stop" se pré-remplit à **5%** (demande explicite) si tu ne l'as pas déjà modifié. Le **Stop-loss** reste optionnel (filet de sécurité, vide par défaut, comme "Rebond de creux").
+
+⚠️ **"Nombre de bougies" testé empiriquement (2 vs 5), constat honnête** : élargir à 5 bougies augmente le rendement moyen sur plusieurs périodes (ETH/BTC) mais aussi fortement la variance - le pire cas par période est environ 4 fois plus large, et la médiane reste négative dans les deux cas. La moyenne plus haute vient de 1-2 périodes exceptionnelles, pas d'une amélioration régulière. Le défaut reste à 2 (comportement d'origine) - à tester au cas par cas plutôt qu'à considérer 5 comme un meilleur réglage.
+
+⚠️ **"Limiter à 1 achat par pente continue" testé empiriquement, constat honnête** : avec le réglage par défaut (2 bougies), l'effet est quasi nul sur plusieurs périodes testées - une comparaison à la seule bougie précédente reste rarement vraie plusieurs bougies d'affilée sur un marché réel, donc peu de doublons à supprimer. Avec une fenêtre large (ex: 7 bougies), l'effet est plus net sur l'exemple testé (1 seule journée : 6 trades → 4, rendement -0,16% → +0,01%) mais un seul jour ne suffit pas à conclure à un avantage général. Combine surtout bien avec un "Nombre de bougies" élevé.
+
+**Recherche empirique menée sur plusieurs périodes (ETH/BTC, 2026-09-16)** : aucun réglage testé (trailing 1,5%, 3% ou 5%) ne démontre un avantage fiable et durable — le rendement moyen par période reste proche de zéro, voire négatif. Resserrer le trailing (le rendre plus réactif) **dégrade** le résultat au lieu de l'améliorer : sur une granularité d'1 minute, le bruit normal du marché fait sortir la position avant qu'un vrai rebond n'ait eu le temps de se développer. Le réglage par défaut à 5% (celui demandé initialement) reste le meilleur des 3 testés, sans pour autant être un réglage optimal démontré — à utiliser avec cette limite en tête.
 
 **Filtre de probabilité (optionnel)** : coche "Filtre de probabilité" pour bloquer automatiquement un achat si une simulation statistique (basée sur 3 ans d'historique) estime que la probabilité de hausse du prix dans les prochaines 24h est sous le seuil que tu définis (55% par défaut).
 
@@ -245,7 +287,7 @@ Un seul sous-onglet pour l'instant : **Backtest**.
 
 ### 6.1 Sous-onglet "Backtest"
 
-Teste un bot précis (type de bot, devise, exchange, période, capital, paramètres) directement depuis le dashboard, sans terminal — c'est le même moteur que l'outil en ligne de commande `backtest_lab` (voir §8.1), juste avec un formulaire à la place des options en ligne de commande.
+Teste un bot précis (type de bot, devise, exchange, période, capital, paramètres) directement depuis le dashboard, sans terminal — c'est le même moteur que l'outil en ligne de commande `backtest_lab` (voir §9.1), juste avec un formulaire à la place des options en ligne de commande.
 
 | Champ | Explication |
 |---|---|
@@ -271,11 +313,180 @@ Clique sur **"Lancer le test"**. Une barre de progression apparaît pendant l'ex
 
 Sous le rapport, le bouton **"Exporter ces paramètres vers un nouveau bot"** bascule directement vers Configuration → Création avec tous les réglages du test déjà remplis (symbole, timeframe, paramètres de stratégie, gestion du risque, filtres avancés) — reste à donner un nom et vérifier le plafond de mise avant de lancer. Grisé pour "Retour à la moyenne" et "Market making", pas encore créables depuis un formulaire (YAML uniquement).
 
+**Graphique en chandelles (2026-09-16, demandé par l'utilisateur)** — pour un test sur une **période unique** (Sous-périodes = 1), un graphique apparaît sous le rapport : les vraies bougies (ouverture/plus haut/plus bas/clôture) de la période testée, avec un triangle vert à chaque achat et un triangle rouge à chaque vente ; un cercle marque une position encore ouverte en fin de période. Deux curseurs "Début de la fenêtre (%)"/"Fin de la fenêtre (%)" permettent de zoomer sur une plage précise sans relancer le test (pratique pour examiner un trade en détail), et une case à cocher permet de basculer entre l'affichage en bougies et une simple courbe de clôture. **Absent en mode "Sous-périodes" > 1** : il faudrait un graphique par sous-période, pas encore implémenté.
+
+**Mesure de pente au clic (2026-09-16, demandé par l'utilisateur)** — directement sur le graphique, sans bouton : clique sur une 1<sup>re</sup> bougie, puis sur une 2<sup>e</sup>, et la variation de clôture entre les deux s'affiche automatiquement (en %, coloré vert si positif/rouge si négatif) dans un encart sous le graphique, avec les deux points reliés par un trait pointillé sur le graphique lui-même. Un 3<sup>e</sup> clic recommence une nouvelle mesure. Pratique pour vérifier la pente réelle entre 2 points précis (par exemple pour comparer au seuil réglé pour "Détecteur de pente", §5.3). ⚠️ Si le graphique est très zoomé arrière, chaque point cliquable peut représenter plusieurs bougies réelles regroupées (voir ci-dessus) — zoomer avant de mesurer donne un résultat plus précis.
+
 ⚠️ Le premier test sur une devise/timeframe jamais utilisée peut prendre du temps (téléchargement de l'historique) — les tests suivants sur la même combinaison sont quasi instantanés (mis en cache localement). Comme pour `optimize`, un bon résultat sur une période passée n'est jamais une garantie pour l'avenir. Le filtre de tendance (EMA) et le sizing ATR démarrent "à froid" en backtest (pas d'historique avant la période testée pour les réchauffer, contrairement au paper trading) — leurs tout premiers effets dans le test peuvent donc différer légèrement d'un bot réel déjà rodé.
 
 ---
 
-## 7. Outil complémentaire : trouver une crypto tendance
+## 7. Onglet "Investissement"
+
+Cet onglet gère un type de bot à part, qui ne ressemble pas aux autres : au
+lieu d'essayer de repérer le bon moment pour acheter, il **verse une somme
+fixe chaque mois** sur une répartition d'actions que tu as choisie, et **ne
+vend jamais parce que ça baisse**.
+
+Pourquoi ce choix : toutes les recherches menées dans ce projet (sur les
+cryptos comme sur les actions, jusqu'à 972 combinaisons testées d'un coup)
+donnent le même résultat une fois vérifiées sur des périodes que le réglage
+n'a pas servi à choisir — aucune stratégie testée ne fait mieux, de façon
+reproductible, qu'un panier diversifié acheté et gardé. Ce bot ne prétend
+donc pas battre le marché. Il automatise seulement les trois choses qui
+améliorent vraiment un résultat sans avoir besoin de deviner quoi que ce
+soit : verser régulièrement sans se demander si « c'est le bon moment »,
+revenir vers la répartition visée, et mesurer honnêtement.
+
+> **Argent fictif uniquement.** Comme les bots actions classiques, il passe
+> ses ordres sur le compte **paper** d'Interactive Brokers. Les ports du
+> compte réel sont refusés par le logiciel lui-même.
+
+### 7.1 Sous-onglet "Suivi"
+
+Une fiche par bot, avec :
+
+- **Total versé** : la somme de tous tes versements mensuels.
+- **Valeur** et **Gain** : ce que ça vaut aujourd'hui, et l'écart.
+- **Rendement / an** : le rendement annuel *pondéré par les flux*. C'est
+  important : comme tu ajoutes de l'argent au fil des mois, un simple
+  « pourcentage de gain » serait trompeur (l'argent versé le mois dernier
+  n'a pas eu le temps de travailler). Ce calcul en tient compte.
+- **Baisse max subie** : la pire chute traversée depuis le début. À regarder
+  en face — sur le panier donné en exemple, elle atteint 50 %.
+- **Frais payés** : cumul réel. Avec de petits versements, les frais sont un
+  poste qui compte vraiment.
+- **Le tableau des lignes** : combien de titres tu détiens, leur valeur, le
+  poids **réel** de chaque ligne et son poids **cible**, et l'écart entre
+  les deux (affiché en rouge s'il sort de la bande de tolérance).
+
+La valorisation utilise les **derniers cours connus**, c'est-à-dire ceux du
+dernier passage du bot, pas le cours de la seconde : ce bot n'agit qu'une
+fois par mois, l'afficher en direct n'aurait pas de sens. La date est
+indiquée sous le tableau.
+
+Deux boutons :
+
+- **« Simuler le passage du jour »** : montre exactement ce que le bot
+  ferait aujourd'hui (quels ordres, à quel prix, ce qu'il resterait en
+  liquidités). **N'envoie rien et n'enregistre rien** — tu peux le lancer
+  autant de fois que tu veux, ça ne consomme pas le versement du mois. Ça
+  fonctionne même sans TWS installé.
+- **« Exécuter réellement (compte paper) »** : passe les ordres pour de
+  vrai sur le compte paper. Demande une confirmation. Nécessite TWS ou IB
+  Gateway lancé et connecté en mode paper.
+
+Relancer l'exécution deux fois dans le même mois ne verse **pas** deux fois :
+le versement est enregistré par mois, une bonne fois pour toutes.
+
+> **Deux choses à savoir avant de cliquer « Exécuter réellement ».**
+>
+> **Le suivi peut afficher du faux si un ordre se passe mal.** C'est arrivé
+> le 18/09/2026 : le courtier avait bien acheté deux actions mais annonçait
+> « ordre annulé », et le bot a enregistré un portefeuille vide avec de
+> l'argent qu'il n'avait plus. Le bot croit désormais les **exécutions** du
+> courtier plutôt que son message de statut, et te signale l'incohérence.
+> Par sécurité, il compare aussi ses positions à celles du courtier avant
+> chaque exécution, et **refuse de passer le moindre ordre** en cas d'écart.
+>
+> **Le compte paper ne facture aucune commission.** Le vrai courtier prend
+> 3 € minimum par ordre ; le paper ne prélève rien. Tes résultats en paper
+> seront donc **meilleurs que la réalité**, exactement du montant des frais.
+> C'est pour ça que le champ « Frais minimum » existe : il sert à ce que le
+> suivi reste honnête même quand le courtier ne prélève rien.
+
+### 7.1 bis Ce que montre l'écran, et ce que tu peux y faire
+
+**Le graphique du haut** compare les six lignes du panier. Chacune part de
+0 % au début de la période choisie (1 mois à 5 ans). C'est fait exprès :
+comparer un cours de 7 € et un de 400 € côte à côte n'apprendrait rien, alors
+qu'en pourcentage d'évolution ils se comparent vraiment. La légende donne le
+nom de chaque ligne et sa performance sur la période ; survole une courbe pour
+retrouver son nom.
+
+**Une carte par action**, avec :
+
+- Le **cours actuel**, et ton gain ou ta perte sur cette ligne.
+- Le **prix de revient** : ce que l'action t'a réellement coûté en moyenne,
+  frais compris. C'est la seule référence qui compte — un cours de 79 € ne dit
+  rien tant qu'on ne sait pas si tu as payé 70 ou 85. Il apparaît aussi en
+  pointillés sur la petite courbe.
+- La **barre d'allocation** : la part réelle de cette ligne dans ton panier,
+  avec un repère vertical sur la part visée. L'écart passe en orange s'il
+  dépasse ta bande de tolérance.
+
+**Les boutons**, du plus anodin au plus engageant :
+
+- **− / + et « Montant exact… »** changent ton versement mensuel. Ça s'applique
+  au prochain versement, rien n'est engagé sur le coup. En dessous de 50 €/mois
+  un avertissement s'affiche : les 3 € de frais par ordre dépasseraient 6 % de
+  ton versement.
+- **« Vendre la moitié » / « Tout vendre »** sur chaque carte passent un
+  **vrai ordre** sur le compte paper, hors du versement mensuel. Une
+  confirmation te le rappelle. Hors des heures d'ouverture de la place,
+  l'ordre est refusé et te le dit. Vendre ne rend **pas** le versement du mois
+  à nouveau disponible.
+- **« Remettre le panier à zéro »** efface les positions, les ordres et les
+  versements enregistrés du bot — le versement du mois redevient disponible.
+  L'historique est **sauvegardé** dans un fichier de secours, rien n'est perdu
+  définitivement. **Attention** : ce bouton ne vend rien. Les actions restent
+  chez le courtier, et le bot refusera de passer des ordres tant que ses
+  comptes ne correspondent pas aux siens. Vends d'abord, remets à zéro ensuite.
+
+Le tableau de chiffres d'avant est toujours là, replié sous
+« Tableau détaillé des lignes ».
+
+### 7.2 Sous-onglet "Réglages"
+
+Pour créer un bot, choisis « + Nouveau bot », sinon sélectionne un bot
+existant pour le modifier ou le supprimer.
+
+- **Allocation cible** : une ligne par action, avec un poids. Les poids sont
+  relatifs — `1 / 1 / 1` donne trois lignes égales, `2 / 1` donne deux tiers
+  / un tiers. **C'est le réglage le plus important de toute la page** : il
+  pèse bien plus lourd sur ton résultat que tous les autres réunis. Le
+  panier proposé par défaut est très concentré (grandes valeurs Euronext
+  françaises et néerlandaises, aucune diversification géographique) — il
+  sert d'exemple, pas de conseil.
+- **Versement mensuel** : prélevé au premier jour d'ouverture de chaque mois.
+- **Ordre minimum** : en dessous de ce montant, aucun ordre n'est passé et
+  l'argent attend le mois suivant. Utile parce qu'un petit ordre paie
+  proportionnellement beaucoup de frais.
+- **Répartition du versement** : « concentrer sur les lignes en retard » ou
+  « répartir selon les poids cibles ». Les deux donnent le même rendement
+  (vérifié sur 6 périodes). Mais répartir 200 € sur 6 lignes fait 33 € par
+  ligne, souvent moins que le prix d'une seule action : l'argent reste alors
+  en attente. D'où le choix de concentrer par défaut pour de petits
+  versements.
+- **Bande de tolérance** : si une ligne s'écarte de plus de N points de sa
+  cible, le bot allège ce qui a trop monté pour racheter ce qui est en
+  retard. Laisse vide pour ne jamais vendre. **Laissée vide par défaut
+  depuis le 2026-09-18** : une fois les frais réels du courtier mesurés
+  (3 € minimum par ordre, plus 0,4 % de taxe sur chaque rachat), rééquilibrer
+  s'est révélé coûter 2 à 4 points de rendement par an — mesuré sur quatre
+  dates de départ différentes, à chaque fois perdant. La raison est simple :
+  rééquilibrer vend ce qui monte pour racheter ce qui baisse, et paie des
+  frais aux deux bouts. Tu ne verras donc plus de ventes dans le suivi, sauf
+  si tu remets une valeur ici.
+- **Intervalle minimum** : au plus un rééquilibrage tous les N jours (90 =
+  une fois par trimestre). Ce plafond n'est pas cosmétique : sans lui, le
+  bot rééquilibre tous les jours et les frais dévorent les versements.
+- **Frais** : le pourcentage par ordre, et surtout le **minimum par ordre**.
+  **Mesuré le 2026-09-18 sur le compte réel : 3,00 €** sur Euronext Paris
+  (le manuel indiquait auparavant 1,25 €, une estimation 2,4 fois trop
+  basse). C'est ce minimum qui décide tout pour de petits montants : sur un
+  ordre de 200 €, il représente 1,5 %. Ajoute la taxe française de 0,4 % à
+  l'achat, et un aller-retour coûte 3,4 % avant même que le cours ait bougé.
+  C'est pourquoi ce bot achète et conserve au lieu de tourner.
+- **Port IBKR** : 7497 pour TWS, **4002 pour IB Gateway** (c'est ce que tu
+  utilises). Tous deux en mode paper.
+
+Supprimer un bot retire sa configuration mais **conserve son historique**
+de versements et d'ordres dans `data/`.
+
+---
+
+## 8. Outil complémentaire : trouver une crypto tendance
 
 Ce n'est pas dans le dashboard — à lancer depuis un terminal :
 
@@ -287,7 +498,7 @@ Affiche les plus fortes hausses, baisses et volumes du moment sur Binance, avec 
 
 ---
 
-## 8. Outil complémentaire : rechercher les meilleurs paramètres
+## 9. Outil complémentaire : rechercher les meilleurs paramètres
 
 Toujours en terminal, pas dans le dashboard :
 
@@ -305,9 +516,9 @@ Teste automatiquement ~960 combinaisons de paramètres par paire pour les deux s
 
 ⚠️ **Ça reste un point de départ, pas une certitude.** Même validé sur une période de test, un résultat historique ne garantit rien pour l'avenir — les conditions de marché changent. **Traite toujours le résultat comme un point de départ à valider en mode paper pendant plusieurs jours, jamais comme une certitude.**
 
-### 8.1 Tester un bot précis sur une période choisie (backtest_lab)
+### 9.1 Tester un bot précis sur une période choisie (backtest_lab)
 
-Toujours en terminal — le dashboard propose désormais la même chose via un formulaire (onglet Test → Backtest, voir §6.1), pratique quand tu n'as pas de terminal sous la main. La version terminal reste utile pour scripter/automatiser un test ou en garder une trace exacte rejouable. Contrairement à `optimize` (§8, qui teste des centaines de combinaisons automatiquement) et `reoptimizer` (§8.2 ci-dessous), cet outil sert à tester **un seul bot bien précis**, avec **des paramètres et une période que tu choisis toi-même**, et à obtenir un rapport simple à la fin — utile pour rejouer un test exact plutôt que de laisser des scripts jetables s'accumuler.
+Toujours en terminal — le dashboard propose désormais la même chose via un formulaire (onglet Test → Backtest, voir §6.1), pratique quand tu n'as pas de terminal sous la main. La version terminal reste utile pour scripter/automatiser un test ou en garder une trace exacte rejouable. Contrairement à `optimize` (§9, qui teste des centaines de combinaisons automatiquement) et `reoptimizer` (§9.2 ci-dessous), cet outil sert à tester **un seul bot bien précis**, avec **des paramètres et une période que tu choisis toi-même**, et à obtenir un rapport simple à la fin — utile pour rejouer un test exact plutôt que de laisser des scripts jetables s'accumuler.
 
 **Mode questions/réponses**, le plus simple :
 
@@ -336,7 +547,7 @@ Le rapport liste alors chaque sous-période avec son propre rendement et sa comp
 
 ⚠️ Comme pour `optimize`, un bon résultat sur une période passée n'est jamais une garantie pour l'avenir — c'est un outil de test, pas une prédiction.
 
-### 8.2 Réoptimisation automatique périodique (propositions)
+### 9.2 Réoptimisation automatique périodique (propositions)
 
 **Depuis le dashboard**, dans l'onglet "⚙ Configuration" → sous-onglet "Supervision", clique sur **"Lancer la réoptimisation de tous les bots"** en haut de la section "Propositions de réoptimisation". Ça vérifie tous les bots en une fois (peut prendre plusieurs minutes) ; les résultats apparaissent au fil de l'eau dans le tableau juste en dessous, rafraîchi automatiquement toutes les 15s.
 
@@ -347,7 +558,7 @@ Le rapport liste alors chaque sous-période avec son propre rendement et sa comp
 .venv/Scripts/python -m tradingbot.reoptimizer --all
 ```
 
-Vérifie si un bot existant pourrait être amélioré : relance la même recherche que l'outil `optimize` (§8, y compris le sizing ATR maintenant inclus dans la recherche), mais compare le résultat à la config **actuellement déployée** de ce bot précis, sur la même période de validation.
+Vérifie si un bot existant pourrait être amélioré : relance la même recherche que l'outil `optimize` (§9, y compris le sizing ATR maintenant inclus dans la recherche), mais compare le résultat à la config **actuellement déployée** de ce bot précis, sur la même période de validation.
 
 **Deux groupes de bots, pour mesurer si ça sert vraiment à quelque chose** : chaque bot est classé une fois pour toutes dans un groupe "auto" ou "control" (visible dans le tableau des propositions), à parts égales :
 - Groupe **"control"** : la proposition apparaît normalement dans le tableau avec les boutons **Appliquer**/**Rejeter** — c'est toi qui décides.
@@ -362,7 +573,7 @@ Vérifie si un bot existant pourrait être amélioré : relance la même recherc
 
 ---
 
-## 9. Dépannage
+## 10. Dépannage
 
 | Problème | Solution |
 |---|---|
@@ -373,6 +584,31 @@ Vérifie si un bot existant pourrait être amélioré : relance la même recherc
 | L'onglet Test → Backtest affiche un menu "Type de bot" vide | Le serveur de contrôle tourne encore avec une ancienne version (avant l'ajout de l'onglet Test) — redémarre `start_control_server.bat` |
 
 ---
+
+## 8. Onglet « 🖐 Manuel » : acheter et vendre à la main
+
+Un panier **à part** : son capital est celui que tu y verses avec le bouton
+« Verser », il ne touche pas au panier commun des bots. Les ordres partent
+**pour de vrai** sur le testnet Binance — argent fictif, mais cours réels,
+mêmes arrondis et mêmes limites de paire que les bots (DOGE s'achète en
+unités entières, par exemple).
+
+**Pour passer un ordre** : choisis Acheter ou Vendre, la paire, puis le
+montant en USDT (achat) ou la quantité (vente). Les boutons 25 % / 50 % /
+75 % / Tout remplissent le champ à partir de ton cash ou de ta position.
+L'estimation sous le champ te dit ce que tu vas obtenir, frais compris. Une
+confirmation te rappelle que l'ordre est réel.
+
+**Ce que le panier t'empêche de faire** : acheter plus que ton cash, acheter
+plus que ce que le compte testnet a réellement de libre (il est partagé avec
+les bots), vendre plus que tu ne détiens. Dans ces cas l'ordre est refusé
+avant même de partir, et la raison s'affiche.
+
+**Positions** : quantité, prix de revient (frais inclus), cours, valeur et
+gain ou perte. « Tout vendre » liquide la ligne au marché.
+
+**Remettre le panier à zéro** efface le registre après l'avoir sauvegardé. Ça
+ne vend rien : si tu veux repartir sans position, vends d'abord.
 
 ## Historique des changements de l'interface
 
@@ -426,3 +662,19 @@ Vérifie si un bot existant pourrait être amélioré : relance la même recherc
 | 2026-09-15 | Le stop-loss de "Rebond de creux" redevient réglable (formulaire de création §5.2 et Test → Backtest §6.1), demandé par l'utilisateur après avoir constaté empiriquement le risque concret de positions bloquées des mois en perte latente sans lui. Reste vide/désactivé par défaut (comportement historique inchangé) — une valeur saisie l'active en plus du verrou de gain |
 | 2026-09-15 | Ajout du bouton "Exporter ces paramètres vers un nouveau bot" sous le rapport de l'onglet Test → Backtest (§6.1), demandé par l'utilisateur pour ne pas avoir à retaper à la main une config qui a donné un bon résultat en test — bascule vers Configuration → Création avec le formulaire pré-rempli |
 | 2026-09-15 | Ajout d'une barre de progression pendant l'exécution d'un backtest (§6.1), demandée par l'utilisateur — animée pendant le téléchargement/une simulation unique, avec un vrai pourcentage par sous-période en mode "Sous-périodes" > 1 |
+| 2026-09-16 | Ajout de la stratégie "Creux vs moyenne (5 min, sans verrou)" dans le formulaire de création (§5.1/5.3), proposée par l'utilisateur après observation du graphique en direct — détecte un creux comme un écart à la moyenne mobile (pas une proximité à un plus bas glissant), Timeframe verrouillé sur 5 minutes, Stop-loss rendu obligatoire (pas de verrou de gain pour cette stratégie) |
+| 2026-09-16 | "Positions simultanées max" (formulaire de création et Test → Backtest) se pré-remplit désormais à 10 dès que "Creux vs moyenne" est sélectionné, suite à un constat réel : avec 1 seule position autorisée (défaut générique), cette stratégie restait quasi inactive |
+| 2026-09-16 | Ajout de la stratégie "Détecteur de pente (1 min, trailing 5%)" dans le formulaire de création (§5.1/5.3), idée directe de l'utilisateur ("un détecteur de pente... on vend sur le trailing à 5%") — achète sur une chute brutale entre 2 bougies 1 minute consécutives, Timeframe verrouillé sur 1 minute, Trailing stop pré-rempli à 5% (sauf valeur déjà saisie), Stop-loss optionnel comme "Rebond de creux" |
+| 2026-09-16 | Nouveau champ "Nombre de bougies pour mesurer la pente" pour "Détecteur de pente" (§5.3), suite à l'observation d'un graphique réel où plusieurs achats étaient en fait partis sur une tendance baissière continue — permet de mesurer la pente sur plus de 2 bougies (2 par défaut, comportement inchangé) pour lisser le bruit d'1 minute |
+| 2026-09-16 | Nouvelle case "Limiter à 1 achat par pente continue" pour "Détecteur de pente" (§5.3), constat réel de l'utilisateur ("ça foire pendant les longues pentes") — évite d'empiler un achat à chaque bougie qualifiante sur la même tendance baissière continue ; décochée par défaut |
+| 2026-09-16 | Nouveau graphique en chandelles sous le rapport de l'onglet Test → Backtest (§6.1), demandé par l'utilisateur — affiche les vraies bougies avec les achats/ventes marqués, curseurs de zoom ajustables et bascule bougies/courbe ; disponible uniquement pour un test sur une période unique (pas en mode "Sous-périodes" > 1) |
+| 2026-09-16 | Mesure de pente au clic sur ce nouveau graphique (§6.1), demandé par l'utilisateur ("cliquer sur 2 bougies... sans bouton") — 2 clics suffisent : le 1er pose un point, le 2e calcule et affiche la variation de clôture entre les deux, avec un segment tracé entre les points sur le graphique |
+| 2026-09-16 | Nouveau champ "Type de compte" dans le formulaire de création (§5.2), demandé par l'utilisateur ("configurer des bots qui peuvent investir avec une PEA ou un CTO") — "Actions (paper trading Interactive Brokers)" permet de créer un bot sur une vraie action en argent fictif, en plus des bots crypto existants. Nécessite TWS/IB Gateway installé (voir l'encadré §5.2) ; nouvelle stratégie "Rebond de creux - journalier" avec fenêtre de tendance réglable |
+| 2026-09-17 | Le champ Symbole affiche désormais une liste déroulante de 11 actions courantes (TotalEnergies, Orange, Société Générale, Renault, Air France-KLM, ArcelorMittal, Air Liquide, LVMH, L'Oréal, Sanofi, BNP Paribas) quand "Type de compte" = "Actions", demandé par l'utilisateur ("que je puisse sélectionner les actions avec une liste") — "Autre..." reste disponible pour un ticker non listé, comme pour les cryptos |
+| 2026-09-19 | **Nouvel onglet « 🖐 Manuel »**, demandé par l'utilisateur ("une interface de trade manuel, bouton achat, vente avec un panier à part", en paper). Panier à capital propre, ordres réels sur le testnet, estimation avant envoi, positions avec gain latent, historique. Voir §8 |
+| 2026-09-18 | **Onglet Investissement repensé**, demandé par l'utilisateur ("une interface digne de ce nom pour visualiser les actions achetées, le cours des actions... avec des boutons pour vendre plus tôt, reset le panier, augmenter le plafond"). Le tableau de chiffres laisse la place à un **graphique comparatif** des six lignes (toutes ramenées à 0 % au début de la période, seule façon de comparer des cours de 7 € et de 400 €) avec un sélecteur 1 mois à 5 ans, et à **une carte par action** : cours, gain calculé sur le prix de revient réel frais compris, courbe miniature avec ce prix en pointillés, et barre d'allocation réelle vs cible. Trois nouvelles actions : **vendre la moitié ou tout** d'une ligne, **remettre le panier à zéro** (sauvegarde l'historique, ne vend rien), et **ajuster le plafond mensuel** par − / + ou montant exact. Le tableau d'avant reste accessible, replié. Voir §7.1 bis |
+| 2026-09-18 | **Correction d'un défaut sérieux du bouton « Exécuter réellement »**, découvert parce que tu l'avais cliqué. Interactive Brokers avait bien acheté 1 action TotalEnergies et 1 Société Générale, mais renvoyait à tort « ordre annulé » — le bot a donc enregistré deux ordres rejetés, un portefeuille vide et 200 € de liquidités qu'il n'avait plus. Le suivi affichait donc du faux. Le bot croit désormais les **exécutions** du courtier plutôt que le statut annoncé, et signale l'incohérence quand elle se produit. À savoir aussi : le **compte paper ne facture aucune commission**, alors que le vrai courtier en prend 3 € minimum par ordre — tes résultats en paper sont donc meilleurs que la réalité, de ce montant. Voir §7 |
+| 2026-09-18 | **Frais réels du courtier mesurés**, après branchement du vrai compte Interactive Brokers. Le minimum par ordre est de **3,00 €** et non 1,25 € comme estimé jusqu'ici, et la taxe française de 0,4 % à l'achat était absente des calculs. Conséquences visibles : le **rééquilibrage est désactivé** dans le bot d'investissement (mesuré perdant de 2 à 4 points de rendement par an sur quatre dates de départ, car il vend ce qui monte et paie des frais aux deux bouts) — tu ne verras donc plus de ventes dans le suivi ; le champ **Frais minimum** affiche désormais 3,00 € ; le **port IBKR** passe à 4002 (IB Gateway). Voir §7 |
+| 2026-09-17 | **Nouvel onglet principal « 💰 Investissement »**, demandé par l'utilisateur ("créer une fenêtre séparée dans le dashboard pour pouvoir gérer tout ça") — gère les bots d'investissement régulier (versements mensuels sur une allocation cible, sans stop-loss), avec deux sous-onglets : **Suivi** (total versé, valeur, gain, rendement annualisé, baisse maximale subie, frais, allocation réelle vs cible ligne par ligne, et deux boutons « Simuler le passage du jour » / « Exécuter réellement ») et **Réglages** (créer, modifier ou supprimer un bot : allocation, versement mensuel, bande de rééquilibrage, frais, port IBKR). Voir §7 |
+| 2026-09-17 | Nouvelle strategie **« Régime de tendance »** dans le formulaire de création (§5.1/5.3), demandée par l'utilisateur (« un modèle rentable en haussier, et si possible aussi en baissier ») — le bot reste investi tant que le cours est au-dessus de sa tendance de fond et passe **tout en liquidités** dès qu'il repasse dessous, contrairement au « Filtre de tendance » qui bloquait seulement les nouveaux achats sans jamais fermer une position. Trois réglages : fenêtre de tendance, marge pour entrer, marge pour sortir (les marges évitent le va-et-vient coûteux autour de la ligne). Stop-loss optionnel : la sortie normale est le retournement de tendance. Mesuré sur ETH : +34,8 % en test hors échantillon contre -35,1 % pour un simple achat conservé, et quasi plat en marché baissier au lieu de -41 %. Gagner de l'argent quand ça baisse reste impossible (le bot ne peut qu'acheter), l'objectif est de ne plus subir |
+| 2026-09-18 | **Rafraîchissement de l'interface**, demandé par l'utilisateur (« rendre l'interface graphique plus jolie, moderne et intuitive »). Cinq changements visibles : (1) le contenu occupe désormais toute la largeur de l'écran au lieu d'être bloqué à 900 px — les tableaux ne sont plus comprimés et respirent, alors que l'en-tête s'étalait déjà sur 1360 px ; (2) les valeurs ne se coupent plus en deux lignes dans les tableaux (« +0,00 » puis « % »), et une alternance de teinte aide à suivre une ligne du regard ; (3) les chiffres clés (capital, gain, valeur) sont plus grands et plus lisibles ; (4) chaque intertitre de section porte un petit filet coloré pour se repérer en balayant la page, et les longs paragraphes d'aide apparaissent en encart plutôt que noyés dans le texte courant ; (5) **une légende explique enfin la pastille verte/rouge** à côté de chaque bot (« actif » / « arrêté »), avec le compte des bots en marche et une infobulle précisant qu'un bot est considéré actif s'il a envoyé des données il y a moins de 3 minutes. Ajout aussi d'une icône d'onglet. Les formulaires restent volontairement bornés en largeur : étalés sur tout l'écran, leurs champs se dispersaient sur six colonnes |

@@ -1,0 +1,20 @@
+name: DCA_EURONEXT
+weights:
+  TTE.PA: 0.16666666666666666
+  ORA.PA: 0.16666666666666666
+  GLE.PA: 0.16666666666666666
+  RNO.PA: 0.16666666666666666
+  AF.PA: 0.16666666666666666
+  MT.AS: 0.16666666666666666
+monthly_contribution: 200.0
+# Reequilibrage DESACTIVE (EF-74) : mesure comme coutant 2 a 4 points de
+# rendement par an sur 4 dates de depart, une fois le plancher de
+# commission reel (3,00 EUR) modelise. Remettre 5.0 pour le reactiver.
+rebalance_band_pct: null
+min_rebalance_interval_days: 90
+min_order_value: 50.0
+fee_pct: 0.001
+fee_fixed: 3.0
+follow_drift_on_contribution: true
+ibkr_host: 127.0.0.1
+ibkr_port: 4002

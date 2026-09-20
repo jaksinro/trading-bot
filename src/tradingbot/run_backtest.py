@@ -10,7 +10,7 @@ import yaml
 
 from tradingbot.analysis.atr_sizer import AtrSizer
 from tradingbot.analysis.trend_filter import TrendFilter
-from tradingbot.data_feed import fetch_historical_candles
+from tradingbot.data_feed import fetch_historical_candles, filter_candles, parse_iso_to_ms
 from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
 from tradingbot.mm_engine import MarketMakingEngine
@@ -20,8 +20,11 @@ from tradingbot.risk.risk_manager import MarketMakingConfig, RiskConfig, RiskMan
 from tradingbot.strategies.buy_and_hold import BuyAndHoldStrategy
 from tradingbot.strategies.dip_bounce import DipBounceStrategy
 from tradingbot.strategies.market_making import MarketMakingStrategy
+from tradingbot.strategies.mean_dip import MeanDipStrategy
 from tradingbot.strategies.mean_reversion import MeanReversionStrategy
 from tradingbot.strategies.scalp_dip import ScalpDipStrategy
+from tradingbot.strategies.slope_dip import SlopeDipStrategy
+from tradingbot.strategies.trend_regime import TrendRegimeStrategy
 from tradingbot.strategies.sma_cross import SmaCrossStrategy
 
 STRATEGY_REGISTRY = {
@@ -30,7 +33,10 @@ STRATEGY_REGISTRY = {
     "mean_reversion": MeanReversionStrategy,
     "market_making": MarketMakingStrategy,
     "dip_bounce": DipBounceStrategy,
+    "mean_dip": MeanDipStrategy,
+    "slope_dip": SlopeDipStrategy,
     "buy_and_hold": BuyAndHoldStrategy,
+    "trend_regime": TrendRegimeStrategy,
 }
 
 
@@ -63,12 +69,22 @@ def main(config_path: str) -> None:
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    since_iso = config["backtest"]["since"]
     candles = fetch_historical_candles(
         exchange_id=config["exchange"],
         symbol=config["symbol"],
         timeframe=config["timeframe"],
-        since_iso=config["backtest"]["since"],
+        since_iso=since_iso,
     )
+    # `fetch_historical_candles` renvoie tout le cache local des qu'il couvre
+    # la date demandee (voir sa docstring) - potentiellement PLUS que
+    # `since_iso` si le cache a ete construit avec une periode plus large
+    # auparavant (ex: un sweep de parametres ayant deja tout charge depuis
+    # une date plus ancienne). Filtrer ici est indispensable, pas juste une
+    # precaution : sans ca, un backtest cense commencer a une date precise
+    # (ex: le debut d'une periode de test out-of-sample) se retrouve
+    # silencieusement a rejouer un historique plus long, faussant le resultat.
+    candles = filter_candles(candles, parse_iso_to_ms(since_iso), None)
     print(f"{len(candles)} bougies chargees pour {config['symbol']} ({config['timeframe']})")
 
     strategy = build_strategy(config)

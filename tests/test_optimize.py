@@ -131,18 +131,34 @@ def test_format_candidate_market_making():
 
 
 def test_build_dip_bounce_candidates_shape():
-    """Etape 9 (feuille de route performance) : rebond de creux en tendance
-    haussiere, pas de stop-loss (decision assumee)."""
+    """EF-57 : grille etendue au stop-loss/trailing stop (optionnels depuis
+    EF-55) et au filtre de tendance - plus fige a None/desactive comme avant
+    l'extension du 2026-09-16."""
     candidates = build_dip_bounce_candidates()
     assert len(candidates) > 0
     for c in candidates:
         assert c.strategy_type == "dip_bounce"
         assert "trend_ma_period" in c.params
         assert "dip_threshold_pct" in c.params
-        assert c.risk["stop_loss_pct"] is None
+        assert c.params["force_trade_after_hours"] is None
+        assert c.risk["stop_loss_pct"] in (None, 0.10)
+        assert c.risk["trailing_stop_pct"] in (None, 0.05, 0.08)
         assert c.risk["profit_lock_trigger_pct"] < c.risk["profit_lock_arm_pct"]
-        assert c.trend_filter_ema_period is None
         assert c.atr_sizing_enabled is False
+
+
+def test_build_dip_bounce_candidates_include_stop_loss_and_trailing_variants():
+    candidates = build_dip_bounce_candidates()
+    stop_losses = {c.risk["stop_loss_pct"] for c in candidates}
+    trailing_stops = {c.risk["trailing_stop_pct"] for c in candidates}
+    assert stop_losses == {None, 0.10}
+    assert trailing_stops == {None, 0.05, 0.08}
+
+
+def test_build_dip_bounce_candidates_include_trend_filter_variants():
+    candidates = build_dip_bounce_candidates()
+    ema_periods = {c.trend_filter_ema_period for c in candidates}
+    assert ema_periods == {None, 50, 100, 200, 300}
 
 
 def test_build_strategy_dispatches_dip_bounce():
@@ -166,6 +182,22 @@ def test_format_candidate_dip_bounce():
     text = format_candidate(candidate)
     assert "dip_bounce" in text
     assert "stop_loss=aucun" in text
+
+
+def test_format_candidate_dip_bounce_shows_stop_loss_and_trailing_when_enabled():
+    candidate = Candidate(
+        strategy_type="dip_bounce",
+        params={"trend_ma_period": 24, "dip_threshold_pct": 0.005},
+        risk={
+            "stop_loss_pct": 0.10, "trailing_stop_pct": 0.08,
+            "profit_lock_arm_pct": 0.15, "profit_lock_trigger_pct": 0.12,
+        },
+        trend_filter_ema_period=300,
+    )
+    text = format_candidate(candidate)
+    assert "stop_loss=10%" in text
+    assert "trailing=8%" in text
+    assert "trend_ema=300" in text
 
 
 def test_run_one_backtest_market_making_uses_mm_engine():
@@ -262,13 +294,13 @@ def test_build_sma_cross_candidates_include_trend_filter_variants():
     candidates = build_sma_cross_candidates()
     ema_periods = {c.trend_filter_ema_period for c in candidates}
     assert None in ema_periods  # variante sans filtre toujours presente
-    assert ema_periods == {None, 50, 100, 200}
+    assert ema_periods == {None, 50, 100, 200, 300}
 
 
 def test_build_scalp_dip_candidates_include_trend_filter_variants():
     candidates = build_scalp_dip_candidates()
     ema_periods = {c.trend_filter_ema_period for c in candidates}
-    assert ema_periods == {None, 50, 100, 200}
+    assert ema_periods == {None, 50, 100, 200, 300}
 
 
 def test_build_sma_cross_candidates_include_atr_sizing_variants():
@@ -289,7 +321,7 @@ def test_build_sma_cross_candidates_cover_full_cross_product_of_trend_and_atr():
     l'interaction des deux options (feuille de route, etapes 1 et 2)."""
     candidates = build_sma_cross_candidates()
     combos = {(c.trend_filter_ema_period, c.atr_sizing_enabled) for c in candidates}
-    for ema in [None, 50, 100, 200]:
+    for ema in [None, 50, 100, 200, 300]:
         for atr in [False, True]:
             assert (ema, atr) in combos
 

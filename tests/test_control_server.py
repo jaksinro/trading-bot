@@ -84,6 +84,172 @@ def test_dip_bounce_stop_loss_can_be_explicitly_enabled():
     assert config["risk"]["stop_loss_pct"] == 0.15
 
 
+def test_builds_valid_ibkr_paper_config():
+    """EF-65 : compte 'ibkr_paper' cree un bot actions (paper trading
+    Interactive Brokers) - symbole en format ticker (pas BASE/QUOTE),
+    timeframe force a 1 jour, exchange = 'ibkr_paper' dans la config."""
+    payload = valid_sma_payload(
+        account_type="ibkr_paper", symbol="rno.pa", timeframe="1h",  # timeframe soumis doit etre ignore/force
+    )
+    config = build_config(payload)
+    assert config["exchange"] == "ibkr_paper"
+    assert config["symbol"] == "RNO.PA"
+    assert config["timeframe"] == "1d"  # force, malgre "1h" soumis
+
+
+def test_ibkr_paper_rejects_empty_symbol():
+    payload = valid_sma_payload(account_type="ibkr_paper", symbol="")
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
+def test_ibkr_paper_does_not_require_base_quote_symbol_format():
+    """Un ticker action ('RNO.PA') n'a pas de '/' - ne doit pas etre rejete
+    comme un symbole crypto invalide, et ne doit pas etre valide contre les
+    marches Binance (qui n'a aucun sens ici)."""
+    payload = valid_sma_payload(account_type="ibkr_paper", symbol="RNO.PA")
+    config = build_config(payload)
+    assert config["symbol"] == "RNO.PA"
+
+
+def test_ibkr_paper_rejects_a_strategy_that_forces_an_incompatible_timeframe():
+    """mean_dip force 5m, slope_dip force 1m, dip_bounce_hourly/minute
+    forcent 1h/1m - tous incompatibles avec le paper trading IBKR qui ne
+    gere que des bougies journalieres (run_paper.py::ib_*)."""
+    payload = valid_sma_payload(
+        account_type="ibkr_paper", strategy_type="mean_dip", window="12", num_std="2.0", stop_loss_pct="0.02",
+    )
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
+def test_builds_valid_dip_bounce_daily_config():
+    """EF-65 : nouveau preset dip_bounce pour les actions IBKR - contrairement
+    a dip_bounce_hourly/minute, trend_ma_period est REGLABLE (la recherche
+    empirique STC §3.47 montre qu'il varie fortement d'une action a
+    l'autre) et il n'y a pas de verrou de gain."""
+    payload = valid_sma_payload(
+        account_type="ibkr_paper", strategy_type="dip_bounce_daily",
+        trend_ma_period="10", dip_threshold_pct="0.05", stop_loss_pct="0.08",
+    )
+    config = build_config(payload)
+    assert config["strategy"] == {
+        "type": "dip_bounce", "trend_ma_period": 10, "dip_threshold_pct": 0.05, "force_trade_after_hours": None,
+    }
+    assert config["timeframe"] == "1d"
+    assert config["risk"]["profit_lock_arm_pct"] is None
+    assert config["risk"]["profit_lock_trigger_pct"] is None
+    assert config["risk"]["stop_loss_pct"] == 0.08
+
+
+def test_dip_bounce_daily_stop_loss_is_optional():
+    payload = valid_sma_payload(
+        account_type="ibkr_paper", strategy_type="dip_bounce_daily",
+        trend_ma_period="10", dip_threshold_pct="0.05", stop_loss_pct="",
+    )
+    config = build_config(payload)
+    assert config["risk"]["stop_loss_pct"] is None
+
+
+def test_dip_bounce_daily_rejects_trend_ma_period_below_2():
+    payload = valid_sma_payload(
+        account_type="ibkr_paper", strategy_type="dip_bounce_daily",
+        trend_ma_period="1", dip_threshold_pct="0.05", stop_loss_pct="",
+    )
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
+def test_builds_valid_mean_dip_config():
+    """2026-09-16, idee proposee par l'utilisateur : creux detecte comme un
+    ecart a la moyenne (pas une proximite a un plus bas glissant comme
+    dip_bounce), granularite fine, stop-loss/trailing uniquement (pas de
+    verrou de gain)."""
+    payload = valid_sma_payload(
+        strategy_type="mean_dip", timeframe="1h",  # timeframe soumis doit etre ignore/force
+        window="12", num_std="2.0",
+    )
+    config = build_config(payload)
+    assert config["strategy"] == {"type": "mean_dip", "window": 12, "num_std": 2.0}
+    assert config["timeframe"] == "5m"  # force, malgre "1h" soumis
+    assert config["risk"]["profit_lock_arm_pct"] is None
+    assert config["risk"]["profit_lock_trigger_pct"] is None
+
+
+def test_builds_valid_slope_dip_config():
+    """2026-09-16, idee proposee par l'utilisateur : achete sur une chute
+    brutale entre N bougies consecutives (pente), garde l'ordre, vend
+    uniquement via le trailing stop (stop-loss optionnel en filet)."""
+    payload = valid_sma_payload(
+        strategy_type="slope_dip", timeframe="1h",  # timeframe soumis doit etre ignore/force
+        slope_threshold_pct="0.005", candles_window="2", stop_loss_pct="",
+    )
+    config = build_config(payload)
+    assert config["strategy"] == {
+        "type": "slope_dip", "slope_threshold_pct": 0.005, "candles_window": 2, "one_buy_per_slope": False,
+    }
+    assert config["timeframe"] == "1m"  # force, malgre "1h" soumis
+    assert config["risk"]["stop_loss_pct"] is None  # optionnel, vide reste desactive
+
+
+def test_slope_dip_one_buy_per_slope_can_be_enabled():
+    """2026-09-16, constat reel de l'utilisateur ("sa foire pendant les
+    longues pentes") : limite a 1 achat par episode de pente continue."""
+    payload = valid_sma_payload(
+        strategy_type="slope_dip", slope_threshold_pct="0.005", candles_window="2",
+        stop_loss_pct="", one_buy_per_slope=True,
+    )
+    config = build_config(payload)
+    assert config["strategy"]["one_buy_per_slope"] is True
+
+
+def test_slope_dip_one_buy_per_slope_disabled_by_default():
+    payload = valid_sma_payload(strategy_type="slope_dip", slope_threshold_pct="0.005", candles_window="2", stop_loss_pct="")
+    config = build_config(payload)
+    assert config["strategy"]["one_buy_per_slope"] is False
+
+
+def test_slope_dip_accepts_a_wider_candles_window():
+    """2026-09-16, suite a l'observation du graphique reel d'une journee :
+    mesurer la pente sur plus de 2 bougies (ex: 5) pour lisser le bruit."""
+    payload = valid_sma_payload(strategy_type="slope_dip", slope_threshold_pct="0.005", candles_window="5", stop_loss_pct="")
+    config = build_config(payload)
+    assert config["strategy"]["candles_window"] == 5
+
+
+def test_slope_dip_rejects_candles_window_below_2():
+    payload = valid_sma_payload(strategy_type="slope_dip", slope_threshold_pct="0.005", candles_window="1", stop_loss_pct="")
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
+def test_slope_dip_stop_loss_can_be_explicitly_enabled():
+    payload = valid_sma_payload(strategy_type="slope_dip", slope_threshold_pct="0.005", candles_window="2", stop_loss_pct="0.1")
+    config = build_config(payload)
+    assert config["risk"]["stop_loss_pct"] == 0.1
+
+
+def test_slope_dip_rejects_non_positive_slope_threshold():
+    payload = valid_sma_payload(strategy_type="slope_dip", slope_threshold_pct="0", candles_window="2", stop_loss_pct="")
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
+def test_mean_dip_stop_loss_is_required_not_optional():
+    """Contrairement a dip_bounce : sans verrou de gain ni stop-loss, une
+    position ne se fermerait jamais - le stop-loss reste donc obligatoire
+    pour ce type, comme sma_cross/scalp_dip."""
+    payload = valid_sma_payload(strategy_type="mean_dip", window="12", num_std="2.0", stop_loss_pct="")
+    with pytest.raises(ValueError, match="(?i)stop-loss"):
+        build_config(payload)
+
+
+def test_mean_dip_rejects_window_below_two():
+    payload = valid_sma_payload(strategy_type="mean_dip", window="1", num_std="2.0")
+    with pytest.raises(ValueError):
+        build_config(payload)
+
+
 def test_builds_valid_dip_bounce_minute_config():
     payload = valid_sma_payload(
         strategy_type="dip_bounce_minute", stop_loss_pct="",
@@ -393,3 +559,84 @@ def test_rejects_partial_take_profit_greater_or_equal_to_full_take_profit():
 def test_rejects_partial_take_profit_without_fraction():
     with pytest.raises(ValueError, match="requis"):
         build_config(valid_sma_payload(partial_take_profit_pct="0.01"))
+
+
+# --- EF-80 : les routes GET passent par le VRAI handler HTTP -----------------
+#
+# Le graphique des cryptos a casse sans qu'aucun test ne bronche : un import
+# local ajoute dans `do_GET` pour une autre route avait fait de `parse_qs` une
+# variable locale de toute la fonction, et la route /api/price-history mourait
+# en UnboundLocalError - connexion coupee sans reponse. `fetch_price_history`
+# fonctionnait parfaitement en direct : seul le passage par le handler
+# revelait le defaut. D'ou un serveur reel, sur un port libre, et de vraies
+# requetes HTTP.
+
+import json
+import threading
+import urllib.request
+from http.server import ThreadingHTTPServer
+
+
+class _FakeExchange:
+    def fetch_ohlcv(self, symbol, timeframe, limit):
+        return [[1_700_000_000_000 + i * 60_000, 1, 1, 1, 100.0 + i, 1] for i in range(limit)]
+
+
+@pytest.fixture
+def live_server(monkeypatch):
+    monkeypatch.setattr(control_server, "_public_exchange", _FakeExchange())
+    control_server._price_history_cache.clear()
+    errors = []
+
+    server = ThreadingHTTPServer(("localhost", 0), control_server.Handler)
+    # Une exception dans un thread de requete est normalement avalee par
+    # socketserver : on la capture pour que le test ECHOUE dessus.
+    server.handle_error = lambda request, addr: errors.append(True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    port = server.server_address[1]
+    yield f"http://localhost:{port}", errors
+    server.shutdown()
+
+
+def _get(base: str, path: str):
+    with urllib.request.urlopen(base + path, timeout=10) as response:
+        return response.status, json.loads(response.read())
+
+
+def test_price_history_route_answers_through_the_real_handler(live_server):
+    base, errors = live_server
+
+    status, body = _get(base, "/api/price-history?symbol=ETH%2FUSDT&range=1j")
+
+    assert errors == [], "le handler a leve une exception au lieu de repondre"
+    assert status == 200
+    assert body["points"], "des points de cours attendus"
+    assert body["points"][0][1] == 100.0
+
+
+def test_unknown_price_range_is_a_clean_400_not_a_dropped_connection(live_server):
+    base, errors = live_server
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        _get(base, "/api/price-history?symbol=ETH%2FUSDT&range=1siecle")
+
+    assert exc.value.code == 400
+    assert errors == []
+
+
+def test_every_get_route_either_answers_or_404s_but_never_drops(live_server):
+    """Balaye les routes GET connues : chacune doit produire UNE reponse HTTP.
+    Une connexion fermee sans reponse est le symptome exact du defaut EF-80."""
+    base, errors = live_server
+    routes = [
+        "/api/list-configs", "/api/dca-bots", "/api/list-proposals",
+        "/api/backtest-strategies", "/api/dca-price-history?name=inexistant&days=30",
+        "/api/price-history?symbol=ETH%2FUSDT&range=1mois",
+    ]
+    for route in routes:
+        try:
+            _get(base, route)
+        except urllib.error.HTTPError:
+            pass  # un 4xx/5xx propre est acceptable ; l'absence de reponse ne l'est pas
+    assert errors == [], "au moins une route a leve une exception non geree"
