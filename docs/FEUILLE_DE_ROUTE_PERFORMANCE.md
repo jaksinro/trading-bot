@@ -290,7 +290,9 @@ Suite à la demande de l'utilisateur d'aller plus loin (2026-09-12) :
 
 **Bilan honnête** : implémentation correcte et testée (26 nouveaux tests, 372 au total), mais cette première version simple (spread fixe, skew linéaire, aucune adaptation à la volatilité) n'a pas trouvé d'edge sur ces 4 paires sur cette fenêtre de 3 ans. Piste non explorée ici : élargir le spread en période de forte volatilité (à l'instar de l'ATR sizing, étape 2) pour réduire le risque de sélection adverse en marché fortement trending — les pertes observées (drawdown élevé, consistance négative) sont cohérentes avec ce risque connu du market making naïf en marché directionnel, pas avec un manque de spread capturé.
 
-**Statut** : 🔴 testé, résultat négatif — aucun bot déployé, pas de piste de suite planifiée à ce jour
+**Piste "spread adaptatif à la volatilité" — implémentée le 2026-09-21** (tâche planifiée `lecture-du-plan-et-mise-en-place-dune-feature`) : `MarketMakingStrategy` gère désormais en interne un ATR (même mécanique que `analysis/atr_sizer.py`, calculé sur les bougies précédentes seulement — jamais le high/low de la bougie en cours de cotation, pour ne pas se baser sur une information pas encore connue) et élargit son demi-spread proportionnellement au ratio ATR courant/baseline (borné à `max_spread_multiplier`, ne rétrécit jamais sous le spread configuré). Désactivé par défaut (`volatility_adaptive_spread=False`) — comportement historique inchangé pour les configs existantes. Ajouté comme dimension on/off dans la grille `optimize.py` (`MARKET_MAKING_VOLATILITY_ADAPTIVE_SPREAD_OPTIONS`), 6 nouveaux tests unitaires (`tests/test_market_making_strategy.py`, 766 tests au total). **Non encore validé empiriquement** : nécessite un run complet de `optimize.py` (backtest 3 ans, hors scope de cette tâche) pour savoir si cette variante change le verdict négatif ci-dessus — prochaine étape suggérée pour un futur run.
+
+**Statut** : 🔴 testé, résultat négatif sur la version simple — 🟡 variante "spread adaptatif" implémentée et testée unitairement le 2026-09-21, re-validation empirique (nouveau run `optimize.py`) restant à faire
 
 ---
 

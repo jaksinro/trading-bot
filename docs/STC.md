@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.75 |
-| **Date** | 2026-09-20 |
+| **Version** | 0.76 |
+| **Date** | 2026-09-21 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -89,6 +89,7 @@
 | 0.73 | EF-81 (§3.64) : **panier de trading manuel en paper** - onglet "Manuel", registre local a capital propre (`manual_trading.py`), ordres reels sur le testnet via `PaperExecutor`, achat refuse avant tout ordre si le cash du panier ou le solde testnet (partage avec les bots) ne suffit pas, vente plafonnee a la position, remise a zero par sauvegarde. Verifie par un aller-retour reel sur DOGE. Piege a connaitre : les bots reecrivent `dashboard.html` a chaque cycle, toute evolution du dashboard exige de les redemarrer |
 | 0.74 | EF-82 (§3.65) : **acces au dashboard depuis tout appareil de la maison et deploiement Raspberry Pi**. Le serveur ecoute sur le reseau, la page derive l'adresse du serveur de sa propre origine, script de demarrage + unites systemd + installateur Linux. **Mot de passe obligatoire pour tout client non-local** (403 tant qu'il n'est pas defini, puis HTTP Basic). **Defaut grave corrige** : la detection de processus du verrou anti-doublon ne connaissait que `tasklist` (Windows) et aurait juge tout verrou perime sur Linux - deux instances d'un meme bot auraient pu tourner sur le Pi. Verifie via l'IP reseau du poste. Projet commite et pousse sur GitHub |
 | 0.75 | CT-15bis (§3.66) : **correction mineure du re-optimiseur** - `propose_reoptimization()` n'avancait pas `last_checked_at` quand le bot etait ignore pour position ouverte, si bien qu'un bot souvent en position restait "due" en continu et etait reevalue a chaque lancement de `run_all`/`--all` au lieu d'attendre le prochain intervalle. Corrige : l'etat avance desormais aussi dans ce cas, en conservant un `pending_candidate` deja en attente. Sans consequence sur les propositions deja emises, uniquement sur la frequence des verifications inutiles |
+| 0.76 | Etape 7 piste 2 (§3.67) : **spread adaptatif a la volatilite pour le market making** - `MarketMakingStrategy` elargit son spread (ATR interne, meme mecanique que l'etape 2) quand la volatilite recente depasse la normale, pour reduire le risque de selection adverse en marche trending. Desactive par defaut, integre a la grille `optimize.py`. Mise a jour ATR volontairement APRES le calcul de la cotation de la bougie courante (jamais avant, contrairement a `Engine`) pour ne pas se baser sur un high/low pas encore connu. 6 nouveaux tests, 766 au total. Non encore valide empiriquement (pas de nouveau run `optimize.py`) |
 
 ---
 
@@ -1556,6 +1557,18 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Correction** : la branche "position ouverte" de `propose_reoptimization()` ecrit desormais `state[name] = {**existing_entry, "last_checked_at": now.isoformat()}` avant de retourner - `existing_entry` est fusionne pour ne pas perdre un `pending_candidate` deja enregistre par un cycle precedent (etape 6, piste 3 - confirmation sur deux verifications consecutives, §3.\* "Etape 6"). Sans impact sur les garde-fous existants : la position ouverte reste verifiee deux fois (ici, et a l'application - Garde-fou 3, §3.55) et aucune proposition n'est jamais ecrite dans ce cas.
 
 **Validation** : nouveau test `test_propose_reoptimization_updates_last_checked_at_when_position_open` dans `tests/test_reoptimizer.py`, qui verifie que `last_checked_at` avance ET qu'un `pending_candidate` existant est conserve. Suite complete : **760 tests**.
+
+---
+
+### 3.67 Etape 7 piste 2 (feuille de route performance) : spread adaptatif a la volatilite pour le market making
+
+**Origine** : piste identifiee mais non explorees a la premiere implementation du market making (§3.26, etape 7 - resultat negatif) : "elargir le spread en periode de forte volatilite (a l'instar de l'ATR sizing, etape 2) pour reduire le risque de selection adverse en marche fortement trending". Un market maker cote en continu bid/ask ; en marche fortement directionnel, un cote se fait "traverser" plus souvent que l'autre (l'inventaire se remplit dans le mauvais sens juste avant que le prix continue) - elargir le spread quand la volatilite recente depasse la normale reduit la frequence de ces fills defavorables, au prix de moins de fills captures.
+
+**Implemente** : `strategies/market_making.py::MarketMakingStrategy` gere desormais en interne un `AtrSizer` (meme mecanique que `analysis/atr_sizer.py`, etape 2) quand `volatility_adaptive_spread=True` (defaut `False`, comportement historique inchange). Le demi-spread est multiplie par `ratio = atr / baseline`, borne a `[1.0, max_spread_multiplier]` (defaut 3.0) : ne retrecit jamais sous le spread configure, ne l'elargit jamais au-dela du plafond. **Point d'attention traite explicitement** : l'ATR est mis a jour APRES avoir calcule la cotation de la bougie courante, jamais avant - contrairement a `Engine.process_candle` (qui met a jour son propre `AtrSizer` avant de decider sur la MEME bougie), `MarketMakingStrategy.quote()` documentait deja que seul `candle.open` est connu au moment de coter (le high/low servent a simuler les fills apres coup, voir `mm_engine.py`) ; utiliser le high/low de la bougie en cours pour elargir SA PROPRE cotation aurait constitue un biais d'anticipation (look-ahead). Le spread ne reagit donc qu'a la volatilite des bougies PRECEDENTES, avec un decalage d'une bougie assume.
+
+**Integration** : nouvelle dimension on/off dans la grille de `optimize.py` (`MARKET_MAKING_VOLATILITY_ADAPTIVE_SPREAD_OPTIONS`, meme principe qu'`ATR_SIZING_OPTIONS` pour les strategies directionnelles) - aucun changement necessaire a `mm_engine.py`/`run_backtest.py`/`run_paper.py`/`backtest_lab.py`, la fonctionnalite est entierement encapsulee dans la strategie elle-meme.
+
+**Validation** : 6 nouveaux tests dans `tests/test_market_making_strategy.py` (desactive par defaut, pas d'effet sur la bougie qui cause le pic de volatilite, elargissement mesure sur la bougie SUIVANTE, jamais sous le spread de base, plafond respecte, parametre invalide rejete). Suite complete : **766 tests**. **Non encore valide empiriquement** (pas de nouveau run `optimize.py` sur 3 ans - voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md etape 7) : cette section documente le mecanisme, pas un edge demontre.
 
 ---
 
