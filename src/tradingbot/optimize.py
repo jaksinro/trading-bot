@@ -81,6 +81,15 @@ MARKET_MAKING_MAX_INVENTORY_QUOTE = [200.0, 400.0]
 MARKET_MAKING_SKEW_FACTOR = [0.5, 1.0, 2.0]
 MARKET_MAKING_FEE_PCT = 0.001
 
+# Etape 7 piste 2 (feuille de route performance) : elargissement du spread en
+# periode de forte volatilite (ATR), pour reduire le risque de selection
+# adverse en marche trending - jamais teste jusqu'ici. Simple on/off (meme
+# logique qu'ATR_SIZING_OPTIONS) avec les memes periodes ATR par defaut, pas
+# de grille dediee sur ses propres hyperparametres pour ne pas faire exploser
+# le nombre de combinaisons avant d'avoir un premier signal empirique.
+MARKET_MAKING_VOLATILITY_ADAPTIVE_SPREAD_OPTIONS: list[bool] = [False, True]
+MARKET_MAKING_MAX_SPREAD_MULTIPLIER = 3.0
+
 # Etape 9 (feuille de route performance) : rebond de creux en tendance
 # haussiere, proposee par l'utilisateur - regime (moyenne), creux (min) et
 # objectif de sortie (max) tous derives de la MEME fenetre glissante
@@ -311,16 +320,19 @@ def build_market_making_candidates() -> list[Candidate]:
                 if order_size > max_inventory:
                     continue  # un seul ordre ne peut pas depasser le plafond d'inventaire
                 for skew in MARKET_MAKING_SKEW_FACTOR:
-                    candidates.append(Candidate(
-                        strategy_type="market_making",
-                        params={
-                            "spread_pct": spread,
-                            "order_size_quote": order_size,
-                            "max_inventory_quote": max_inventory,
-                            "skew_factor": skew,
-                        },
-                        risk={"fee_pct": MARKET_MAKING_FEE_PCT},
-                    ))
+                    for vol_adaptive in MARKET_MAKING_VOLATILITY_ADAPTIVE_SPREAD_OPTIONS:
+                        candidates.append(Candidate(
+                            strategy_type="market_making",
+                            params={
+                                "spread_pct": spread,
+                                "order_size_quote": order_size,
+                                "max_inventory_quote": max_inventory,
+                                "skew_factor": skew,
+                                "volatility_adaptive_spread": vol_adaptive,
+                                "max_spread_multiplier": MARKET_MAKING_MAX_SPREAD_MULTIPLIER,
+                            },
+                            risk={"fee_pct": MARKET_MAKING_FEE_PCT},
+                        ))
     return candidates
 
 
@@ -380,10 +392,14 @@ def run_one_backtest(candles, candidate: Candidate) -> BacktestResult | None:
     strategy = build_strategy(candidate)
 
     if candidate.strategy_type == "market_making":
-        # Pas de RiskManager/trend_filter/atr_sizer : ces concepts (sizing en
-        # % de capital, stop-loss, filtre de tendance) sont specifiques aux
-        # strategies directionnelles et n'ont pas de sens pour du market
-        # making (voir mm_engine.py).
+        # Pas de RiskManager/trend_filter/atr_sizer externe : ces concepts
+        # (sizing en % de capital, stop-loss, filtre de tendance) sont
+        # specifiques aux strategies directionnelles et n'ont pas de sens
+        # pour du market making (voir mm_engine.py). L'ATR reste pertinent
+        # ici sous une forme differente : pas pour dimensionner une position,
+        # mais pour elargir le spread cote - gere en interne par
+        # MarketMakingStrategy elle-meme (volatility_adaptive_spread), pas
+        # par un AtrSizer externe passe a l'engine.
         portfolio = Portfolio(starting_capital=STARTING_CAPITAL, fee_pct=candidate.risk.get("fee_pct", MARKET_MAKING_FEE_PCT))
         executor = BacktestExecutor(portfolio)
         engine = MarketMakingEngine(strategy, executor, portfolio)
@@ -430,6 +446,10 @@ def _format_atr_sizing(candidate: Candidate) -> str:
     return ", atr_sizing=on" if candidate.atr_sizing_enabled else ""
 
 
+def _format_vol_adaptive_spread(candidate: Candidate) -> str:
+    return ", spread_adaptatif=on" if candidate.params.get("volatility_adaptive_spread") else ""
+
+
 def _format_stop_loss(risk: dict) -> str:
     return f"{risk['stop_loss_pct']:.0%}" if risk.get("stop_loss_pct") is not None else "aucun"
 
@@ -451,7 +471,8 @@ def format_candidate(candidate: Candidate) -> str:
     if candidate.strategy_type == "market_making":
         return (
             f"market_making(spread={p['spread_pct']:.2%}, ordre={p['order_size_quote']:.0f}, "
-            f"inventaire_max={p['max_inventory_quote']:.0f}, skew={p['skew_factor']})"
+            f"inventaire_max={p['max_inventory_quote']:.0f}, skew={p['skew_factor']}"
+            f"{_format_vol_adaptive_spread(candidate)})"
         )
     if candidate.strategy_type == "dip_bounce":
         return (
@@ -474,6 +495,7 @@ def result_to_config_yaml(result: BacktestResult, name: str) -> str:
         result.candidate.params.get("trend_ma_period", 0),
         result.candidate.trend_filter_ema_period or 0,
         DEFAULT_ATR_BASELINE_PERIOD if result.candidate.atr_sizing_enabled else 0,
+        DEFAULT_ATR_BASELINE_PERIOD if result.candidate.params.get("volatility_adaptive_spread") else 0,
         30,
     )
     config = {
