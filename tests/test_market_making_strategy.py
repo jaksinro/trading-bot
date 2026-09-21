@@ -1,9 +1,15 @@
+import pytest
+
 from tradingbot.strategies.market_making import MarketMakingStrategy
 from tradingbot.types import Candle
 
 
 def make_candle(open_price: float) -> Candle:
     return Candle(timestamp=0, open=open_price, high=open_price, low=open_price, close=open_price, volume=1.0)
+
+
+def make_ohlc_candle(open_price: float, high: float, low: float, close: float) -> Candle:
+    return Candle(timestamp=0, open=open_price, high=high, low=low, close=close, volume=1.0)
 
 
 def test_symmetric_quote_when_inventory_is_zero():
@@ -77,3 +83,79 @@ def test_invalid_max_inventory_quote_raises():
         assert False, "devrait lever ValueError"
     except ValueError:
         pass
+
+
+def test_invalid_max_spread_multiplier_raises():
+    try:
+        MarketMakingStrategy(
+            spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, max_spread_multiplier=0.5
+        )
+        assert False, "devrait lever ValueError"
+    except ValueError:
+        pass
+
+
+def test_volatility_adaptive_spread_disabled_by_default():
+    strategy = MarketMakingStrategy(spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, skew_factor=0.0)
+    # Bougie tres volatile (high/low tres ecartes) : le spread reste inchange tant que
+    # volatility_adaptive_spread=False (comportement historique preserve).
+    quote = strategy.quote(make_ohlc_candle(100.0, 130.0, 70.0, 100.0), inventory=0.0)
+    assert quote.bid_price == 99.5  # 100 * (1 - 0.01/2), comme sans volatilite
+
+
+def test_volatility_adaptive_spread_does_not_widen_the_volatile_candle_itself():
+    """Le high/low de la bougie EN COURS ne doit pas influencer sa propre
+    cotation (pas de lookahead, voir le commentaire de `_spread_multiplier`) -
+    seul l'ATR observe sur les bougies PRECEDENTES peut elargir le spread."""
+    strategy = MarketMakingStrategy(
+        spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, skew_factor=0.0,
+        volatility_adaptive_spread=True, atr_period=2, atr_baseline_period=5, max_spread_multiplier=3.0,
+    )
+    quiet_quote = None
+    for _ in range(5):
+        quiet_quote = strategy.quote(make_ohlc_candle(100.0, 100.2, 99.8, 100.0), inventory=0.0)
+    base_half_spread = 100.0 - quiet_quote.bid_price
+
+    volatile_quote = strategy.quote(make_ohlc_candle(100.0, 110.0, 90.0, 100.0), inventory=0.0)
+    assert (100.0 - volatile_quote.bid_price) == pytest.approx(base_half_spread)
+
+
+def test_volatility_adaptive_spread_widens_after_a_high_volatility_candle():
+    strategy = MarketMakingStrategy(
+        spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, skew_factor=0.0,
+        volatility_adaptive_spread=True, atr_period=2, atr_baseline_period=5, max_spread_multiplier=3.0,
+    )
+    quiet_quote = None
+    for _ in range(5):
+        quiet_quote = strategy.quote(make_ohlc_candle(100.0, 100.2, 99.8, 100.0), inventory=0.0)
+    base_half_spread = 100.0 - quiet_quote.bid_price
+
+    strategy.quote(make_ohlc_candle(100.0, 110.0, 90.0, 100.0), inventory=0.0)  # pic de volatilite
+
+    next_quote = strategy.quote(make_ohlc_candle(100.0, 100.2, 99.8, 100.0), inventory=0.0)
+    assert (100.0 - next_quote.bid_price) > base_half_spread
+
+
+def test_volatility_adaptive_spread_never_narrows_below_base_spread():
+    strategy = MarketMakingStrategy(
+        spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, skew_factor=0.0,
+        volatility_adaptive_spread=True, atr_period=2, atr_baseline_period=5,
+    )
+    # Volatilite decroissante (chaque bougie plus calme que la precedente) :
+    # le multiplicateur ne doit jamais tomber sous 1.0 (spread configure).
+    for high, low in [(105.0, 95.0), (102.0, 98.0), (100.5, 99.5), (100.2, 99.8)]:
+        quote = strategy.quote(make_ohlc_candle(100.0, high, low, 100.0), inventory=0.0)
+        assert (100.0 - quote.bid_price) >= 0.5  # jamais sous le half-spread de base
+
+
+def test_max_spread_multiplier_caps_the_widening():
+    strategy = MarketMakingStrategy(
+        spread_pct=0.01, order_size_quote=100.0, max_inventory_quote=1000.0, skew_factor=0.0,
+        volatility_adaptive_spread=True, atr_period=2, atr_baseline_period=5, max_spread_multiplier=2.0,
+    )
+    for _ in range(5):
+        strategy.quote(make_ohlc_candle(100.0, 100.2, 99.8, 100.0), inventory=0.0)
+    strategy.quote(make_ohlc_candle(100.0, 110.0, 90.0, 100.0), inventory=0.0)  # ratio ATR/baseline bien > 2.0
+
+    capped_quote = strategy.quote(make_ohlc_candle(100.0, 100.2, 99.8, 100.0), inventory=0.0)
+    assert (100.0 - capped_quote.bid_price) == pytest.approx(1.0)  # half_spread(0.5) * multiplicateur plafonne (2.0)
