@@ -53,6 +53,7 @@ from tradingbot.optimize import (
     Candidate,
     _since_iso,
     build_mean_reversion_candidates,
+    build_rsi_range_candidates,
     build_scalp_dip_candidates,
     build_sma_cross_candidates,
     compute_window_consistency,
@@ -235,7 +236,10 @@ def _search_best_out_of_sample(train_candles: list, test_candles: list, symbol: 
     """Reprend la methodologie de `optimize.py` (grille + validation
     out-of-sample) pour une seule paire, et retourne (train, test) du
     MEILLEUR candidat sur la performance de validation."""
-    all_candidates = build_sma_cross_candidates() + build_scalp_dip_candidates() + build_mean_reversion_candidates()
+    all_candidates = (
+        build_sma_cross_candidates() + build_scalp_dip_candidates()
+        + build_mean_reversion_candidates() + build_rsi_range_candidates()
+    )
     train_results = []
     for candidate in all_candidates:
         result = run_one_backtest(train_candles, candidate)

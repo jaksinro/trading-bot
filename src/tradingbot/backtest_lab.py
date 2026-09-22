@@ -107,6 +107,16 @@ PRESETS: dict[str, StrategyPreset] = {
         ],
         risk_param_specs=[], supports_stop_loss=True,
     ),
+    "rsi_range": StrategyPreset(
+        key="rsi_range", label="Range trading par oscillateur RSI",
+        strategy_type="rsi_range", engine="standard", timeframe=None,
+        param_specs=[
+            ParamSpec("period", "Periode RSI (bougies)", 14, int),
+            ParamSpec("oversold", "Seuil de survente", 30.0, float),
+            ParamSpec("overbought", "Seuil de surachat", 70.0, float),
+        ],
+        risk_param_specs=[], supports_stop_loss=True,
+    ),
     "mean_dip": StrategyPreset(
         key="mean_dip", label="Creux vs moyenne mobile (5 min, ~1h, stop-loss + trailing uniquement)",
         strategy_type="mean_dip", engine="standard", timeframe="5m",

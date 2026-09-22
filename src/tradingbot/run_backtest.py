@@ -22,6 +22,7 @@ from tradingbot.strategies.dip_bounce import DipBounceStrategy
 from tradingbot.strategies.market_making import MarketMakingStrategy
 from tradingbot.strategies.mean_dip import MeanDipStrategy
 from tradingbot.strategies.mean_reversion import MeanReversionStrategy
+from tradingbot.strategies.rsi_range import RsiRangeStrategy
 from tradingbot.strategies.scalp_dip import ScalpDipStrategy
 from tradingbot.strategies.slope_dip import SlopeDipStrategy
 from tradingbot.strategies.trend_regime import TrendRegimeStrategy
@@ -31,6 +32,7 @@ STRATEGY_REGISTRY = {
     "sma_cross": SmaCrossStrategy,
     "scalp_dip": ScalpDipStrategy,
     "mean_reversion": MeanReversionStrategy,
+    "rsi_range": RsiRangeStrategy,
     "market_making": MarketMakingStrategy,
     "dip_bounce": DipBounceStrategy,
     "mean_dip": MeanDipStrategy,

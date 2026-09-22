@@ -39,6 +39,7 @@ from tradingbot.risk.risk_manager import RiskConfig, RiskManager
 from tradingbot.strategies.dip_bounce import DipBounceStrategy
 from tradingbot.strategies.market_making import MarketMakingStrategy
 from tradingbot.strategies.mean_reversion import MeanReversionStrategy
+from tradingbot.strategies.rsi_range import RsiRangeStrategy
 from tradingbot.strategies.scalp_dip import ScalpDipStrategy
 from tradingbot.strategies.sma_cross import SmaCrossStrategy
 
@@ -67,6 +68,15 @@ SCALP_TAKE_PROFIT_OPTIONS = [0.005, 0.01, 0.02]
 MEAN_REVERSION_WINDOWS = [10, 20, 30]
 MEAN_REVERSION_NUM_STD = [1.5, 2.0, 2.5]
 MEAN_REVERSION_STOP_LOSS_OPTIONS = [0.02, 0.05]
+
+# Etape 6 (piste 6 bis, feuille de route performance) : deuxieme famille de
+# retour a la moyenne, indicateur de nature differente de MeanReversionStrategy
+# (oscillateur de momentum RSI plutot qu'ecart-type de prix) - voir
+# strategies/rsi_range.py pour la justification de diversification.
+RSI_RANGE_PERIODS = [7, 14, 21]
+RSI_RANGE_OVERSOLD = [20.0, 30.0]
+RSI_RANGE_OVERBOUGHT = [70.0, 80.0]
+RSI_RANGE_STOP_LOSS_OPTIONS = [0.02, 0.05]
 
 # Etape 7 (feuille de route performance) : market making - edge structurel
 # (capture de spread), pas directionnel comme les 3 familles precedentes.
@@ -312,6 +322,28 @@ def build_mean_reversion_candidates() -> list[Candidate]:
     return candidates
 
 
+def build_rsi_range_candidates() -> list[Candidate]:
+    """Pas de filtre de tendance/sizing ATR croise (meme raisonnement que
+    build_mean_reversion_candidates) : un filtre de tendance bloquerait
+    precisement les achats en survente que cette strategie cherche a faire."""
+    candidates = []
+    for period in RSI_RANGE_PERIODS:
+        for oversold in RSI_RANGE_OVERSOLD:
+            for overbought in RSI_RANGE_OVERBOUGHT:
+                for stop_loss in RSI_RANGE_STOP_LOSS_OPTIONS:
+                    candidates.append(Candidate(
+                        strategy_type="rsi_range",
+                        params={"period": period, "oversold": oversold, "overbought": overbought},
+                        risk={
+                            "max_position_size_pct": MAX_POSITION_SIZE_PCT,
+                            "stop_loss_pct": stop_loss,
+                            "take_profit_pct": None,
+                            "max_daily_loss_pct": MAX_DAILY_LOSS_PCT,
+                        },
+                    ))
+    return candidates
+
+
 def build_market_making_candidates() -> list[Candidate]:
     candidates = []
     for spread in MARKET_MAKING_SPREAD_PCT:
@@ -381,6 +413,8 @@ def build_strategy(candidate: Candidate):
         return SmaCrossStrategy(**candidate.params)
     if candidate.strategy_type == "mean_reversion":
         return MeanReversionStrategy(**candidate.params)
+    if candidate.strategy_type == "rsi_range":
+        return RsiRangeStrategy(**candidate.params)
     if candidate.strategy_type == "market_making":
         return MarketMakingStrategy(**candidate.params)
     if candidate.strategy_type == "dip_bounce":
@@ -468,6 +502,11 @@ def format_candidate(candidate: Candidate) -> str:
         )
     if candidate.strategy_type == "mean_reversion":
         return f"mean_reversion(fenetre={p['window']}, ecart_type={p['num_std']}, stop_loss={r['stop_loss_pct']:.0%})"
+    if candidate.strategy_type == "rsi_range":
+        return (
+            f"rsi_range(periode={p['period']}, survente={p['oversold']:.0f}, "
+            f"surachat={p['overbought']:.0f}, stop_loss={r['stop_loss_pct']:.0%})"
+        )
     if candidate.strategy_type == "market_making":
         return (
             f"market_making(spread={p['spread_pct']:.2%}, ordre={p['order_size_quote']:.0f}, "
@@ -492,6 +531,7 @@ def result_to_config_yaml(result: BacktestResult, name: str) -> str:
         result.candidate.params.get("long_window", 0),
         result.candidate.params.get("lookback", 0),
         result.candidate.params.get("window", 0),
+        result.candidate.params.get("period", 0),
         result.candidate.params.get("trend_ma_period", 0),
         result.candidate.trend_filter_ema_period or 0,
         DEFAULT_ATR_BASELINE_PERIOD if result.candidate.atr_sizing_enabled else 0,
@@ -556,7 +596,8 @@ def _fmt_result(r: BacktestResult | None) -> str:
 def main(symbols: list[str]) -> None:
     all_candidates = (
         build_sma_cross_candidates() + build_scalp_dip_candidates()
-        + build_mean_reversion_candidates() + build_market_making_candidates()
+        + build_mean_reversion_candidates() + build_rsi_range_candidates()
+        + build_market_making_candidates()
         + build_dip_bounce_candidates()
     )
     print(f"{len(all_candidates)} combinaisons de parametres a tester par paire, sur {len(symbols)} paire(s).")
