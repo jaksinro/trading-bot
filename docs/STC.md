@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.76 |
-| **Date** | 2026-09-21 |
+| **Version** | 0.77 |
+| **Date** | 2026-09-22 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -90,6 +90,7 @@
 | 0.74 | EF-82 (§3.65) : **acces au dashboard depuis tout appareil de la maison et deploiement Raspberry Pi**. Le serveur ecoute sur le reseau, la page derive l'adresse du serveur de sa propre origine, script de demarrage + unites systemd + installateur Linux. **Mot de passe obligatoire pour tout client non-local** (403 tant qu'il n'est pas defini, puis HTTP Basic). **Defaut grave corrige** : la detection de processus du verrou anti-doublon ne connaissait que `tasklist` (Windows) et aurait juge tout verrou perime sur Linux - deux instances d'un meme bot auraient pu tourner sur le Pi. Verifie via l'IP reseau du poste. Projet commite et pousse sur GitHub |
 | 0.75 | CT-15bis (§3.66) : **correction mineure du re-optimiseur** - `propose_reoptimization()` n'avancait pas `last_checked_at` quand le bot etait ignore pour position ouverte, si bien qu'un bot souvent en position restait "due" en continu et etait reevalue a chaque lancement de `run_all`/`--all` au lieu d'attendre le prochain intervalle. Corrige : l'etat avance desormais aussi dans ce cas, en conservant un `pending_candidate` deja en attente. Sans consequence sur les propositions deja emises, uniquement sur la frequence des verifications inutiles |
 | 0.76 | Etape 7 piste 2 (§3.67) : **spread adaptatif a la volatilite pour le market making** - `MarketMakingStrategy` elargit son spread (ATR interne, meme mecanique que l'etape 2) quand la volatilite recente depasse la normale, pour reduire le risque de selection adverse en marche trending. Desactive par defaut, integre a la grille `optimize.py`. Mise a jour ATR volontairement APRES le calcul de la cotation de la bougie courante (jamais avant, contrairement a `Engine`) pour ne pas se baser sur un high/low pas encore connu. 6 nouveaux tests, 766 au total. Non encore valide empiriquement (pas de nouveau run `optimize.py`) |
+| 0.77 | Etape 6 piste 6 bis (§3.68) : **`RsiRangeStrategy`**, nouvelle famille de retour a la moyenne par oscillateur RSI (momentum) plutot qu'ecart-type de prix comme `MeanReversionStrategy` - piste "elargir a d'autres familles de strategies" explicitement identifiee comme non exploree dans docs/FEUILLE_DE_ROUTE_PERFORMANCE.md. Integree a `optimize.py` (grille de 24 combinaisons), `run_backtest.py`/`run_paper.py` (STRATEGY_REGISTRY), au reoptimiseur hebdomadaire et au lab manuel (`backtest_lab.py`). 7 nouveaux tests, 773 au total. Non encore validee empiriquement (pas de run `optimize.py` sur 3 ans) |
 
 ---
 
@@ -1569,6 +1570,20 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Integration** : nouvelle dimension on/off dans la grille de `optimize.py` (`MARKET_MAKING_VOLATILITY_ADAPTIVE_SPREAD_OPTIONS`, meme principe qu'`ATR_SIZING_OPTIONS` pour les strategies directionnelles) - aucun changement necessaire a `mm_engine.py`/`run_backtest.py`/`run_paper.py`/`backtest_lab.py`, la fonctionnalite est entierement encapsulee dans la strategie elle-meme.
 
 **Validation** : 6 nouveaux tests dans `tests/test_market_making_strategy.py` (desactive par defaut, pas d'effet sur la bougie qui cause le pic de volatilite, elargissement mesure sur la bougie SUIVANTE, jamais sous le spread de base, plafond respecte, parametre invalide rejete). Suite complete : **766 tests**. **Non encore valide empiriquement** (pas de nouveau run `optimize.py` sur 3 ans - voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md etape 7) : cette section documente le mecanisme, pas un edge demontre.
+
+---
+
+### 3.68 Etape 6 piste 6 bis (feuille de route performance) : `RsiRangeStrategy`, deuxieme famille de retour a la moyenne
+
+**Origine** : bilan de l'etape 6 (§3.\*, `MeanReversionStrategy` par bandes de Bollinger implementee et testee, aucun edge trouve sur les 4 paires sans edge connu) identifiant explicitement une piste non exploree : "elargir la recherche a d'autres familles de strategies (pas seulement bandes de Bollinger pour le mean-reversion)" - voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md, etape 6.
+
+**Choix de conception** : `RsiRangeStrategy` garde le meme pari directionnel que `MeanReversionStrategy` (un exces recent tend a se corriger) mais avec un indicateur de nature differente - un oscillateur de MOMENTUM (RSI, rapport gains/pertes moyens lisses sur une fenetre glissante, borne 0-100) plutot qu'un ecart-type de PRIX. Les deux peuvent diverger sur les memes donnees : le RSI peut rester neutre pendant une baisse lente et reguliere ou les bandes de Bollinger signaleraient deja une survente, et inversement signaler une survente/un surachat que les bandes ne voient pas encore lors d'un mouvement brusque mais bref. Assez distinct pour constituer un vrai test de diversification de familles, pas une reparametrisation du meme indicateur sous un autre nom.
+
+**Implemente** : `strategies/rsi_range.py::RsiRangeStrategy(period=14, oversold=30.0, overbought=70.0)` - RSI calcule en glissant (moyenne simple des gains/pertes sur `period` bougies, formule standard `100 - 100/(1+RS)`), achat quand le RSI descend a `oversold` ou en dessous (survente), vente quand il remonte a `overbought` ou au-dessus (surachat). Pas de filtre de tendance/sizing ATR croise dans la grille (meme raisonnement que `MeanReversionStrategy`, §3.\* etape 6 : un filtre de tendance contredirait precisement le pari d'achat en survente).
+
+**Integration** : `optimize.py::build_rsi_range_candidates()` (24 combinaisons : 3 periodes RSI x 2 seuils de survente x 2 seuils de surachat x 2 stop-loss, sans croisement filtre de tendance/ATR), `run_backtest.py::STRATEGY_REGISTRY` (utilisable en config YAML pour backtest/paper - `run_paper.py` reutilise le meme registre via `build_strategy`), `reoptimizer.py::_search_best_out_of_sample` (recherche hebdomadaire de reoptimisation), `backtest_lab.py::PRESETS` (exploration manuelle). Strategie YAML uniquement, pas creable depuis le formulaire du dashboard (meme perimetre que `mean_reversion`/`market_making`/`funding_arb`).
+
+**Validation** : 7 nouveaux tests dans `tests/test_rsi_range_strategy.py` (pas de signal avant la periode pleine, achat en survente, vente en surachat, pas de double achat en position, pas de signal sur prix plat, parametres invalides rejetes). Suite complete : **773 tests**. **Non encore validee empiriquement** (pas de run `optimize.py` sur 3 ans a ce jour - prochaine etape suggeree pour un futur run, comme pour le spread adaptatif du market making §3.67).
 
 ---
 
