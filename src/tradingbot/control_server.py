@@ -115,7 +115,9 @@ def fetch_price_history(symbol: str, range_key: str, exchange=None) -> list[list
 
     timeframe, limit = PRICE_HISTORY_RANGES[range_key]
     ohlcv = (exchange or _public_exchange).fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-    points = [[int(row[0]), float(row[4])] for row in ohlcv]
+    # [t, cloture, ouverture, haut, bas] : bougies completes pour le graphique
+    # en chandeliers (EF-84) ; index 0/1 inchanges pour les lecteurs existants.
+    points = [[int(row[0]), float(row[4]), float(row[1]), float(row[2]), float(row[3])] for row in ohlcv]
     _price_history_cache[cache_key] = (now, points)
     return points
 

@@ -27,8 +27,9 @@ def test_warm_up_strategy_seeds_price_history():
 
     # 6 lignes recuperees (warmup_candles + 1), la derniere (en cours) exclue -> 5 points.
     assert len(price_history) == 5
-    assert price_history[0] == [4000, 104.0]
-    assert price_history[-1] == [8000, 108.0]
+    # EF-84 : [t, cloture, ouverture, haut, bas] - t et cloture en tete.
+    assert price_history[0] == [4000, 104.0, 104.0, 104.0, 104.0]
+    assert price_history[-1][:2] == [8000, 108.0]
 
 
 def test_warm_up_strategy_works_without_price_history():

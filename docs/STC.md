@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.78 |
+| **Version** | 0.79 |
 | **Date** | 2026-09-22 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -92,6 +92,7 @@
 | 0.76 | Etape 7 piste 2 (§3.67) : **spread adaptatif a la volatilite pour le market making** - `MarketMakingStrategy` elargit son spread (ATR interne, meme mecanique que l'etape 2) quand la volatilite recente depasse la normale, pour reduire le risque de selection adverse en marche trending. Desactive par defaut, integre a la grille `optimize.py`. Mise a jour ATR volontairement APRES le calcul de la cotation de la bougie courante (jamais avant, contrairement a `Engine`) pour ne pas se baser sur un high/low pas encore connu. 6 nouveaux tests, 766 au total. Non encore valide empiriquement (pas de nouveau run `optimize.py`) |
 | 0.77 | Etape 6 piste 6 bis (§3.68) : **`RsiRangeStrategy`**, nouvelle famille de retour a la moyenne par oscillateur RSI (momentum) plutot qu'ecart-type de prix comme `MeanReversionStrategy` - piste "elargir a d'autres familles de strategies" explicitement identifiee comme non exploree dans docs/FEUILLE_DE_ROUTE_PERFORMANCE.md. Integree a `optimize.py` (grille de 24 combinaisons), `run_backtest.py`/`run_paper.py` (STRATEGY_REGISTRY), au reoptimiseur hebdomadaire et au lab manuel (`backtest_lab.py`). 7 nouveaux tests, 773 au total. Non encore validee empiriquement (pas de run `optimize.py` sur 3 ans) |
 | 0.78 | EF-83 (§3.69) : **les bots crypto n'ont jamais pu acheter** - rechauffes sur le testnet, qui ne garde que ~14 jours (339 bougies 1h) pour un besoin de 500/1000/2000, leur strategie restait muette ; redemarres chaque jour, ils ne l'auraient jamais ete. Donnees de marche basculees sur le marche public, ordres toujours sur le testnet ; decisions journalisees en base, console non tamponnee. Verifie : les 3 bots ont achete a la bougie suivante. Les 6 jours de paper precedents ne valident rien |
+| 0.79 | EF-84 (§3.70) : **graphique des bots en chandeliers** avec triangles d'achat/vente, meme fonction de dessin que l'onglet Test (canvas cible en parametre). Historique du bot et `/api/price-history` en bougies completes `[t, cloture, ouverture, haut, bas]`, compatibles avec l'ancien format. Ancien graphique SVG supprime |
 
 ---
 
@@ -1605,6 +1606,20 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Consequence a retenir** : les six jours de paper des bots crypto (17/09 -> 23/09) ne valident RIEN - ils ne tradaient pas. La validation en conditions reelles repart du 23/09.
 
 **Validation** : `tests/test_warmup_depth.py`, 5 tests dont un echange factice a historique court reproduisant la panne exacte (339 bougies pour un besoin de 500 -> strategie muette). Suite complete : **778 tests**.
+
+---
+
+### 3.70 EF-84 : graphique des bots en chandeliers, avec les memes marqueurs que l'onglet Test
+
+**Demande** : "change l'interface du graphique pour ressembler a celui des tests avec les bougies, pareil pour les achats et ventes (avec les triangles)".
+
+**Un seul dessin pour les deux graphiques** : `drawBacktestCandlestickChart` prend desormais le canvas cible en parametre. Le graphique de l'onglet Bot (vue Live et toutes les periodes) passe par la meme fonction que l'onglet Test : bougies vertes/rouges, triangle vert pour un achat, triangle rouge pour une vente, cercle autour de l'achat d'une position encore ouverte. La mesure de pente au clic reste propre a l'onglet Test. L'ancien graphique SVG en courbe (`priceChartSvg`, 87 lignes) et son utilitaire d'axe, sans plus aucun appelant, sont supprimes plutot que laisses morts.
+
+**Donnees** : une bougie a besoin de son ouverture, de son haut et de son bas ; le bot ne gardait que la cloture. L'historique du bot et la reponse de `/api/price-history` passent de `[t, cloture]` a `[t, cloture, ouverture, haut, bas]` - t et cloture restent aux index 0 et 1, donc tout lecteur de l'ancien format continue de fonctionner. Un point ancien sans ouverture/haut/bas (bot pas encore redemarre) fait passer le graphique en courbe plutot que de dessiner des bougies sans corps. Les ordres du bot (entree/sortie horodatees) sont convertis au format des marqueurs de l'onglet Test.
+
+**Verification** : redemarrage des bots (positions ouvertes restaurees, pas liquidees : `flatten_on_start` ne s'applique qu'au tout premier lancement, verifie avant), graphique controle dans le navigateur en vue Live et sur 1 mois, avec le triangle d'achat cercle de la position ETH ouverte a 2 737,05.
+
+**Validation** : deux tests mis a jour (ils figeaient l'ancien format) et un ajoute, avec ouverture/haut/bas/cloture tous distincts - les donnees de test existantes avaient ouverture = haut = bas et n'auraient pas vu une inversion d'index. Suite complete : **779 tests**.
 
 ---
 

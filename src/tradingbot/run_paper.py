@@ -272,7 +272,7 @@ def warm_up_strategy(
         # l'inventaire) - seul price_history/trend_filter/atr_sizer restent
         # utiles pour l'affichage dashboard, deja geres ci-dessous.
         if price_history is not None:
-            price_history.append([candle.timestamp, candle.close])
+            price_history.append([candle.timestamp, candle.close, candle.open, candle.high, candle.low])
         if trend_filter is not None:
             trend_filter.update(candle.close)
         if atr_sizer is not None:
@@ -367,7 +367,7 @@ def ib_warm_up_strategy(
         if hasattr(strategy, "on_candle"):
             strategy.on_candle(candle)
         if price_history is not None:
-            price_history.append([candle.timestamp, candle.close])
+            price_history.append([candle.timestamp, candle.close, candle.open, candle.high, candle.low])
         if trend_filter is not None:
             trend_filter.update(candle.close)
         if atr_sizer is not None:
@@ -682,7 +682,7 @@ def main(config_path: str) -> None:
                 engine.process_candle(candle)
                 logger.save_open_positions(executor.portfolio.positions)
                 logger.log_equity(candle.timestamp, executor.portfolio.equity(candle.close))
-                price_history.append([candle.timestamp, candle.close])
+                price_history.append([candle.timestamp, candle.close, candle.open, candle.high, candle.low])
                 last_seen_ts = candle.timestamp
                 print(f"[{candle.timestamp}] close={candle.close} equity={executor.portfolio.equity(candle.close):.2f}")
                 last_exit_check_ts = time.time()  # la bougie complete vient deja de verifier les sorties

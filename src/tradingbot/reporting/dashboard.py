@@ -453,12 +453,6 @@ function renderOrdersTable(orders, currentPrice) {
     </table>`;
 }
 
-function formatAxisPrice(v) {
-  if (v >= 1000) return v.toLocaleString('fr-FR', {maximumFractionDigits: 0});
-  if (v >= 1) return v.toFixed(2);
-  if (v >= 0.01) return v.toFixed(4);
-  return v.toFixed(6);
-}
 
 function formatAxisTime(ts, spanMs) {
   const d = new Date(ts);
@@ -469,93 +463,6 @@ function formatAxisTime(ts, spanMs) {
   return d.toLocaleDateString('fr-FR', {year: 'numeric'});
 }
 
-function priceChartSvg(points, orders) {
-  if (!points || points.length < 2) {
-    return '<p class="muted">Pas encore assez de donnees pour un graphique.</p>';
-  }
-  const width = 760, height = 240;
-  const padL = 66, padR = 14, padTop = 14, padBottom = 28;
-
-  // Le domaine temporel du graphique est fixe par la fenetre de prix visible
-  // (les ~200 dernieres bougies, ou la periode choisie via le selecteur) :
-  // un vieux trade clos bien avant cette fenetre ne doit pas l'etirer, sinon
-  // la courbe de prix reelle se retrouve ecrasee dans un coin. Les trades
-  // hors fenetre sont ignores, ceux qui la chevauchent sont rognes a ses bornes.
-  const minTs = points[0][0], maxTs = points[points.length - 1][0];
-  const tsSpan = (maxTs - minTs) || 1;
-
-  const relevantOrders = (orders || [])
-    .filter(o => o.entry_timestamp && o.entry_timestamp <= maxTs && (o.exit_timestamp || maxTs) >= minTs)
-    .map(o => ({
-      ...o,
-      entry_timestamp: Math.max(o.entry_timestamp, minTs),
-      exit_timestamp: o.exit_timestamp ? Math.min(o.exit_timestamp, maxTs) : null,
-    }));
-
-  let allValues = points.map(p => p[1]);
-  relevantOrders.forEach(o => {
-    allValues.push(o.buy_price);
-    if (o.sell_price !== null && o.sell_price !== undefined) allValues.push(o.sell_price);
-  });
-  const minV = Math.min(...allValues), maxV = Math.max(...allValues);
-  const vSpan = (maxV - minV) || 1;
-
-  const xScale = ts => ((ts - minTs) / tsSpan) * (width - padL - padR) + padL;
-  const yScale = v => height - padBottom - ((v - minV) / vSpan) * (height - padTop - padBottom);
-
-  const priceCoords = points.map(p => `${xScale(p[0]).toFixed(1)},${yScale(p[1]).toFixed(1)}`).join(" ");
-  const lastPrice = points[points.length - 1][1], firstPrice = points[0][1];
-  const priceColor = lastPrice >= firstPrice ? "#2fd699" : "#ff6b6b";
-  const gradId = `pcg${Math.random().toString(36).slice(2, 9)}`;
-  const areaBase = height - padBottom;
-  const areaPath = `M${xScale(points[0][0]).toFixed(1)},${areaBase} L${priceCoords.split(" ").join(" L")} L${xScale(points[points.length - 1][0]).toFixed(1)},${areaBase} Z`;
-
-  const tradeMarkers = relevantOrders.map(o => {
-    const x1 = xScale(o.entry_timestamp);
-    const x2 = xScale(o.exit_timestamp || maxTs);
-    const yBuy = yScale(o.buy_price);
-    const isClosed = o.sell_price !== null && o.sell_price !== undefined;
-    const barIsWinning = isClosed ? (o.pnl >= 0) : (lastPrice >= o.buy_price);
-    const barColor = barIsWinning ? "#2fd699" : "#ff6b6b";
-    let svg = `<line x1="${x1.toFixed(1)}" y1="${yBuy.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${yBuy.toFixed(1)}" stroke="${barColor}" stroke-width="4" stroke-linecap="round" opacity="0.8"><title>Achat @ ${o.buy_price}</title></line>`;
-    svg += `<circle cx="${x1.toFixed(1)}" cy="${yBuy.toFixed(1)}" r="4" fill="#2fd699"><title>Achat @ ${o.buy_price}</title></circle>`;
-    if (isClosed) {
-      const ySell = yScale(o.sell_price);
-      svg += `<circle cx="${x2.toFixed(1)}" cy="${ySell.toFixed(1)}" r="4" fill="#ff6b6b"><title>Vente @ ${o.sell_price}</title></circle>`;
-    }
-    return svg;
-  }).join("");
-
-  const Y_TICKS = 4, X_TICKS = 5;
-  let yAxis = "";
-  for (let i = 0; i <= Y_TICKS; i++) {
-    const v = minV + (vSpan * i) / Y_TICKS;
-    const y = yScale(v);
-    yAxis += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${width - padR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.07)" stroke-width="1" />`;
-    yAxis += `<text x="${padL - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="#6b7690">${formatAxisPrice(v)}</text>`;
-  }
-  let xAxis = "";
-  for (let i = 0; i <= X_TICKS; i++) {
-    const ts = minTs + (tsSpan * i) / X_TICKS;
-    const x = xScale(ts);
-    xAxis += `<text x="${x.toFixed(1)}" y="${height - padBottom + 16}" text-anchor="middle" font-size="10" fill="#6b7690">${formatAxisTime(ts, tsSpan)}</text>`;
-  }
-
-  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" style="background:var(--surface); border:1px solid var(--border); border-radius:10px;">
-    <defs>
-      <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${priceColor}" stop-opacity="0.28" />
-        <stop offset="100%" stop-color="${priceColor}" stop-opacity="0" />
-      </linearGradient>
-    </defs>
-    ${yAxis}
-    <path d="${areaPath}" fill="url(#${gradId})" />
-    ${tradeMarkers}
-    <polyline points="${priceCoords}" fill="none" stroke="${priceColor}" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" />
-    ${xAxis}
-  </svg>
-  <p class="muted" style="margin-top:8px;">Ligne = cours du marche. Barre verte = position en gain, barre rouge = position en perte (calcule au prix actuel si encore ouverte). Point vert = achat, point rouge = vente.</p>`;
-}
 
 const PRICE_RANGES = ["live", "1h", "1j", "1mois", "1an", "5ans", "10ans"];
 const PRICE_RANGE_LABELS = { live: "Live", "1h": "1 heure", "1j": "1 jour", "1mois": "1 mois", "1an": "1 an", "5ans": "5 ans", "10ans": "10 ans" };
@@ -607,10 +514,54 @@ function renderPriceChartSection(name, data) {
     points = cached ? cached.points : null;
     ensureHistoricalPriceData(name, range, data);
   }
+  // EF-84 : chandeliers + triangles d'achat/vente, meme dessin que l'onglet
+  // Test. Le canvas ne peut etre dessine qu'une fois insere dans la page :
+  // on memorise ce qu'il faut tracer, `drawPendingBotChart()` le fait ensuite.
+  pendingBotChart = points ? { points, orders: data.orders, name } : null;
   const chartHtml = points
-    ? priceChartSvg(points, data.orders)
+    ? `<canvas id="bot_price_canvas" style="width:100%; height:320px; display:block; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);"></canvas>
+       <p class="muted" style="font-size:11px; margin-top:6px;">Bougie verte = cloture au-dessus de l'ouverture, rouge = en dessous.
+       Triangle vert = achat, triangle rouge = vente, cercle = position encore ouverte.</p>`
     : '<p class="muted">Chargement du cours historique...</p>';
   return `${renderPriceRangeSelector(name)}${chartHtml}`;
+}
+
+let pendingBotChart = null;
+
+// Convertit l'historique [t, cloture, ouverture, haut, bas] en bougies. Un
+// ancien point sans ouverture/haut/bas (bot pas encore redemarre depuis
+// l'ajout des chandeliers) vaut une bougie plate a sa cloture : le graphique
+// passe alors en courbe, plutot que d'afficher des traits sans corps.
+function pointsToCandles(points) {
+  return points.map(p => ({
+    t: p[0], c: p[1],
+    o: p.length > 2 ? p[2] : p[1],
+    h: p.length > 3 ? p[3] : p[1],
+    l: p.length > 4 ? p[4] : p[1],
+  }));
+}
+
+// Les ordres du bot (entree/sortie horodatees) deviennent les marqueurs du
+// dessin des tests : achat et vente pour un trade clos, achat cercle pour une
+// position encore ouverte.
+function ordersToMarkers(orders) {
+  const closed = [], open = [];
+  (orders || []).forEach(o => {
+    if (!o.entry_timestamp) return;
+    const isClosed = o.sell_price !== null && o.sell_price !== undefined && o.exit_timestamp;
+    if (isClosed) closed.push({ buy_t: o.entry_timestamp, buy_p: o.buy_price, sell_t: o.exit_timestamp, sell_p: o.sell_price });
+    else open.push({ buy_t: o.entry_timestamp, buy_p: o.buy_price });
+  });
+  return { closed, open };
+}
+
+function drawPendingBotChart() {
+  if (!pendingBotChart || !document.getElementById("bot_price_canvas")) return;
+  const candles = pointsToCandles(pendingBotChart.points);
+  if (candles.length < 2) return;
+  const hasOhlc = pendingBotChart.points.some(p => p.length > 4);
+  const { closed, open } = ordersToMarkers(pendingBotChart.orders);
+  drawBacktestCandlestickChart(candles, closed, open, hasOhlc, "bot_price_canvas");
 }
 
 // EF-82 : l'adresse du serveur est celle qui a servi cette page - c'est ce
@@ -2825,6 +2776,7 @@ function renderBotContent() {
     <h2 style="font-size:14px; color:#9098a5; margin-top:28px;">Dernieres actions</h2>
     ${renderLogs(data.logs)}
   `;
+  drawPendingBotChart();
   if (configDetailsWasOpen) loadBotConfigPanel(currentBotName);
 }
 
@@ -3306,16 +3258,21 @@ function updateBacktestChartView() {
   if (label) label.textContent = `${visible.length} bougies affichees sur ${n} au total (fenetre ${fromPct}% - ${toPct}%)`;
 }
 
-function drawBacktestCandlestickChart(candles, closedTrades, openPositions, showCandles) {
-  const canvas = document.getElementById("bt_chart_canvas");
+function drawBacktestCandlestickChart(candles, closedTrades, openPositions, showCandles, canvasId = "bt_chart_canvas") {
+  // EF-84 : meme dessin pour les tests ET pour le graphique des bots - le
+  // canvas cible est un parametre ; la mesure de pente au clic reste propre
+  // au graphique des tests.
+  const isBacktest = canvasId === "bt_chart_canvas";
+  const canvas = document.getElementById(canvasId);
   if (!canvas || !candles || candles.length === 0) return;
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.clientWidth || 1100;
   canvas.width = cssWidth * dpr;
-  canvas.height = 380 * dpr;
+  const cssHeight = canvas.clientHeight || 380;
+  canvas.height = cssHeight * dpr;
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const w = cssWidth, h = 380;
+  const w = cssWidth, h = cssHeight;
   ctx.clearRect(0, 0, w, h);
 
   const padL = 58, padR = 12, padT = 12, padB = 22;
@@ -3397,6 +3354,7 @@ function drawBacktestCandlestickChart(candles, closedTrades, openPositions, show
     }
   });
 
+  if (!isBacktest) return;
   lastChartLayout = { candles, x, y, minT, maxT, padL, padR, plotW };
 
   // EF-61 : 2 bougies cliquees pour mesurer la pente - dessine les 2 points

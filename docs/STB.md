@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.75 |
+| **Version** | 0.76 |
 | **Date** | 2026-09-17 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -89,6 +89,7 @@
 | 0.73 | EF-81 : **trading manuel en paper**, panier a part, ordres reels sur le testnet. Verifie par un aller-retour reel |
 | 0.74 | EF-82 : dashboard accessible depuis tout appareil de la maison (mot de passe obligatoire), deploiement Raspberry Pi (systemd, installateur), verrou anti-doublon rendu portable. Pousse sur GitHub |
 | 0.75 | EF-83 : **les bots crypto ne pouvaient pas acheter** (historique du testnet trop court pour leur rechauffement). Corrige, trois achats reels constates ; decisions desormais conservees |
+| 0.76 | EF-84 : graphique des bots en chandeliers avec triangles d'achat et de vente, comme l'onglet Test |
 ---
 
 ## 1. Introduction
@@ -251,6 +252,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-81 | L'utilisateur doit pouvoir acheter et vendre a la main, en paper, depuis un panier separe des bots - "une interface de trade manuel, bouton achat, vente avec un panier a part" | Devrait - **realise**. Onglet "Manuel" : registre local a capital propre, verse par l'utilisateur, qui ne touche pas au panier commun des bots ; ordres reels sur le testnet Binance par le meme executeur que les bots. Le compte testnet etant partage, un achat est refuse avant tout ordre si le solde libre reel ne le couvre pas. Prix d'execution reel et prix de revient frais inclus enregistres ; vente plafonnee a la position ; remise a zero par sauvegarde qui ne vend rien. Verifie par un aller-retour reel (222 DOGE). Voir STC §3.64 |
 | EF-82 | Le dashboard doit etre accessible depuis n'importe quel appareil de la maison, et le systeme doit tourner sur un Raspberry Pi - demande de l'utilisateur, avec mandat de tout changer et de commiter | Doit - **realise**. Le serveur ecoute sur le reseau, la page trouve le serveur par sa propre origine (et non plus `localhost` en dur), demarrage automatique Linux (script + systemd + installateur). **Tout client non-local est refuse tant qu'aucun mot de passe n'est defini**, puis authentifie par HTTP Basic - un dashboard qui passe des ordres ne s'ouvre pas sur un reseau par oubli. **Defaut grave corrige au passage** : le verrou anti-doublon utilisait `tasklist`, absent de Linux, et aurait laisse deux instances d'un meme bot tourner sur le Pi. Verifie via l'IP reseau du poste actuel. Voir STC §3.65 |
 | EF-83 | Les bots crypto doivent reellement pouvoir acheter en paper - question de l'utilisateur ("il aurait du acheter depuis le debut ?") | Doit - **realise**. Les trois bots n'avaient passe aucun ordre en six jours de regime haussier : le testnet ne fournit que ~14 jours d'historique, leur strategie ne sortait jamais de sa phase de rechauffement. Donnees de marche prises sur le marche public, ordres sur le testnet ; rechauffement incomplet desormais signale ; decisions conservees a travers les redemarrages. Verifie par trois achats reels a la bougie suivante. Voir STC §3.69 |
+| EF-84 | Le graphique de cours des bots doit ressembler a celui des tests : bougies, et triangles pour les achats et ventes - demande de l'utilisateur | Pourrait - **realise**. Meme fonction de dessin pour les deux onglets ; historique des bots en bougies completes. Voir STC §3.70 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---
