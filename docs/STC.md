@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.77 |
+| **Version** | 0.78 |
 | **Date** | 2026-09-22 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -91,6 +91,7 @@
 | 0.75 | CT-15bis (§3.66) : **correction mineure du re-optimiseur** - `propose_reoptimization()` n'avancait pas `last_checked_at` quand le bot etait ignore pour position ouverte, si bien qu'un bot souvent en position restait "due" en continu et etait reevalue a chaque lancement de `run_all`/`--all` au lieu d'attendre le prochain intervalle. Corrige : l'etat avance desormais aussi dans ce cas, en conservant un `pending_candidate` deja en attente. Sans consequence sur les propositions deja emises, uniquement sur la frequence des verifications inutiles |
 | 0.76 | Etape 7 piste 2 (§3.67) : **spread adaptatif a la volatilite pour le market making** - `MarketMakingStrategy` elargit son spread (ATR interne, meme mecanique que l'etape 2) quand la volatilite recente depasse la normale, pour reduire le risque de selection adverse en marche trending. Desactive par defaut, integre a la grille `optimize.py`. Mise a jour ATR volontairement APRES le calcul de la cotation de la bougie courante (jamais avant, contrairement a `Engine`) pour ne pas se baser sur un high/low pas encore connu. 6 nouveaux tests, 766 au total. Non encore valide empiriquement (pas de nouveau run `optimize.py`) |
 | 0.77 | Etape 6 piste 6 bis (§3.68) : **`RsiRangeStrategy`**, nouvelle famille de retour a la moyenne par oscillateur RSI (momentum) plutot qu'ecart-type de prix comme `MeanReversionStrategy` - piste "elargir a d'autres familles de strategies" explicitement identifiee comme non exploree dans docs/FEUILLE_DE_ROUTE_PERFORMANCE.md. Integree a `optimize.py` (grille de 24 combinaisons), `run_backtest.py`/`run_paper.py` (STRATEGY_REGISTRY), au reoptimiseur hebdomadaire et au lab manuel (`backtest_lab.py`). 7 nouveaux tests, 773 au total. Non encore validee empiriquement (pas de run `optimize.py` sur 3 ans) |
+| 0.78 | EF-83 (§3.69) : **les bots crypto n'ont jamais pu acheter** - rechauffes sur le testnet, qui ne garde que ~14 jours (339 bougies 1h) pour un besoin de 500/1000/2000, leur strategie restait muette ; redemarres chaque jour, ils ne l'auraient jamais ete. Donnees de marche basculees sur le marche public, ordres toujours sur le testnet ; decisions journalisees en base, console non tamponnee. Verifie : les 3 bots ont achete a la bougie suivante. Les 6 jours de paper precedents ne valident rien |
 
 ---
 
@@ -1584,6 +1585,26 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Integration** : `optimize.py::build_rsi_range_candidates()` (24 combinaisons : 3 periodes RSI x 2 seuils de survente x 2 seuils de surachat x 2 stop-loss, sans croisement filtre de tendance/ATR), `run_backtest.py::STRATEGY_REGISTRY` (utilisable en config YAML pour backtest/paper - `run_paper.py` reutilise le meme registre via `build_strategy`), `reoptimizer.py::_search_best_out_of_sample` (recherche hebdomadaire de reoptimisation), `backtest_lab.py::PRESETS` (exploration manuelle). Strategie YAML uniquement, pas creable depuis le formulaire du dashboard (meme perimetre que `mean_reversion`/`market_making`/`funding_arb`).
 
 **Validation** : 7 nouveaux tests dans `tests/test_rsi_range_strategy.py` (pas de signal avant la periode pleine, achat en survente, vente en surachat, pas de double achat en position, pas de signal sur prix plat, parametres invalides rejetes). Suite complete : **773 tests**. **Non encore validee empiriquement** (pas de run `optimize.py` sur 3 ans a ce jour - prochaine etape suggeree pour un futur run, comme pour le spread adaptatif du market making §3.67).
+
+---
+
+### 3.69 EF-83 : les bots crypto n'ont jamais pu acheter - historique du testnet trop court
+
+**Question de l'utilisateur** : "ca fait un moment que le bot tourne, il aurait du acheter depuis le debut ?". Reponse : oui. ETH, BTC et DOGE etaient 5,6 %, 9,8 % et 19,5 % au-dessus de leur seuil d'achat ; les trois bots avaient traite 68 bougies depuis le 17/09 sans passer un seul ordre, et le panier commun ne portait aucune trace de tentative.
+
+**Cause** : le rechauffement et les bougies en direct venaient de `executor.exchange`, le client **testnet**. Le testnet Binance ne conserve qu'environ 14 jours de bougies - **339 en 1h**, verifie, quel que soit le nombre demande. La strategie recevait 338 bougies au lieu de 500 (ETH), 1 000 (BTC) et 2 000 (DOGE), n'atteignait jamais sa maturite (`warmup_candles`) et renvoyait "aucun signal" a chaque bougie. Il aurait fallu 7, 27 et 69 jours consecutifs sans redemarrage ; le PC redemarrant chaque jour, **les bots n'auraient jamais achete**. Le message de demarrage aggravait les choses : "Strategie rechauffee avec 500 bougies" affichait le nombre DEMANDE, pas le nombre recu.
+
+**Pourquoi le diagnostic a ete long, dit franchement** : les rejeux de l'assistant (vrai moteur, vraies sessions, copie du vrai panier) prenaient l'historique sur le marche PUBLIC et achetaient tous ; chaque piste eliminee (strategie, filtres, compte testnet, panier) etait saine. Aucun test ne pouvait voir le defaut : tous les echanges factices renvoyaient exactement ce qu'on leur demandait. La contradiction n'est devenue visible qu'apres avoir rendu le bot observable : sa decision reelle a 10h ("aucun signal", ETH a 2 743 contre un seuil a ~2 610) ne pouvait plus s'expliquer que par l'etat interne de la strategie, puis par la source de ses donnees.
+
+**Deux defauts d'observabilite, corriges au passage parce qu'ils ont rendu la panne invisible six jours** : (1) les decisions ne vivaient qu'en memoire (`recent_logs`), perdues a chaque redemarrage quotidien - elles sont desormais journalisees en base (`events`, niveau `decision`) ; (2) la console des bots etait capturee sans `-u`, donc tamponnee : les fichiers `logs/*.log` restaient a 0 octet.
+
+**Correction** : les DONNEES de marche du mode paper viennent du marche public reel (`build_market_data_exchange`, client ccxt sans cle, incapable de passer un ordre) ; les ORDRES restent sur le testnet. C'est aussi la serie sur laquelle la strategie a ete validee. Un rechauffement incomplet est desormais annonce en toutes lettres (nombre reel recu, bougies manquantes, strategie muette) au lieu d'etre masque.
+
+**Verification reelle** : apres redemarrage, stratégies rechauffees sur 500 / 1 000 / 2 000 bougies reelles ; a la cloture de 11h, **les trois bots ont achete sur le testnet** - ETH 0,0731 a 2 737,05, BTC 0,00232 a 85 930, DOGE 2 005 a 0,0998.
+
+**Consequence a retenir** : les six jours de paper des bots crypto (17/09 -> 23/09) ne valident RIEN - ils ne tradaient pas. La validation en conditions reelles repart du 23/09.
+
+**Validation** : `tests/test_warmup_depth.py`, 5 tests dont un echange factice a historique court reproduisant la panne exacte (339 bougies pour un besoin de 500 -> strategie muette). Suite complete : **778 tests**.
 
 ---
 

@@ -181,7 +181,7 @@ def launch_process(config_path: Path, name: str) -> tuple[bool, str]:
 
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     process = subprocess.Popen(
-        [sys.executable, "-m", "tradingbot.run_paper", str(config_path)],
+        [sys.executable, "-u", "-m", "tradingbot.run_paper", str(config_path)],  # -u : sortie non tamponnee, sinon le journal reste vide (EF-83)
         cwd=str(ROOT),
         stdout=log_file,
         stderr=subprocess.STDOUT,

@@ -179,6 +179,20 @@ def poll_new_closed_candle(exchange, symbol: str, timeframe: str, last_seen_ts: 
     return _row_to_candle(closed_row)
 
 
+def build_market_data_exchange(exchange_id: str, fallback=None):
+    """Client ccxt PUBLIC (aucune cle, aucun ordre possible) pour les donnees de
+    marche du mode paper. Repli sur `fallback` (le client testnet) si le
+    client public ne peut pas etre construit, pour ne jamais empecher un bot
+    de demarrer - le message de rechauffement incomplet signalera alors la
+    limite du testnet."""
+    try:
+        import ccxt
+
+        return getattr(ccxt, exchange_id)({"enableRateLimit": True})
+    except Exception:
+        return fallback
+
+
 def _row_to_candle(row) -> Candle:
     return Candle(
         timestamp=int(row[0]),
@@ -436,6 +450,13 @@ def main(config_path: str) -> None:
     def _on_decision(candle: Candle, message: str) -> None:
         ts = datetime.datetime.fromtimestamp(candle.timestamp / 1000).strftime("%H:%M:%S")
         recent_logs.append([ts, message])
+        # EF-83 : les decisions ne vivaient qu'en MEMOIRE (`recent_logs`), perdues
+        # a chaque redemarrage - et le PC redemarre chaque jour. Impossible alors
+        # de savoir, apres coup, pourquoi un bot n'avait pas achete pendant
+        # une semaine de regime haussier. Chaque decision est desormais
+        # journalisee en base (une ligne par bougie, ~24 par jour et par bot).
+        logger.log_event("decision", f"[bougie {ts}] {message}")
+        print(f"[decision {ts}] {message}", flush=True)
 
     probability_filter_config = config.get("probability_filter") or {}
     probability_gate = None
@@ -554,7 +575,15 @@ def main(config_path: str) -> None:
         fetch_closed_candle = lambda last_ts: ib_poll_new_closed_candle(executor.ib, executor.contract, last_ts)
         timeframe_seconds = 86_400  # bougies journalieres uniquement pour IBKR (STC §3.46/§3.48)
     else:
-        exchange = executor.exchange
+        # EF-83 : les DONNEES de marche viennent du marche PUBLIC reel, les
+        # ORDRES restent sur le testnet (executor.exchange). Le testnet Binance
+        # ne conserve qu'environ 14 jours de bougies (339 en 1h, verifie) : un
+        # bot demandant 500/1000/2000 bougies de rechauffement en recevait 338,
+        # sa strategie n'atteignait jamais sa maturite et restait MUETTE - trois
+        # bots en regime haussier franc n'ont pas passe un seul ordre en six
+        # jours. Le marche public a tout l'historique, et c'est la serie de prix
+        # sur laquelle la strategie a ete validee.
+        exchange = build_market_data_exchange(config["exchange"], executor.exchange)
         fetch_current_price = lambda: exchange.fetch_ticker(config["symbol"])["last"]
         fetch_closed_candle = lambda last_ts: poll_new_closed_candle(exchange, config["symbol"], config["timeframe"], last_ts)
         timeframe_seconds = exchange.parse_timeframe(config["timeframe"])
@@ -577,7 +606,21 @@ def main(config_path: str) -> None:
             exchange, config["symbol"], config["timeframe"], strategy, warmup_candles,
             price_history, trend_filter, atr_sizer, price_level_sizer,
         )
-    print(f"Strategie rechauffee avec {warmup_candles} bougies d'historique.")
+    # EF-83 : ce message affichait le nombre DEMANDE, pas le nombre RECU - il
+    # annoncait "500 bougies" pendant que la strategie n'en avait vu que 338.
+    fed = getattr(strategy, "_seen", None)
+    needed = getattr(strategy, "warmup_candles", None)
+    if fed is not None and needed is not None and fed < needed:
+        missing = needed - fed
+        message = (
+            f"RECHAUFFEMENT INCOMPLET : {fed} bougies recues sur {needed} necessaires - la strategie restera "
+            f"MUETTE (aucun achat ni vente) pendant encore {missing} bougie(s) {config['timeframe']}, "
+            "et repartira de zero a chaque redemarrage. Source de donnees trop courte ?"
+        )
+        logger.log_event("warning", message)
+        print(message, flush=True)
+    else:
+        print(f"Strategie rechauffee avec {fed if fed is not None else warmup_candles} bougies d'historique.")
 
     poll_interval_seconds = min(60, timeframe_seconds)
 
