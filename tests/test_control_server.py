@@ -736,3 +736,69 @@ def test_the_user_name_is_configurable(remote_server, monkeypatch):
     monkeypatch.setenv(control_server.USER_ENV, "youenn")
     assert _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))[0] == 401
     assert _get_status(remote_server, "/api/list-configs", _basic("youenn", "secret"))[0] == 200
+
+
+# --- EF-85 : le journal d'un bot survit a sa relance ------------------------
+#
+# Le journal etait ouvert en "w" : la trace d'un plantage etait EFFACEE au
+# lancement suivant. Popen est remplace par un faux processus qui ecrit dans
+# le fichier recu, comme le ferait un vrai bot.
+
+
+class _FakeProcess:
+    def __init__(self, exited: bool):
+        self._exited = exited
+
+    def poll(self):
+        return 1 if self._exited else None
+
+
+def _fake_popen(output: str, exited: bool):
+    def popen(args, cwd, stdout, stderr, creationflags):
+        stdout.write(output)
+        stdout.flush()
+        return _FakeProcess(exited)
+    return popen
+
+
+def test_a_previous_crash_trace_survives_a_relaunch(tmp_path, monkeypatch):
+    monkeypatch.setattr(control_server, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(control_server, "CRASH_CHECK_DELAY_SECONDS", 0)
+    (tmp_path / "ETH.log").write_text("ccxt.base.errors.NetworkError: coupure de 02h09\n", encoding="utf-8")
+
+    monkeypatch.setattr(control_server.subprocess, "Popen", _fake_popen("Mode paper demarre\n", exited=False))
+    ok, _ = control_server.launch_process(tmp_path / "ETH.yml", "ETH")
+
+    text = (tmp_path / "ETH.log").read_text(encoding="utf-8")
+    assert ok
+    assert "NetworkError: coupure de 02h09" in text, "la trace du plantage precedent doit rester lisible"
+    assert "===== lancement" in text
+    assert text.index("coupure de 02h09") < text.index("Mode paper demarre")
+
+
+def test_an_immediate_crash_reports_this_launch_not_an_old_one(tmp_path, monkeypatch):
+    """Le message renvoye au formulaire doit venir de CE lancement : avec un
+    journal en ajout, la derniere ligne du fichier ne suffit plus a le garantir
+    si le nouveau lancement n'ecrit rien."""
+    monkeypatch.setattr(control_server, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(control_server, "CRASH_CHECK_DELAY_SECONDS", 0)
+    (tmp_path / "ETH.log").write_text("ancienne erreur sans rapport\n", encoding="utf-8")
+
+    monkeypatch.setattr(control_server.subprocess, "Popen", _fake_popen("", exited=True))
+    ok, message = control_server.launch_process(tmp_path / "ETH.yml", "ETH")
+
+    assert not ok
+    assert "ancienne erreur" not in message
+
+
+def test_a_large_log_is_rotated_instead_of_growing_forever(tmp_path, monkeypatch):
+    monkeypatch.setattr(control_server, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(control_server, "CRASH_CHECK_DELAY_SECONDS", 0)
+    monkeypatch.setattr(control_server, "LOG_MAX_BYTES", 100)
+    (tmp_path / "ETH.log").write_text("x" * 500, encoding="utf-8")
+
+    monkeypatch.setattr(control_server.subprocess, "Popen", _fake_popen("demarre\n", exited=False))
+    control_server.launch_process(tmp_path / "ETH.yml", "ETH")
+
+    assert (tmp_path / "ETH.log.1").read_text(encoding="utf-8") == "x" * 500
+    assert "x" * 500 not in (tmp_path / "ETH.log").read_text(encoding="utf-8")

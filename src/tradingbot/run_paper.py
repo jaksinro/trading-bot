@@ -179,6 +179,31 @@ def poll_new_closed_candle(exchange, symbol: str, timeframe: str, last_seen_ts: 
     return _row_to_candle(closed_row)
 
 
+def is_transient_network_error(error: BaseException) -> bool:
+    """Vrai pour une erreur de RESEAU passagere (coupure, delai depasse,
+    exchange momentanement indisponible, limite de debit) - qu'il suffit de
+    reessayer. Faux pour tout le reste (erreur de logique, cle invalide,
+    symbole inconnu) : celles-la doivent continuer a arreter le bot plutot
+    que d'etre masquees par des essais sans fin."""
+    try:
+        import ccxt
+
+        if isinstance(error, ccxt.NetworkError):  # inclut RequestTimeout, ExchangeNotAvailable, DDoSProtection
+            return True
+        if isinstance(error, ccxt.ExchangeError):
+            return False
+    except ImportError:
+        pass
+    try:
+        import requests
+
+        if isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+            return True
+    except ImportError:
+        pass
+    return isinstance(error, (ConnectionError, TimeoutError))
+
+
 def build_market_data_exchange(exchange_id: str, fallback=None):
     """Client ccxt PUBLIC (aucune cle, aucun ordre possible) pour les donnees de
     marche du mode paper. Repli sur `fallback` (le client testnet) si le
@@ -674,9 +699,36 @@ def main(config_path: str) -> None:
         webbrowser.open(MASTER_DASHBOARD_PATH.resolve().as_uri())
 
     try:
+        network_outage_since = None
         while True:
-            candle = fetch_closed_candle(last_seen_ts)
-            current_price = candle.close if candle is not None else fetch_current_price()
+            # EF-85 : une SEULE coupure reseau tuait le bot. Le 2026-09-25 a
+            # 02h09, `fetch_ticker` a recu "connexion fermee par l'hote
+            # distant" ; l'exception a remonte jusqu'ici, le processus est
+            # mort, et le bot ETH est reste six heures a l'arret AVEC une
+            # position ouverte - donc sans pouvoir la vendre si la tendance
+            # s'etait retournee. Seule la LECTURE des donnees de marche est
+            # rattrapee ici : aucun ordre n'est passe a ce stade, reessayer
+            # au cycle suivant est sans risque. Une erreur pendant le
+            # traitement d'une bougie (qui peut passer un ordre) continue,
+            # elle, de remonter : son etat serait ambigu.
+            try:
+                candle = fetch_closed_candle(last_seen_ts)
+                current_price = candle.close if candle is not None else fetch_current_price()
+            except Exception as e:
+                if not is_transient_network_error(e):
+                    raise
+                if network_outage_since is None:
+                    network_outage_since = time.time()
+                    message = f"Coupure reseau, nouvel essai toutes les {poll_interval_seconds}s : {type(e).__name__}: {str(e)[:160]}"
+                    logger.log_event("warning", message)
+                    print(message, flush=True)
+                time.sleep(poll_interval_seconds)
+                continue
+            if network_outage_since is not None:
+                message = f"Reseau retabli apres {time.time() - network_outage_since:.0f}s de coupure."
+                logger.log_event("info", message)
+                print(message, flush=True)
+                network_outage_since = None
 
             if candle is not None:
                 engine.process_candle(candle)

@@ -172,6 +172,9 @@ def is_bot_running(name: str) -> bool:
     return _is_process_running(pid)
 
 
+LOG_MAX_BYTES = 2_000_000  # au-dela, le journal d'un bot tourne vers {name}.log.1
+
+
 def launch_process(config_path: Path, name: str) -> tuple[bool, str]:
     """Lance le bot en arriere-plan (pas de fenetre visible) avec sa sortie
     capturee dans logs/{name}.log, et verifie apres un court delai qu'il n'a
@@ -179,7 +182,18 @@ def launch_process(config_path: Path, name: str) -> tuple[bool, str]:
     l'utilisateur ne voie jamais l'erreur."""
     LOG_DIR.mkdir(exist_ok=True)
     log_path = LOG_DIR / f"{name}.log"
-    log_file = open(log_path, "w", encoding="utf-8")
+    # EF-85 : le journal etait ouvert en "w", donc EFFACE a chaque lancement -
+    # la trace d'un plantage disparaissait au redemarrage suivant (celle du bot
+    # ETH le 2026-09-25 n'a ete lue que parce qu'elle a ete consultee avant la
+    # relance). On complete desormais le journal, avec un en-tete de session,
+    # et on le fait tourner au-dela de LOG_MAX_BYTES pour ne pas le laisser
+    # grossir sans fin sur un Raspberry Pi.
+    if log_path.exists() and log_path.stat().st_size > LOG_MAX_BYTES:
+        log_path.replace(log_path.with_suffix(".log.1"))
+    log_file = open(log_path, "a", encoding="utf-8")
+    log_file.write(f"\n===== lancement {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+    log_file.flush()
+    session_start = log_file.tell()
 
     creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     process = subprocess.Popen(
@@ -193,7 +207,9 @@ def launch_process(config_path: Path, name: str) -> tuple[bool, str]:
     time.sleep(CRASH_CHECK_DELAY_SECONDS)
     if process.poll() is not None:
         log_file.close()
-        error_text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            f.seek(session_start)
+            error_text = f.read().strip()  # uniquement la sortie de CE lancement
         last_line = error_text.splitlines()[-1] if error_text else "erreur inconnue (log vide)"
         return False, last_line
 

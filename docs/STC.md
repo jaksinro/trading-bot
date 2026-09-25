@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.79 |
+| **Version** | 0.80 |
 | **Date** | 2026-09-22 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -93,6 +93,7 @@
 | 0.77 | Etape 6 piste 6 bis (§3.68) : **`RsiRangeStrategy`**, nouvelle famille de retour a la moyenne par oscillateur RSI (momentum) plutot qu'ecart-type de prix comme `MeanReversionStrategy` - piste "elargir a d'autres familles de strategies" explicitement identifiee comme non exploree dans docs/FEUILLE_DE_ROUTE_PERFORMANCE.md. Integree a `optimize.py` (grille de 24 combinaisons), `run_backtest.py`/`run_paper.py` (STRATEGY_REGISTRY), au reoptimiseur hebdomadaire et au lab manuel (`backtest_lab.py`). 7 nouveaux tests, 773 au total. Non encore validee empiriquement (pas de run `optimize.py` sur 3 ans) |
 | 0.78 | EF-83 (§3.69) : **les bots crypto n'ont jamais pu acheter** - rechauffes sur le testnet, qui ne garde que ~14 jours (339 bougies 1h) pour un besoin de 500/1000/2000, leur strategie restait muette ; redemarres chaque jour, ils ne l'auraient jamais ete. Donnees de marche basculees sur le marche public, ordres toujours sur le testnet ; decisions journalisees en base, console non tamponnee. Verifie : les 3 bots ont achete a la bougie suivante. Les 6 jours de paper precedents ne valident rien |
 | 0.79 | EF-84 (§3.70) : **graphique des bots en chandeliers** avec triangles d'achat/vente, meme fonction de dessin que l'onglet Test (canvas cible en parametre). Historique du bot et `/api/price-history` en bougies completes `[t, cloture, ouverture, haut, bas]`, compatibles avec l'ancien format. Ancien graphique SVG supprime |
+| 0.80 | EF-85 (§3.71) : **une coupure reseau tuait un bot** - le bot ETH est mort a 02h09 sur un `ccxt.NetworkError` passager et est reste 6 h a l'arret avec une position ouverte. La lecture des donnees de marche reessaie desormais les erreurs reseau passageres ; les autres erreurs, et celles pendant un ordre, continuent d'arreter le bot. **Le journal etait efface a chaque relance** : il est desormais complete et tourne au-dela de 2 Mo |
 
 ---
 
@@ -1620,6 +1621,22 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Verification** : redemarrage des bots (positions ouvertes restaurees, pas liquidees : `flatten_on_start` ne s'applique qu'au tout premier lancement, verifie avant), graphique controle dans le navigateur en vue Live et sur 1 mois, avec le triangle d'achat cercle de la position ETH ouverte a 2 737,05.
 
 **Validation** : deux tests mis a jour (ils figeaient l'ancien format) et un ajoute, avec ouverture/haut/bas/cloture tous distincts - les donnees de test existantes avaient ouverture = haut = bas et n'auraient pas vu une inversion d'index. Suite complete : **779 tests**.
+
+---
+
+### 3.71 EF-85 : une coupure reseau suffisait a tuer un bot - et effacait la trace du plantage
+
+**Signalement** : "regarde pourquoi le bot ETH a plante".
+
+**Cause** : le 2026-09-25 a 02h09, `fetch_ticker` a recu "connexion existante fermee par l'hote distant" (`ccxt.NetworkError`, erreur Windows 10054) - une coupure reseau de quelques secondes. Aucun `try` dans la boucle principale : l'exception a remonte, le processus est mort. Le bot ETH est reste **six heures a l'arret avec une position ouverte**, donc incapable de la vendre si la tendance s'etait retournee. Verifie apres coup : ETH est reste 5 % au-dessus de sa tendance toute la nuit, aucune vente n'a ete ratee - c'etait de la chance, pas une protection. BTC et DOGE, touches par la meme boucle, ont simplement echappe a la coupure.
+
+**Correction** : la LECTURE des donnees de marche (bougie close, cours courant) rattrape desormais les erreurs de reseau passageres (`is_transient_network_error` : `ccxt.NetworkError` et ses sous-classes - delai depasse, exchange indisponible, limite de debit - plus les coupures `requests`/systeme) : avertissement journalise une fois, nouvel essai au cycle suivant, message quand le reseau revient. **Delimitation voulue** : toute autre erreur (cle invalide, paire inconnue, bug) continue d'arreter le bot plutot que d'etre masquee par des essais sans fin ; et une erreur pendant le TRAITEMENT d'une bougie, qui peut passer un ordre, continue de remonter - son etat serait ambigu (ordre parti ou non ?), et le reessayer pourrait doubler un achat.
+
+**Second defaut, decouvert en relancant le bot** : le serveur ouvrait le journal du bot en ecriture (`"w"`) a chaque lancement - **la trace du plantage etait effacee par la relance**. Celle-ci n'a ete lue que parce qu'elle avait ete consultee juste avant. Le journal est desormais complete (en-tete `===== lancement ... =====` par session), tourne vers `{nom}.log.1` au-dela de 2 Mo (Raspberry Pi), et le message d'erreur renvoye au formulaire en cas de crash immediat ne lit que la sortie du lancement courant - avec un journal en ajout, la derniere ligne du fichier pourrait sinon appartenir a une session precedente.
+
+**Limite qui demeure** : un bot mort pour une autre raison reste mort jusqu'au prochain demarrage du PC - aucun superviseur ne le relance. Voir la proposition faite a l'utilisateur.
+
+**Validation** : `tests/test_network_resilience.py` (13 tests : l'erreur exacte du plantage, les familles d'erreurs reseau reessayees, et celles qui doivent continuer a arreter le bot) ; 3 tests de journal dans `tests/test_control_server.py` (trace precedente conservee apres relance, message de crash propre au lancement courant, rotation). **Limite du test** : la boucle principale n'est pas extraite en fonction testable ; c'est le classement des erreurs qui est teste, pas la boucle elle-meme. Suite complete : **795 tests**. Les trois bots ont ete relances avec le correctif, positions restaurees.
 
 ---
 
