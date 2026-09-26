@@ -3083,7 +3083,7 @@ function renderBotContent() {
 
   contentEl.innerHTML = `
     <span class="badge">Mode ${data.mode}</span>${statusHtml}${stopBtn}
-    <a href="/trading.html?bot=${encodeURIComponent(currentBotName)}" style="margin-left:8px; font-size:12px; font-weight:600;">Ouvrir l'espace de trading</a>
+    <a href="${CONTROL_SERVER}/trading.html?bot=${encodeURIComponent(currentBotName)}" target="_blank" rel="noopener" style="margin-left:8px; font-size:12px; font-weight:600;">Ouvrir l'espace de trading</a>
     <h1 style="margin-top:8px;">${currentBotName} &middot; ${data.symbol}</h1>
     <p class="muted">Derniere mise a jour : ${data.updated_at}${hasPool ? ` &middot; Panier commun disponible : ${fmtMoney(data.pool_available_cash)}` : ""}</p>
 
