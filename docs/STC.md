@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.81 |
+| **Version** | 0.82 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -95,6 +95,7 @@
 | 0.79 | EF-84 (§3.70) : **graphique des bots en chandeliers** avec triangles d'achat/vente, meme fonction de dessin que l'onglet Test (canvas cible en parametre). Historique du bot et `/api/price-history` en bougies completes `[t, cloture, ouverture, haut, bas]`, compatibles avec l'ancien format. Ancien graphique SVG supprime |
 | 0.80 | EF-85 (§3.71) : **une coupure reseau tuait un bot** - le bot ETH est mort a 02h09 sur un `ccxt.NetworkError` passager et est reste 6 h a l'arret avec une position ouverte. La lecture des donnees de marche reessaie desormais les erreurs reseau passageres ; les autres erreurs, et celles pendant un ordre, continuent d'arreter le bot. **Le journal etait efface a chaque relance** : il est desormais complete et tourne au-dela de 2 Mo |
 | 0.81 | EF-86 (§3.72) : **HTTPS optionnel pour l'acces reseau au dashboard** (`DASHBOARD_TLS_CERT`/`DASHBOARD_TLS_KEY`) ; poignee de main TLS dans le thread de la requete ; configuration incomplete = refus de demarrer ; certificat auto-signe genere par `scripts/generate_dashboard_cert.sh` ; scripts de demarrage compatibles |
+| 0.82 | EF-87 (§3.73) : **graphique TradingView Lightweight Charts** (version figee + SRI, repli sur le dessin maison, zoom/reticule/legende OHLC, heure alignee sur l'heure locale) et **reception des alertes TradingView** par webhook : fermee sans secret, secret dans le corps (aucun en-tete possible), seule route avant l'auth du dashboard, ordres paper automatiques desactives par defaut et plafonnes, execution en arriere-plan (limite TradingView de 3 s). Exposition internet laissee a la decision de l'utilisateur |
 
 ---
 
@@ -1657,6 +1658,33 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Limites** : certificat auto-signe -> avertissement du navigateur a la premiere visite sur chaque appareil (a accepter) ; si l'IP du Pi change, regenerer le certificat. HTTPS ne rend pas le dashboard apte a une exposition Internet (pas de limitation des tentatives de mot de passe) - le conseil "pas de redirection de port" demeure.
 
 **Validation** : 8 tests dans `tests/test_control_server.py` sur un vrai serveur TLS avec certificat genere a la volee (`cryptography`, deja tiree par ccxt) : absence de variables = HTTP ; configuration a moitie remplie refusee (x2) ; fichier absent = erreur claire ; mot de passe toujours exige en HTTPS (401 puis 200) ; un client HTTP en clair ne casse pas le serveur ; un client muet n'en bloque pas d'autres. Verifie en plus de bout en bout avec un certificat produit par le script (openssl) : 200 en `https://localhost`. Scripts shell verifies par `bash -n`, script PowerShell par son analyseur syntaxique.
+
+---
+
+### 3.73 EF-87 : graphique TradingView Lightweight Charts et reception des alertes TradingView
+
+**Demande** : "c'est possible d'automatiser les analyses avec TradingView ? si c'est le cas commence par integrer la bibliotheque de graphiques de TradingView [...] et active les alertes sur mon app".
+
+**Reponse a la question, verifiee sur la documentation TradingView le 2026-09-26** : TradingView n'a PAS d'API permettant de recuperer ses analyses depuis du code. L'automatisation passe par les alertes : une analyse ecrite en Pine Script tourne sur les serveurs TradingView et peut appeler une adresse web (webhook). Conditions relevees : ports 80 et 443 uniquement, IPv4 uniquement, double authentification obligatoire sur le compte, reponse exigee en moins de 3 secondes, **aucun en-tete personnalise possible**, et - selon la page tarifs consultee le meme jour - webhooks reserves aux abonnements Premium et Ultimate.
+
+**1. Graphique** : le graphique des bots utilise TradingView Lightweight Charts 4.2.3 (licence Apache 2.0, logo d'attribution conserve). Charge depuis jsDelivr en version **figee avec empreinte SRI** (sha384) : le navigateur refuse le script si le CDN servait un jour autre chose que ce fichier. S'il ne charge pas (hors ligne), repli automatique sur le dessin maison d'EF-84 - le graphique ne disparait jamais. Apports : zoom a la molette, deplacement, reticule, et une legende ouverture/haut/bas/cloture de la bougie survolee, qui remplace l'info-bulle perdue a EF-84. Les marqueurs d'achat/vente sont rattaches a la bougie contenant l'instant du trade (exigence de la bibliotheque). Le zoom choisi survit au rafraichissement automatique de 15 s. **Defaut trouve en verifiant, corrige** : la bibliotheque affiche l'heure en UTC, le reste du dashboard en heure locale - l'axe marquait 01:00 pour une bougie que la legende datait de 03:00 ; les temps sont desormais decales a l'heure locale (decalage unique, celui du jour : un historique traversant un changement d'heure a ses bougies anterieures decalees d'une heure). L'onglet Test garde son dessin maison, qui porte la mesure de pente au clic.
+
+**2. Alertes** (`tv_alerts.py`, route `/api/tv-webhook`, onglet "Alertes") :
+- **ferme par defaut** : sans `TRADINGVIEW_WEBHOOK_SECRET`, tout appel est refuse (403) ;
+- le secret voyage dans le CORPS JSON (champ `secret`) ou dans l'adresse (`?token=`, seule option pour un message en texte brut) - TradingView ne permettant aucun en-tete. Compare en temps constant, **jamais stocke**. TradingView deconseille de mettre des identifiants dans le corps ; il s'agit ici d'un secret dedie qui ne donne acces qu'a cette route ;
+- c'est la **seule route qui passe avant l'authentification HTTP Basic** du dashboard (TradingView ne peut pas l'envoyer) ; un test verifie que cette exception n'ouvre aucune autre route ;
+- corps limite a 10 Ko, filtre optionnel par adresse d'origine (`TRADINGVIEW_ALLOWED_IPS`, liste des IP TradingView ; inutile derriere un tunnel, qui masque l'origine) ;
+- **ordres automatiques desactives par defaut** (`TRADINGVIEW_AUTO_ORDERS`). Actives, un `buy`/`sell` devient un ordre PAPER dans le panier manuel uniquement - jamais les bots ni le panier commun - plafonne par alerte (`TRADINGVIEW_MAX_ORDER_USDT`, 100 par defaut), et seulement pour un ticker reconnu (`BINANCE:ETHUSDT`, `ETHUSDT`, perpetuels ramenes au spot) : un ticker non reconnu n'est jamais "devine" ;
+- **l'ordre part en arriere-plan** apres la reponse : TradingView abandonne au-dela de 3 s et un ordre testnet (cours, solde, ordre) peut les depasser. La decision et son motif sont consignes AVANT l'execution, puis le resultat (execute / refuse / erreur) est rattache a l'alerte - une exception de thread n'est jamais perdue ;
+- l'onglet Manuel et les alertes passent par une meme fonction `execute_manual_order` (extraite du handler) : memes garde-fous (cash du panier, solde testnet reel, vente plafonnee).
+
+**Non fait, et dit** : rendre le serveur joignable depuis internet. TradingView doit atteindre une adresse publique en HTTPS sur le port 443 ; c'est une exposition reseau qui reste a la decision de l'utilisateur (tunnel Cloudflare ou ngrok recommande, qui n'ouvre aucun port sur la box). Tant que ce n'est pas fait, aucune alerte TradingView reelle ne peut arriver.
+
+**Etat laisse chez l'utilisateur** : reception ACTIVEE (secret aleatoire genere dans `.env`, jamais affiche), ordres automatiques DESACTIVES.
+
+**Verification reelle** : reponse du webhook en 0,23 s ; mauvais secret -> 401 ; alerte d'achat valide consignee sans ordre (ordres automatiques desactives) ; graphique verifie dans le navigateur (bibliotheque 4.2.3 chargee, sans repli, fleche d'achat de la position ETH, legende au survol, heure alignee) ; onglet Alertes affichant les deux alertes recues.
+
+**Validation** : `tests/test_tv_alerts.py`, 27 tests - fermeture sans secret, secret absent/faux, secret jamais stocke, texte brut avec jeton, corps trop long, correspondance des tickers, decision d'ordre (desactive, plafond, montant par defaut, vente totale, ticker inconnu, alerte informative), alerte stockee avec sa decision, filtre d'IP, **ordre en arriere-plan avec reponse en moins d'une seconde pendant qu'il s'execute**, echec d'ordre consigne, et trois tests par un vrai serveur HTTP dont celui verifiant que l'exception d'authentification reste limitee au webhook. Suite complete : **829 tests**.
 
 ---
 

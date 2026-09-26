@@ -713,6 +713,128 @@ def build_config(payload: dict) -> dict:
     return config
 
 
+class ManualOrderError(Exception):
+    pass
+
+
+def execute_manual_order(payload: dict) -> tuple[int, dict]:
+    """Ordre au marche du panier manuel sur le testnet (EF-81), partage par
+    l'onglet Manuel et par les alertes TradingView (EF-87) : un seul chemin,
+    donc les memes garde-fous (cash du panier, solde testnet reel, vente
+    plafonnee a la position). L'ordre part REELLEMENT via `PaperExecutor`, le
+    meme code que les bots. Renvoie (code HTTP, corps)."""
+    from dotenv import load_dotenv
+
+    from tradingbot.execution.paper_executor import PaperExecutor
+    from tradingbot.manual_trading import ManualBook
+
+    symbol = str(payload.get("symbol", "")).upper().strip()
+    side = str(payload.get("side", "")).lower()
+    if "/" not in symbol or side not in ("buy", "sell"):
+        return 400, {"error": "symbole (ex: ETH/USDT) et cote (buy/sell) requis"}
+
+    load_dotenv()
+    api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
+    api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
+    try:
+        executor = PaperExecutor("binance", symbol, api_key, api_secret)
+        price = float(executor.exchange.fetch_ticker(symbol)["last"])
+    except Exception as e:
+        return 400, {"error": f"testnet injoignable ou paire inconnue : {e}"}
+
+    book = ManualBook()
+    try:
+        if side == "buy":
+            amount = float(payload.get("amount", 0) or 0)
+            quote = symbol.split("/")[1]
+            free = executor.exchange.fetch_balance().get(quote, {}).get("free")
+            report = book.buy(symbol, amount, price, executor,
+                              free_quote_on_exchange=float(free) if free is not None else None)
+        else:
+            raw_qty = payload.get("quantity")
+            quantity = None if raw_qty in (None, "", "all") else float(raw_qty)
+            report = book.sell(symbol, quantity, price, executor)
+    except Exception as e:
+        return 500, {"error": f"echec de l'ordre : {e}"}
+
+    return 200, {
+        "status": report.status, "symbol": report.symbol, "side": report.side,
+        "quantity": report.quantity, "price": report.price, "fee": report.fee,
+        "reason": report.reason, "cash_after": report.cash_after, "warnings": report.warnings,
+    }
+
+
+# ----------------------------------------------------------------------------
+# Alertes TradingView (EF-87)
+# ----------------------------------------------------------------------------
+TV_SECRET_ENV = "TRADINGVIEW_WEBHOOK_SECRET"
+TV_AUTO_ORDERS_ENV = "TRADINGVIEW_AUTO_ORDERS"
+TV_MAX_ORDER_ENV = "TRADINGVIEW_MAX_ORDER_USDT"
+TV_ALLOWED_IPS_ENV = "TRADINGVIEW_ALLOWED_IPS"
+TV_DEFAULT_MAX_ORDER_USDT = 100.0
+
+
+def tv_settings() -> dict:
+    load_dotenv()
+    try:
+        max_order = float(os.environ.get(TV_MAX_ORDER_ENV, TV_DEFAULT_MAX_ORDER_USDT))
+    except ValueError:
+        max_order = TV_DEFAULT_MAX_ORDER_USDT
+    allowed = [ip.strip() for ip in os.environ.get(TV_ALLOWED_IPS_ENV, "").split(",") if ip.strip()]
+    return {
+        "secret": os.environ.get(TV_SECRET_ENV, ""),
+        "auto_orders": os.environ.get(TV_AUTO_ORDERS_ENV, "0").strip().lower() in ("1", "true", "oui", "yes"),
+        "max_order_usdt": max_order,
+        "allowed_ips": allowed,
+    }
+
+
+def run_alert_order_in_background(store, alert_id: int, plan: dict) -> threading.Thread:
+    """TradingView abandonne l'appel au-dela de 3 secondes, alors qu'un ordre
+    testnet (cours, solde, ordre) peut les depasser : on a deja repondu,
+    l'ordre part ici, et son resultat est rattache a l'alerte."""
+    def work():
+        try:
+            status, body = execute_manual_order(plan)
+            if status == 200 and body.get("status") == "filled":
+                store.set_order_outcome(alert_id, "execute",
+                                        f"{body['side']} {body['quantity']} {body['symbol']} a {body['price']}")
+            else:
+                store.set_order_outcome(alert_id, "refuse", body.get("reason") or body.get("error") or str(body))
+        except Exception as e:  # jamais d'exception perdue en silence dans un thread
+            store.set_order_outcome(alert_id, "erreur", f"{type(e).__name__}: {e}")
+    thread = threading.Thread(target=work, daemon=True, name=f"tv-alert-{alert_id}")
+    thread.start()
+    return thread
+
+
+def handle_tradingview_alert(body: bytes, url_token: str | None, source_ip: str | None,
+                             settings: dict | None = None, store=None, background=True) -> tuple[int, dict]:
+    """Traitement complet d'un appel de webhook, sans dependre du serveur HTTP
+    (testable directement). Renvoie (code HTTP, corps) en quelques
+    millisecondes : l'eventuel ordre part en arriere-plan."""
+    from tradingbot.tv_alerts import AlertRejected, AlertStore, auto_order_plan, parse_alert
+
+    settings = settings or tv_settings()
+    if settings["allowed_ips"] and source_ip not in settings["allowed_ips"]:
+        return 403, {"error": "adresse d'origine non autorisee"}
+    try:
+        alert = parse_alert(body, settings["secret"], url_token)
+    except AlertRejected as e:
+        return e.status, {"error": e.reason}
+
+    store = store or AlertStore()
+    alert_id = store.record(alert, source_ip)
+    plan, why = auto_order_plan(alert, settings["auto_orders"], settings["max_order_usdt"])
+    if plan is None:
+        store.set_order_outcome(alert_id, "aucun", why)
+        return 200, {"status": "recue", "id": alert_id, "order": None, "detail": why}
+    store.set_order_outcome(alert_id, "en cours", why)
+    if background:
+        run_alert_order_in_background(store, alert_id, plan)
+    return 200, {"status": "recue", "id": alert_id, "order": "en cours", "detail": why}
+
+
 class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # Acces reseau (EF-82)
@@ -770,6 +892,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        # EF-87 : TradingView ne peut envoyer ni en-tete ni identifiant HTTP
+        # Basic - la route du webhook est donc la SEULE a passer avant
+        # `_authorized`, et elle porte sa propre authentification (secret
+        # dans le corps ou dans l'adresse, voir tv_alerts.parse_alert).
+        if urlsplit(self.path).path == "/api/tv-webhook":
+            length = min(int(self.headers.get("Content-Length", 0) or 0), 100_000)
+            token = (parse_qs(urlsplit(self.path).query).get("token") or [None])[0]
+            status, body = handle_tradingview_alert(
+                self.rfile.read(length), token, self.client_address[0] if self.client_address else None,
+            )
+            self._send_json(status, body)
+            return
         if not self._authorized():
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -797,6 +931,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/dca-reset": self._handle_dca_reset,
             "/api/dca-contribution": self._handle_dca_contribution,
             "/api/manual-order": self._handle_manual_order,
+            "/api/tv-test": self._handle_tv_test,
             "/api/manual-deposit": self._handle_manual_deposit,
             "/api/manual-reset": self._handle_manual_reset,
         }
@@ -1136,53 +1271,27 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
 
     def _handle_manual_order(self, payload: dict) -> None:
-        """Achat ou vente au marche sur le testnet. L'ordre part REELLEMENT
-        (via `PaperExecutor`, le meme code que les bots) ; seul le registre
-        est propre au panier manuel."""
-        import os
+        """Achat ou vente au marche sur le testnet, depuis l'onglet Manuel."""
+        status, body = execute_manual_order(payload)
+        self._send_json(status, body)
 
-        from dotenv import load_dotenv
-
-        from tradingbot.execution.paper_executor import PaperExecutor
-        from tradingbot.manual_trading import ManualBook
-
-        symbol = str(payload.get("symbol", "")).upper().strip()
-        side = str(payload.get("side", "")).lower()
-        if "/" not in symbol or side not in ("buy", "sell"):
-            self._send_json(400, {"error": "symbole (ex: ETH/USDT) et cote (buy/sell) requis"})
+    def _handle_tv_test(self, payload: dict) -> None:
+        """Simule une alerte depuis le dashboard (utilisateur deja authentifie),
+        pour verifier la chaine sans compte TradingView. Passe par le meme
+        traitement qu'une vraie alerte, secret compris."""
+        settings = tv_settings()
+        if not settings["secret"]:
+            self._send_json(400, {"error": f"definis d'abord {TV_SECRET_ENV} dans .env, puis relance le serveur"})
             return
-
-        load_dotenv()
-        api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
-        api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
-        try:
-            executor = PaperExecutor("binance", symbol, api_key, api_secret)
-            price = float(executor.exchange.fetch_ticker(symbol)["last"])
-        except Exception as e:
-            self._send_json(400, {"error": f"testnet injoignable ou paire inconnue : {e}"})
-            return
-
-        book = ManualBook()
-        try:
-            if side == "buy":
-                amount = float(payload.get("amount", 0) or 0)
-                quote = symbol.split("/")[1]
-                free = executor.exchange.fetch_balance().get(quote, {}).get("free")
-                report = book.buy(symbol, amount, price, executor,
-                                  free_quote_on_exchange=float(free) if free is not None else None)
-            else:
-                raw_qty = payload.get("quantity")
-                quantity = None if raw_qty in (None, "", "all") else float(raw_qty)
-                report = book.sell(symbol, quantity, price, executor)
-        except Exception as e:
-            self._send_json(500, {"error": f"echec de l'ordre : {e}"})
-            return
-
-        self._send_json(200, {
-            "status": report.status, "symbol": report.symbol, "side": report.side,
-            "quantity": report.quantity, "price": report.price, "fee": report.fee,
-            "reason": report.reason, "cash_after": report.cash_after, "warnings": report.warnings,
-        })
+        body = json.dumps({
+            "secret": settings["secret"],
+            "ticker": payload.get("ticker") or "BINANCE:ETHUSDT",
+            "action": payload.get("action") or "test",
+            "price": payload.get("price"),
+            "message": "Alerte de test envoyee depuis le dashboard",
+        }).encode()
+        status, result = handle_tradingview_alert(body, None, "dashboard")
+        self._send_json(status, result)
 
     def _handle_manual_deposit(self, payload: dict) -> None:
         from tradingbot.manual_trading import ManualBook
@@ -1388,6 +1497,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, read_price_history(config, db_path_for(config.name), days=days))
             except Exception as e:
                 self._send_json(500, {"error": f"historique indisponible : {e}"})
+            return
+
+        if self.path == "/api/tv-alerts":
+            from tradingbot.tv_alerts import AlertStore
+
+            settings = tv_settings()
+            self._send_json(200, {
+                "enabled": bool(settings["secret"]),
+                "auto_orders": settings["auto_orders"],
+                "max_order_usdt": settings["max_order_usdt"],
+                "ip_filter": bool(settings["allowed_ips"]),
+                "alerts": AlertStore().recent(50),
+            })
             return
 
         if self.path == "/api/manual-book":

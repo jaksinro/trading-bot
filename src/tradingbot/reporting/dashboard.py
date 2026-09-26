@@ -264,6 +264,12 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .dot-legend .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
   .dot-legend-count { color: var(--text-dim); border-left: 1px solid var(--border); padding-left: 12px; }
   span.adv-hint { display: block; margin-top: 5px; }
+  /* --- Graphique TradingView et alertes (EF-87) --- */
+  .chart-ohlc { position: absolute; top: 8px; left: 12px; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; pointer-events: none; z-index: 3; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-ok { background: var(--green-soft); color: var(--green); }
+  .pill-off { background: rgba(255,255,255,0.06); color: var(--text-dim); }
+
   /* --- Onglet Manuel (EF-81) --- */
   .manual-layout { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; margin-top: 14px; }
   @media (max-width: 900px) { .manual-layout { grid-template-columns: 1fr; } }
@@ -324,6 +330,13 @@ _MASTER_DASHBOARD_HTML = """<!DOCTYPE html>
   .dca-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   hr.sep { border: none; border-top: 1px solid var(--border); margin: 22px 0; }
 </style>
+<!-- EF-87 : TradingView Lightweight Charts (Apache 2.0), version FIGEE et
+     empreinte verifiee : le navigateur refuse le script si le CDN servait un
+     jour autre chose que ce fichier precis. S'il ne charge pas (hors ligne),
+     le graphique retombe sur le dessin maison. -->
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"
+        integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK"
+        crossorigin="anonymous"></script>
 </head>
 <body>
   <div class="app-header">
@@ -519,9 +532,12 @@ function renderPriceChartSection(name, data) {
   // on memorise ce qu'il faut tracer, `drawPendingBotChart()` le fait ensuite.
   pendingBotChart = points ? { points, orders: data.orders, name } : null;
   const chartHtml = points
-    ? `<canvas id="bot_price_canvas" style="width:100%; height:320px; display:block; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);"></canvas>
-       <p class="muted" style="font-size:11px; margin-top:6px;">Bougie verte = cloture au-dessus de l'ouverture, rouge = en dessous.
-       Triangle vert = achat, triangle rouge = vente, cercle = position encore ouverte.</p>`
+    ? `<div style="position:relative;">
+         <div id="bot_price_chart" style="width:100%; height:340px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;"></div>
+         <div id="bot_price_legend" class="chart-ohlc"></div>
+       </div>
+       <p class="muted" style="font-size:11px; margin-top:6px;">Molette = zoom, glisser = se deplacer, survol = ouverture / haut / bas / cloture de la bougie.
+       Fleche verte = achat, fleche rouge = vente, "ouvert" = position encore ouverte. Graphique : TradingView Lightweight Charts.</p>`
     : '<p class="muted">Chargement du cours historique...</p>';
   return `${renderPriceRangeSelector(name)}${chartHtml}`;
 }
@@ -555,13 +571,208 @@ function ordersToMarkers(orders) {
   return { closed, open };
 }
 
+// EF-87 : le graphique des bots utilise TradingView Lightweight Charts (zoom,
+// deplacement, reticule, valeurs de la bougie survolee). Si la bibliotheque
+// n'a pas pu etre chargee (hors ligne, CDN indisponible), on retombe sur le
+// dessin maison (EF-84) : le graphique ne disparait jamais.
+let botChartInstance = null;
+let botChartRanges = {};   // "bot|periode" -> zone visible, conservee entre deux rafraichissements
+
 function drawPendingBotChart() {
-  if (!pendingBotChart || !document.getElementById("bot_price_canvas")) return;
+  const host = document.getElementById("bot_price_chart");
+  if (!pendingBotChart || !host) return;
   const candles = pointsToCandles(pendingBotChart.points);
   if (candles.length < 2) return;
   const hasOhlc = pendingBotChart.points.some(p => p.length > 4);
   const { closed, open } = ordersToMarkers(pendingBotChart.orders);
+  if (botChartInstance) { try { botChartInstance.remove(); } catch (e) {} botChartInstance = null; }
+  if (window.LightweightCharts) {
+    try { drawTradingViewChart(host, candles, closed, open, hasOhlc); return; }
+    catch (e) { console.error("graphique TradingView indisponible, repli sur le dessin maison :", e); host.innerHTML = ""; }
+  }
+  host.innerHTML = '<canvas id="bot_price_canvas" style="width:100%; height:100%; display:block;"></canvas>';
   drawBacktestCandlestickChart(candles, closed, open, hasOhlc, "bot_price_canvas");
+}
+
+function drawTradingViewChart(host, candles, closed, open, hasOhlc) {
+  const key = pendingBotChart.name + "|" + getSelectedPriceRange(pendingBotChart.name);
+  const css = getComputedStyle(document.documentElement);
+  const token = (name, fallback) => (css.getPropertyValue(name) || fallback).trim();
+  const up = token("--green", "#2fd699"), down = token("--red", "#ff6b6b");
+  const grid = token("--border", "rgba(255,255,255,0.07)");
+
+  const chart = LightweightCharts.createChart(host, {
+    autoSize: true,
+    layout: { background: { type: "solid", color: "transparent" }, textColor: token("--text-dim", "#9aa2b5"), fontSize: 11 },
+    grid: { vertLines: { color: grid }, horzLines: { color: grid } },
+    rightPriceScale: { borderColor: grid },
+    timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { locale: "fr-FR" },
+  });
+  botChartInstance = chart;
+
+  // La bibliotheque exige des temps en SECONDES, strictement croissants et
+  // uniques, et affiche l'heure en UTC. Le reste du dashboard est en heure
+  // LOCALE : sans ce decalage, l'axe marquait 01:00 pour la bougie que la
+  // legende datait de 03:00 (constate en verifiant le graphique). Decalage
+  // unique, celui d'aujourd'hui : sur un historique qui traverse un
+  // changement d'heure, les bougies d'avant sont decalees d'une heure.
+  const tzShift = -new Date().getTimezoneOffset() * 60;
+  const seen = new Set();
+  const data = candles
+    .filter(c => { if (seen.has(c.t)) return false; seen.add(c.t); return true; })
+    .sort((a, b) => a.t - b.t)
+    .map(c => ({ time: Math.floor(c.t / 1000) + tzShift, open: c.o, high: c.h, low: c.l, close: c.c }));
+
+  const series = hasOhlc
+    ? chart.addCandlestickSeries({ upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down })
+    : chart.addLineSeries({ color: token("--accent", "#5b8def"), lineWidth: 2 });
+  series.setData(hasOhlc ? data : data.map(d => ({ time: d.time, value: d.close })));
+
+  // Un marqueur doit tomber sur une bougie existante : on le rattache a la
+  // bougie qui contient l'instant du trade (la derniere qui commence avant).
+  const times = data.map(d => d.time);
+  const step = times.length > 1 ? times[times.length - 1] - times[times.length - 2] : 3600;
+  function snap(ms) {
+    const s = Math.floor(ms / 1000) + tzShift;
+    if (s < times[0] || s > times[times.length - 1] + step) return null;
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (times[mid] <= s) lo = mid; else hi = mid - 1; }
+    return times[lo];
+  }
+  const fmt = v => Number(v).toLocaleString("fr-FR", { maximumFractionDigits: 6 });
+  const markers = [];
+  closed.forEach(tr => {
+    const b = snap(tr.buy_t), s = snap(tr.sell_t);
+    if (b !== null) markers.push({ time: b, position: "belowBar", color: up, shape: "arrowUp", text: "achat " + fmt(tr.buy_p) });
+    if (s !== null) markers.push({ time: s, position: "aboveBar", color: down, shape: "arrowDown", text: "vente " + fmt(tr.sell_p) });
+  });
+  open.forEach(pos => {
+    const b = snap(pos.buy_t);
+    if (b !== null) markers.push({ time: b, position: "belowBar", color: up, shape: "arrowUp", text: "achat " + fmt(pos.buy_p) + " (ouvert)" });
+  });
+  markers.sort((a, b) => a.time - b.time);
+  series.setMarkers(markers);
+
+  // Valeurs de la bougie survolee (remplace l'info-bulle perdue a EF-84).
+  const legend = document.getElementById("bot_price_legend");
+  const showLegend = bar => {
+    if (!legend) return;
+    if (!bar) { legend.textContent = ""; return; }
+    // bar.time porte deja le decalage local : on le formate donc "en UTC".
+    const d = new Date(bar.time * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" });
+    legend.textContent = bar.open !== undefined
+      ? d + "   O " + fmt(bar.open) + "   H " + fmt(bar.high) + "   B " + fmt(bar.low) + "   C " + fmt(bar.close)
+      : d + "   " + fmt(bar.value);
+  };
+  chart.subscribeCrosshairMove(param => showLegend(param && param.time ? param.seriesData.get(series) : null));
+
+  // Le dashboard se redessine toutes les 15 s : on conserve le zoom choisi.
+  const saved = botChartRanges[key];
+  if (saved) chart.timeScale().setVisibleLogicalRange(saved);
+  else chart.timeScale().fitContent();
+  chart.timeScale().subscribeVisibleLogicalRangeChange(range => { if (range) botChartRanges[key] = range; });
+}
+
+// --- Onglet Alertes : alertes TradingView recues par webhook (EF-87) ---------
+async function renderAlertsTab() {
+  const contentEl = document.getElementById("content");
+  if (!document.getElementById("alerts-root")) {
+    const hookUrl = window.location.origin + "/api/tv-webhook";
+    contentEl.innerHTML = `<div id="alerts-root">
+      <h1>Alertes TradingView</h1>
+      <p class="muted">TradingView n'offre pas d'API pour lire ses analyses. En revanche, une analyse ecrite en Pine Script
+      tourne en continu sur ses serveurs et peut <strong>appeler ton app</strong> quand elle se declenche (webhook). Les alertes
+      recues arrivent ici. Elles peuvent aussi devenir des ordres <strong>paper</strong> dans le panier Manuel, si tu l'as
+      explicitement active.</p>
+      <div id="alerts-status"></div>
+      <div class="section-block">
+        <div class="section-header"><h2>Brancher TradingView</h2></div>
+        <ol class="muted" style="line-height:1.7; font-size:13px; padding-left:18px;">
+          <li>Dans le fichier <code>.env</code> du serveur, definis <code>TRADINGVIEW_WEBHOOK_SECRET=</code> (une longue chaine au hasard), puis relance le serveur.</li>
+          <li>Rends le serveur joignable depuis internet en <strong>HTTPS sur le port 443</strong> - TradingView refuse tout autre port. Un tunnel (Cloudflare Tunnel, ngrok) est le plus simple et n'ouvre aucun port sur ta box.</li>
+          <li>Sur TradingView, cree une alerte, coche <em>Webhook URL</em> et colle l'adresse publique suivie de <code>/api/tv-webhook</code>. Adresse vue d'ici : <code>${hookUrl}</code></li>
+          <li>Dans le message de l'alerte, colle ce modele en remplacant le secret :</li>
+        </ol>
+        <pre class="dca-pre">{
+  "secret": "TON_SECRET",
+  "ticker": "{{exchange}}:{{ticker}}",
+  "action": "buy",
+  "price": "{{close}}",
+  "amount": 20,
+  "message": "{{strategy.order.comment}}"
+}</pre>
+        <p class="muted" style="font-size:12px;"><code>action</code> : <code>buy</code>, <code>sell</code>, ou n'importe quel autre mot pour une simple information.
+        <code>amount</code> : montant d'achat en USDT (plafonne). A la vente, <code>quantity</code> vaut tout par defaut.
+        Conditions TradingView : abonnement donnant droit aux webhooks, et double authentification activee sur le compte.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;">
+          <button class="primary" onclick="sendTestAlert('test')">Envoyer une alerte de test</button>
+          <button onclick="sendTestAlert('buy')">Tester une alerte d'achat</button>
+          <span class="muted" style="font-size:12px;">L'alerte de test passe par exactement le meme traitement qu'une vraie.</span>
+        </div>
+        <div id="alerts-msg" class="manual-msg"></div>
+      </div>
+      <div id="alerts-list"></div>
+    </div>`;
+  }
+  await refreshAlerts();
+}
+
+async function refreshAlerts() {
+  let d;
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/tv-alerts`);
+    d = await resp.json();
+  } catch (e) {
+    document.getElementById("alerts-status").innerHTML = investServerDownHtml();
+    return;
+  }
+  const pill = (ok, yes, no) => `<span class="pill ${ok ? "pill-ok" : "pill-off"}">${ok ? yes : no}</span>`;
+  document.getElementById("alerts-status").innerHTML = `<div class="section-block"><div class="grid">
+    <div><div class="stat-label">Reception</div><div class="stat-value" style="font-size:16px;">${pill(d.enabled, "active", "desactivee")}</div></div>
+    <div><div class="stat-label">Ordres automatiques</div><div class="stat-value" style="font-size:16px;">${pill(d.auto_orders, "actifs (paper)", "desactives")}</div></div>
+    <div><div class="stat-label">Plafond par alerte</div><div class="stat-value">${d.max_order_usdt} USDT</div></div>
+    <div><div class="stat-label">Alertes recues</div><div class="stat-value">${d.alerts.length}</div></div>
+  </div>
+  ${d.enabled ? "" : '<p class="muted" style="margin-top:10px;">Reception desactivee : aucun <code>TRADINGVIEW_WEBHOOK_SECRET</code> dans <code>.env</code>. Tout appel est refuse.</p>'}
+  ${d.auto_orders ? "" : '<p class="muted" style="margin-top:6px; font-size:12px;">Les alertes sont consignees mais ne passent aucun ordre. Pour qu\\'un <em>buy</em>/<em>sell</em> devienne un ordre paper dans le panier Manuel : <code>TRADINGVIEW_AUTO_ORDERS=1</code> dans <code>.env</code>.</p>'}
+  </div>`;
+
+  const list = document.getElementById("alerts-list");
+  if (!d.alerts.length) {
+    list.innerHTML = '<div class="section-block"><div class="section-header"><h2>Alertes recues</h2></div><p class="muted">Aucune alerte pour le moment.</p></div>';
+    return;
+  }
+  const color = s => s === "execute" ? "var(--green)" : (s === "refuse" || s === "erreur") ? "var(--red)" : s === "en cours" ? "var(--amber)" : "var(--text-faint)";
+  const rows = d.alerts.map(a => `<tr>
+    <td class="muted">${a.received_at.replace("T", " ").replace("+00:00", " UTC")}</td>
+    <td><strong>${a.ticker || "-"}</strong></td>
+    <td>${a.action || "-"}</td>
+    <td style="text-align:right;">${a.price === null ? "-" : a.price}</td>
+    <td style="max-width:260px; white-space:normal;">${(a.message || "").replace(/</g, "&lt;")}</td>
+    <td style="color:${color(a.order_status)}; white-space:normal;" title="${(a.order_detail || "").replace(/"/g, "&quot;")}">${a.order_status || "-"}<br><span class="muted" style="font-size:11px;">${(a.order_detail || "").replace(/</g, "&lt;")}</span></td>
+    <td class="muted" style="font-size:11px;">${a.source_ip || ""}</td>
+  </tr>`).join("");
+  list.innerHTML = `<div class="section-block"><div class="section-header"><h2>Alertes recues</h2></div>
+    <table class="bi"><thead><tr><th>Quand</th><th>Ticker</th><th>Action</th><th style="text-align:right;">Prix</th><th>Message</th><th>Suite donnee</th><th>Origine</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+async function sendTestAlert(action) {
+  const msg = document.getElementById("alerts-msg");
+  if (action === "buy" && !confirm("Envoyer une alerte d'ACHAT de test ?\\n\\nSi les ordres automatiques sont actifs, elle passera un vrai ordre paper (testnet) dans le panier Manuel.")) return;
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/tv-test`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ticker: "BINANCE:ETHUSDT" }),
+    });
+    const d = await resp.json();
+    msg.innerHTML = d.error ? `<span style="color:var(--red);">${d.error}</span>` : `<span style="color:var(--green);">Alerte recue (#${d.id}) - ${d.detail}</span>`;
+  } catch (e) {
+    msg.innerHTML = `<span style="color:var(--red);">Serveur de controle injoignable : ${e}</span>`;
+  }
+  await refreshAlerts();
 }
 
 // EF-82 : l'adresse du serveur est celle qui a servi cette page - c'est ce
@@ -633,6 +844,7 @@ const MAIN_TABS = [
   { id: "bot", label: "🤖 Bot" },
   { id: "invest", label: "💰 Investissement" },
   { id: "manual", label: "🖐 Manuel" },
+  { id: "alerts", label: "🔔 Alertes" },
   { id: "config", label: "⚙ Configuration" },
   { id: "test", label: "🧪 Test" },
 ];
@@ -694,6 +906,12 @@ function renderSubTabsAndContent() {
       btn.onclick = () => { currentInvestSubTab = btn.dataset.id; renderSubTabsAndContent(); };
     });
     renderInvestContent();
+    return;
+  }
+
+  if (currentMainTab === "alerts") {
+    subtabsEl.style.display = "none";
+    renderAlertsTab();
     return;
   }
 

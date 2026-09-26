@@ -141,7 +141,9 @@ Ce graphique a remplacé l'ancienne "courbe de capital" (jugée peu lisible : el
 - **Un cercle** autour de l'achat d'une position encore ouverte.
 - **Les axes** : le prix à gauche, les dates en bas.
 
-Ça permet de voir en un coup d'œil si le bot achète au bon moment par rapport aux mouvements réels du marché. Le prix exact de chaque achat et de chaque vente se lit dans le tableau "Ordres" juste en dessous (le graphique n'affiche plus d'info-bulle au survol).
+Ça permet de voir en un coup d'œil si le bot achète au bon moment par rapport aux mouvements réels du marché.
+
+**Depuis le 2026-09-26, ce graphique est celui de TradingView** (sa bibliothèque gratuite) : **molette** pour zoomer, **glisser** pour se déplacer, et au **survol** d'une bougie, ses quatre valeurs s'affichent en haut à gauche (O = ouverture, H = plus haut, B = plus bas, C = clôture). Les achats sont des flèches vertes, les ventes des flèches rouges, avec leur prix. Le zoom que tu choisis est conservé quand la page se rafraîchit. Si la bibliothèque ne peut pas être chargée (pas d'internet), l'ancien graphique s'affiche à la place.
 
 **Boutons de période** au-dessus du graphique : **Live** (les données en temps réel du bot, granularité fine mais fenêtre courte), **1 heure**, **1 jour**, **1 mois**, **1 an**, **5 ans**, **10 ans**. Les périodes autres que "Live" interrogent l'historique réel du marché (marché spot Binance, pas le testnet dont l'historique est trop court) via le serveur de contrôle — nécessite donc que `python -m tradingbot.control_server` tourne, comme pour créer/modifier un bot. Le résultat est mis en cache une minute pour ne pas surcharger l'exchange si plusieurs onglets sont ouverts sur la même crypto.
 
@@ -639,6 +641,38 @@ fabriqué par toi et non par une autorité connue du navigateur. Clique sur
 redemandera plus. Si tu tapes par erreur l'ancienne adresse en `http://`, la
 page ne s'ouvre pas : remplace simplement par `https://`.
 
+## 11. Onglet « 🔔 Alertes » : recevoir les alertes TradingView
+
+TradingView ne permet pas à une autre application de lire ses analyses. Ce
+qu'il permet : écrire ton analyse sur TradingView (en Pine Script ou avec
+une simple alerte de prix), et quand elle se déclenche, **TradingView prévient
+ton app**. Les alertes reçues s'affichent dans cet onglet.
+
+**Pour que ça marche, trois conditions côté TradingView et côté réseau** :
+1. un abonnement TradingView qui inclut les « webhooks » (selon leur page
+   tarifs de septembre 2026 : Premium ou Ultimate) et la double
+   authentification activée sur ton compte ;
+2. ton app doit être joignable depuis internet, en HTTPS. Le plus simple et le
+   plus sûr est un tunnel (Cloudflare Tunnel, ngrok) : il n'ouvre aucune porte
+   sur ta box ;
+3. sur TradingView, dans l'alerte, coche « Webhook URL », colle l'adresse de
+   ton app suivie de `/api/tv-webhook`, et colle le modèle de message affiché
+   dans l'onglet en y mettant ton secret.
+
+**Le secret** est dans le fichier `.env` (`TRADINGVIEW_WEBHOOK_SECRET`). Sans
+lui, toute alerte est refusée. Il n'est jamais enregistré avec les alertes.
+
+**Par défaut, une alerte ne passe aucun ordre** : elle est seulement notée.
+Si tu veux qu'une alerte « buy » ou « sell » passe un ordre, mets
+`TRADINGVIEW_AUTO_ORDERS=1` dans `.env`. L'ordre est alors passé **en argent
+fictif**, dans ton **panier Manuel** uniquement (jamais dans les bots), et
+limité à 100 USDT par alerte (réglable). La colonne « Suite donnée » te dit
+ce qui s'est passé pour chaque alerte : aucun ordre (et pourquoi), exécuté,
+ou refusé (et pourquoi).
+
+Le bouton **« Envoyer une alerte de test »** simule une alerte depuis l'app,
+pour vérifier que tout fonctionne sans compte TradingView.
+
 ## Historique des changements de l'interface
 
 | Date | Changement |
@@ -710,3 +744,4 @@ page ne s'ouvre pas : remplace simplement par `https://`.
 | 2026-09-17 | Nouvelle strategie **« Régime de tendance »** dans le formulaire de création (§5.1/5.3), demandée par l'utilisateur (« un modèle rentable en haussier, et si possible aussi en baissier ») — le bot reste investi tant que le cours est au-dessus de sa tendance de fond et passe **tout en liquidités** dès qu'il repasse dessous, contrairement au « Filtre de tendance » qui bloquait seulement les nouveaux achats sans jamais fermer une position. Trois réglages : fenêtre de tendance, marge pour entrer, marge pour sortir (les marges évitent le va-et-vient coûteux autour de la ligne). Stop-loss optionnel : la sortie normale est le retournement de tendance. Mesuré sur ETH : +34,8 % en test hors échantillon contre -35,1 % pour un simple achat conservé, et quasi plat en marché baissier au lieu de -41 %. Gagner de l'argent quand ça baisse reste impossible (le bot ne peut qu'acheter), l'objectif est de ne plus subir |
 | 2026-09-18 | **Rafraîchissement de l'interface**, demandé par l'utilisateur (« rendre l'interface graphique plus jolie, moderne et intuitive »). Cinq changements visibles : (1) le contenu occupe désormais toute la largeur de l'écran au lieu d'être bloqué à 900 px — les tableaux ne sont plus comprimés et respirent, alors que l'en-tête s'étalait déjà sur 1360 px ; (2) les valeurs ne se coupent plus en deux lignes dans les tableaux (« +0,00 » puis « % »), et une alternance de teinte aide à suivre une ligne du regard ; (3) les chiffres clés (capital, gain, valeur) sont plus grands et plus lisibles ; (4) chaque intertitre de section porte un petit filet coloré pour se repérer en balayant la page, et les longs paragraphes d'aide apparaissent en encart plutôt que noyés dans le texte courant ; (5) **une légende explique enfin la pastille verte/rouge** à côté de chaque bot (« actif » / « arrêté »), avec le compte des bots en marche et une infobulle précisant qu'un bot est considéré actif s'il a envoyé des données il y a moins de 3 minutes. Ajout aussi d'une icône d'onglet. Les formulaires restent volontairement bornés en largeur : étalés sur tout l'écran, leurs champs se dispersaient sur six colonnes |
 | 2026-09-26 | **Connexion chiffrée (HTTPS) possible pour ouvrir le dashboard depuis un autre appareil.** Le mot de passe et les ordres ne voyagent plus en clair sur le réseau de la maison une fois un certificat créé (une commande) ; l'adresse commence alors par `https://`, et le navigateur affiche un avertissement la première fois, à accepter. Sans certificat, rien ne change. Voir §9 |
+| 2026-09-26 | **Graphique TradingView et onglet « 🔔 Alertes »**, demandés par l'utilisateur. Le graphique de l'onglet Bot utilise désormais la bibliothèque de TradingView : zoom à la molette, déplacement, et valeurs de la bougie survolée. Nouvel onglet Alertes : reçoit les alertes envoyées par TradingView, avec les instructions pour les brancher, un bouton de test, et la liste des alertes reçues. Une alerte ne passe aucun ordre sauf si tu l'actives (ordres fictifs, panier Manuel, plafonnés). Voir §4.2 et §11 |

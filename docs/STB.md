@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.78 |
+| **Version** | 0.79 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -92,6 +92,7 @@
 | 0.76 | EF-84 : graphique des bots en chandeliers avec triangles d'achat et de vente, comme l'onglet Test |
 | 0.77 | EF-85 : un bot ne meurt plus sur une coupure reseau passagere ; le journal d'un bot n'est plus efface a sa relance |
 | 0.78 | EF-86 : HTTPS optionnel pour l'acces reseau au dashboard (mot de passe et ordres chiffres), certificat auto-signe genere par script |
+| 0.79 | EF-87 : graphique TradingView dans l'onglet Bot ; reception des alertes TradingView (onglet Alertes), ordres automatiques desactives par defaut |
 ---
 
 ## 1. Introduction
@@ -257,6 +258,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-84 | Le graphique de cours des bots doit ressembler a celui des tests : bougies, et triangles pour les achats et ventes - demande de l'utilisateur | Pourrait - **realise**. Meme fonction de dessin pour les deux onglets ; historique des bots en bougies completes. Voir STC §3.70 |
 | EF-85 | Un bot ne doit pas mourir sur une coupure reseau passagere, et la trace d'un plantage doit survivre a la relance - signale par l'utilisateur ("regarde pourquoi le bot ETH a plante") | Doit - **realise**. Le bot ETH est mort sur une coupure de quelques secondes et est reste 6 h a l'arret avec une position ouverte. Les erreurs reseau passageres sont desormais reessayees a la lecture des donnees ; le journal n'est plus efface a chaque lancement. Voir STC §3.71 |
 | EF-86 | L'acces reseau au dashboard doit pouvoir etre chiffre : le mot de passe HTTP Basic et les ordres ne doivent pas circuler en clair - point ouvert de la revue du 2026-09-20 (limite assumee d'EF-82) | Devrait - **realise**. HTTPS active par `DASHBOARD_TLS_CERT` + `DASHBOARD_TLS_KEY` ; sans eux, comportement inchange (HTTP). Configuration a moitie remplie ou certificat illisible = refus de demarrer, jamais de repli silencieux sur HTTP. Certificat auto-signe genere par `scripts/generate_dashboard_cert.sh`. Voir STC §3.72 |
+| EF-87 | Automatiser des analyses avec TradingView, et utiliser sa bibliotheque de graphiques - demande de l'utilisateur | Devrait - **realise en partie, limite dite**. TradingView n'a pas d'API d'analyse : l'automatisation passe par ses alertes (Pine Script -> webhook), desormais recues par l'app (onglet Alertes), fermees sans secret, et pouvant devenir des ordres paper plafonnes si l'utilisateur l'active. Graphique des bots sur TradingView Lightweight Charts. **Reste a faire par l'utilisateur** : rendre le serveur joignable en HTTPS sur le port 443 (tunnel), et disposer d'un abonnement TradingView donnant droit aux webhooks. Voir STC §3.73 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---
