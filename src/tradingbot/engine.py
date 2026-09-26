@@ -164,27 +164,43 @@ class Engine:
         # 2. Signal de la strategie (achat = nouveau lot, vente = sortie complete).
         signal = self.strategy.on_candle(candle)
         if signal is not None:
-            open_positions = self.executor.get_positions()
-            open_positions_count = len(open_positions)
-            action = "Achat" if signal.side == Side.BUY else "Vente"
-
-            if self.risk_manager.validate(
-                signal, open_positions_count=open_positions_count,
-                open_positions=open_positions, current_price=candle.close,
-            ):
-                if signal.side == Side.BUY:
-                    messages.append(self._handle_buy_signal(signal, candle))
-                else:
-                    messages.extend(self._close_all_positions(candle, reason=signal.reason or "signal"))
-            else:
-                rejection = self.risk_manager.explain_rejection(
-                    signal, open_positions_count=open_positions_count,
-                    open_positions=open_positions, current_price=candle.close,
-                )
-                messages.append(f"{action} ignore : {rejection}")
+            messages.extend(self._handle_signal(signal, candle))
 
         if not messages:
             messages.append("Aucun signal de la strategie")
+        return messages
+
+    def _handle_signal(self, signal, candle: Candle) -> list[str]:
+        """Validation par le gestionnaire de risque puis execution - partage
+        entre les signaux de la strategie et les ordres poses a la main
+        (EF-88), pour qu'un ordre manuel ne contourne AUCUN garde-fou."""
+        open_positions = self.executor.get_positions()
+        open_positions_count = len(open_positions)
+        action = "Achat" if signal.side == Side.BUY else "Vente"
+
+        if self.risk_manager.validate(
+            signal, open_positions_count=open_positions_count,
+            open_positions=open_positions, current_price=candle.close,
+        ):
+            if signal.side == Side.BUY:
+                return [self._handle_buy_signal(signal, candle)]
+            return self._close_all_positions(candle, reason=signal.reason or "signal")
+        rejection = self.risk_manager.explain_rejection(
+            signal, open_positions_count=open_positions_count,
+            open_positions=open_positions, current_price=candle.close,
+        )
+        return [f"{action} ignore : {rejection}"]
+
+    def process_manual_signal(self, signal, candle: Candle) -> list[str]:
+        """Execute un ordre pose a la main (EF-88) au prix de `candle`, par le
+        MEME chemin qu'un signal de la strategie (risque, panier commun,
+        journal) - mais sans appeler la strategie : son etat (EMA, fenetres)
+        n'avance qu'avec les vraies bougies closes."""
+        self._roll_daily_counters_if_new_day(candle)
+        messages = self._handle_signal(signal, candle)
+        if self.on_decision is not None:
+            for message in messages:
+                self.on_decision(candle, f"[ordre manuel] {message}")
         return messages
 
     def _handle_buy_signal(self, signal, candle: Candle) -> str:

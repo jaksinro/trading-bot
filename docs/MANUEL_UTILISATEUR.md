@@ -149,6 +149,19 @@ Ce graphique a remplacé l'ancienne "courbe de capital" (jugée peu lisible : el
 
 Un achat ou une vente antérieur à la période affichée n'apparaît simplement pas : choisis une période plus longue pour le voir.
 
+**Afficher les zones** — trois cases à cocher au-dessus du graphique, que ton navigateur retient :
+- **Stop-loss et objectifs** : pour chaque position ouverte, son prix d'achat, et selon les réglages du bot son stop-loss (vente si le cours tombe là), son objectif (vente avec gain), son **trailing stop** (qui monte avec le plus haut atteint depuis l'achat) et son verrou de gain. Les bots « trend_regime » n'ont volontairement ni stop-loss ni objectif : chez eux, seul le prix d'achat s'affiche.
+- **Seuils de la stratégie** : les niveaux où la stratégie agit. Pour « trend_regime » : la tendance de fond (le bot vend si le cours passe dessous) et le seuil au-dessus duquel il achète.
+- **Ordres manuels** : tes ordres en attente, en pointillés orange.
+
+**Poser un ordre d'achat en cliquant** — clique sur le graphique à la hauteur du prix voulu. Une fenêtre te propose : « acheter si le cours descend sous ce prix ». Si tu confirmes, le bot surveille ce seuil toutes les minutes et achète **lui-même**, au marché, dès que le cours y arrive. Ce qu'il faut savoir :
+- l'achat passe par **les mêmes protections que la stratégie** : si le bot a déjà atteint son nombre maximal de positions, ou sa perte du jour, l'ordre est refusé et la raison s'affiche. Les bots actuels sont limités à une position à la fois et sont tous en position : un ordre posé sur eux sera refusé tant qu'ils le restent ;
+- une fois acheté, le lot devient une position normale du bot, qui la revendra selon ses propres règles ;
+- le cours est vérifié toutes les minutes : un creux très bref entre deux vérifications peut passer inaperçu, et le prix d'achat réel peut différer un peu du seuil ;
+- si le cours est **déjà** sous le prix cliqué, la fenêtre te prévient : l'achat partira dans la minute.
+
+Sous le graphique, le tableau **« Ordres manuels sur ce bot »** liste tes ordres : en attente (avec un bouton **Annuler**), exécuté, refusé (avec la raison), ou annulé. Un ordre ne se déclenche qu'une fois.
+
 ---
 
 ## 5. Onglet "Configuration"
@@ -745,3 +758,4 @@ pour vérifier que tout fonctionne sans compte TradingView.
 | 2026-09-18 | **Rafraîchissement de l'interface**, demandé par l'utilisateur (« rendre l'interface graphique plus jolie, moderne et intuitive »). Cinq changements visibles : (1) le contenu occupe désormais toute la largeur de l'écran au lieu d'être bloqué à 900 px — les tableaux ne sont plus comprimés et respirent, alors que l'en-tête s'étalait déjà sur 1360 px ; (2) les valeurs ne se coupent plus en deux lignes dans les tableaux (« +0,00 » puis « % »), et une alternance de teinte aide à suivre une ligne du regard ; (3) les chiffres clés (capital, gain, valeur) sont plus grands et plus lisibles ; (4) chaque intertitre de section porte un petit filet coloré pour se repérer en balayant la page, et les longs paragraphes d'aide apparaissent en encart plutôt que noyés dans le texte courant ; (5) **une légende explique enfin la pastille verte/rouge** à côté de chaque bot (« actif » / « arrêté »), avec le compte des bots en marche et une infobulle précisant qu'un bot est considéré actif s'il a envoyé des données il y a moins de 3 minutes. Ajout aussi d'une icône d'onglet. Les formulaires restent volontairement bornés en largeur : étalés sur tout l'écran, leurs champs se dispersaient sur six colonnes |
 | 2026-09-26 | **Connexion chiffrée (HTTPS) possible pour ouvrir le dashboard depuis un autre appareil.** Le mot de passe et les ordres ne voyagent plus en clair sur le réseau de la maison une fois un certificat créé (une commande) ; l'adresse commence alors par `https://`, et le navigateur affiche un avertissement la première fois, à accepter. Sans certificat, rien ne change. Voir §9 |
 | 2026-09-26 | **Graphique TradingView et onglet « 🔔 Alertes »**, demandés par l'utilisateur. Le graphique de l'onglet Bot utilise désormais la bibliothèque de TradingView : zoom à la molette, déplacement, et valeurs de la bougie survolée. Nouvel onglet Alertes : reçoit les alertes envoyées par TradingView, avec les instructions pour les brancher, un bouton de test, et la liste des alertes reçues. Une alerte ne passe aucun ordre sauf si tu l'actives (ordres fictifs, panier Manuel, plafonnés). Voir §4.2 et §11 |
+| 2026-09-26 | **Ordres d'achat au clic et zones sur le graphique des bots**, demandés par l'utilisateur. Un clic sur le graphique propose d'acheter si le cours descend sous le prix cliqué ; le bot surveille et achète lui-même, avec les mêmes protections que sa stratégie. Trois cases à cocher affichent ou masquent les zones : stop-loss et objectifs, seuils de la stratégie, ordres en attente. Nouveau tableau « Ordres manuels sur ce bot » avec bouton Annuler. Voir §4.2 |

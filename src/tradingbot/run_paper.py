@@ -39,7 +39,8 @@ from tradingbot.reporting.stats import build_orders_table, compute_report
 from tradingbot.risk.risk_manager import MarketMakingConfig, RiskConfig, RiskManager
 from tradingbot.run_backtest import build_strategy
 from tradingbot.shared_pool import SharedPool
-from tradingbot.types import Candle
+from tradingbot.manual_triggers import EXECUTED, REJECTED, TriggerStore
+from tradingbot.types import Candle, Side, Signal
 
 IBKR_SHARED_POOL_DB_PATH = "data/shared_pool_ibkr.db"  # panier de capital SEPARE du panier crypto (EF-65)
 
@@ -177,6 +178,19 @@ def poll_new_closed_candle(exchange, symbol: str, timeframe: str, last_seen_ts: 
     if last_seen_ts is not None and timestamp <= last_seen_ts:
         return None
     return _row_to_candle(closed_row)
+
+
+def strategy_chart_levels(strategy) -> list[dict]:
+    """Niveaux de prix propres a la strategie, a tracer sur le graphique
+    (EF-88) : `[{"price", "label", "kind"}]`. Liste vide pour une strategie
+    qui n'en expose pas - jamais d'erreur pour un simple affichage."""
+    getter = getattr(strategy, "chart_levels", None)
+    if getter is None:
+        return []
+    try:
+        return [lvl for lvl in getter() if lvl.get("price")]
+    except Exception:
+        return []
 
 
 def is_transient_network_error(error: BaseException) -> bool:
@@ -459,6 +473,9 @@ def main(config_path: str) -> None:
         api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
         executor = PaperExecutor(config["exchange"], config["symbol"], api_key, api_secret)
     logger = TradeLogger(config["name"])
+    # EF-88 : ordres "acheter si le cours descend sous X" poses depuis le
+    # dashboard, stockes dans la base de CE bot et executes par lui.
+    manual_triggers = TriggerStore(logger.db_path)
     recent_logs: deque[list] = deque(maxlen=MAX_RECENT_LOGS)
     price_history: deque[list] = deque(maxlen=MAX_PRICE_HISTORY_POINTS)
 
@@ -694,6 +711,7 @@ def main(config_path: str) -> None:
         price_level_sizer_status=price_level_sizer_status(price_level_sizer),
         pool_available_cash=shared_pool.available_cash(),
         effective_cap=shared_pool.effective_cap(instance_name, capital_allocated),
+        chart_levels=strategy_chart_levels(strategy),
     )
     if not dashboard_already_existed:
         webbrowser.open(MASTER_DASHBOARD_PATH.resolve().as_uri())
@@ -753,6 +771,30 @@ def main(config_path: str) -> None:
                         for message in messages:
                             print(f"[{fine_candle.timestamp}] (surveillance fine) {message}")
 
+            # EF-88 : ordres poses a la main - verifies a chaque passage (toutes les
+            # minutes) sur le cours du moment, executes par le MEME chemin qu'un
+            # signal de la strategie (garde-fous compris).
+            if not is_market_making:
+                for trigger in manual_triggers.due(current_price):
+                    if not manual_triggers.claim(trigger["id"]):
+                        continue  # annule entre-temps par l'utilisateur : ne part pas
+                    now_ms = int(time.time() * 1000)
+                    tick = Candle(timestamp=now_ms, open=current_price, high=current_price,
+                                  low=current_price, close=current_price, volume=0.0)
+                    try:
+                        results = engine.process_manual_signal(Signal(side=Side.BUY, reason="ordre_manuel"), tick)
+                    except Exception as e:
+                        manual_triggers.finish(trigger["id"], REJECTED, f"erreur : {type(e).__name__}: {e}")
+                        logger.log_event("warning", f"Ordre manuel #{trigger['id']} en erreur : {e}")
+                        raise  # une erreur pendant un ordre reste fatale : etat ambigu (voir EF-85)
+                    detail = " ; ".join(results) or "aucun resultat"
+                    ok = any(r.startswith("Achat execute") for r in results)
+                    manual_triggers.finish(trigger["id"], EXECUTED if ok else REJECTED,
+                                           f"cours {current_price} (seuil {trigger['trigger_price']}) : {detail}")
+                    logger.log_event("info", f"Ordre manuel #{trigger['id']} (achat sous {trigger['trigger_price']}) : {detail}")
+                    print(f"[ordre manuel #{trigger['id']}] {detail}", flush=True)
+                    logger.save_open_positions(executor.portfolio.positions)
+
             write_dashboard(
                 instance_name=instance_name,
                 symbol=config["symbol"],
@@ -769,6 +811,7 @@ def main(config_path: str) -> None:
                 price_level_sizer_status=price_level_sizer_status(price_level_sizer),
                 pool_available_cash=shared_pool.available_cash(),
                 effective_cap=shared_pool.effective_cap(instance_name, capital_allocated),
+                chart_levels=strategy_chart_levels(strategy),
             )
             time.sleep(poll_interval_seconds)
     except KeyboardInterrupt:

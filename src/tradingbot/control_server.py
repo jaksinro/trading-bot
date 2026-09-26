@@ -789,6 +789,18 @@ def tv_settings() -> dict:
     }
 
 
+def bot_trigger_store(name: str):
+    """Registre des ordres declenches d'un bot EXISTANT, ou None. Le nom est
+    verifie contre les configs connues : il sert a construire un chemin de
+    fichier, il ne doit jamais pouvoir designer autre chose qu'une base de bot."""
+    from tradingbot.manual_triggers import TriggerStore
+    from tradingbot.reporting.logger import DATA_DIR
+
+    if not name or get_config_path_for_name(name) is None:
+        return None
+    return TriggerStore(DATA_DIR / f"{name}.db")
+
+
 def run_alert_order_in_background(store, alert_id: int, plan: dict) -> threading.Thread:
     """TradingView abandonne l'appel au-dela de 3 secondes, alors qu'un ordre
     testnet (cours, solde, ordre) peut les depasser : on a deja repondu,
@@ -932,6 +944,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/dca-contribution": self._handle_dca_contribution,
             "/api/manual-order": self._handle_manual_order,
             "/api/tv-test": self._handle_tv_test,
+            "/api/bot-trigger": self._handle_bot_trigger,
+            "/api/bot-trigger-cancel": self._handle_bot_trigger_cancel,
             "/api/manual-deposit": self._handle_manual_deposit,
             "/api/manual-reset": self._handle_manual_reset,
         }
@@ -1275,6 +1289,37 @@ class Handler(BaseHTTPRequestHandler):
         status, body = execute_manual_order(payload)
         self._send_json(status, body)
 
+    def _handle_bot_trigger(self, payload: dict) -> None:
+        """Pose un ordre "acheter si le cours descend sous X" sur un bot (EF-88).
+        Le bot le verifie a chaque passage de sa boucle et l'execute lui-meme."""
+        name = str(payload.get("name", ""))
+        store = bot_trigger_store(name)
+        if store is None:
+            self._send_json(404, {"error": f"bot '{name}' introuvable"})
+            return
+        try:
+            price = float(payload.get("price"))
+            trigger_id = store.add_buy_below(price)
+        except (TypeError, ValueError) as e:
+            self._send_json(400, {"error": f"seuil invalide : {e}"})
+            return
+        self._send_json(200, {"status": "ok", "id": trigger_id, "price": price})
+
+    def _handle_bot_trigger_cancel(self, payload: dict) -> None:
+        store = bot_trigger_store(str(payload.get("name", "")))
+        if store is None:
+            self._send_json(404, {"error": "bot introuvable"})
+            return
+        try:
+            cancelled = store.cancel(int(payload.get("id")))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "identifiant invalide"})
+            return
+        if not cancelled:
+            self._send_json(409, {"error": "ordre deja execute, refuse ou annule : rien a annuler"})
+            return
+        self._send_json(200, {"status": "annule"})
+
     def _handle_tv_test(self, payload: dict) -> None:
         """Simule une alerte depuis le dashboard (utilisateur deja authentifie),
         pour verifier la chaine sans compte TradingView. Passe par le meme
@@ -1497,6 +1542,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, read_price_history(config, db_path_for(config.name), days=days))
             except Exception as e:
                 self._send_json(500, {"error": f"historique indisponible : {e}"})
+            return
+
+        if self.path.startswith("/api/bot-triggers"):
+            name = unquote((parse_qs(urlsplit(self.path).query).get("name") or [""])[0])
+            store = bot_trigger_store(name)
+            if store is None:
+                self._send_json(404, {"error": f"bot '{name}' introuvable"})
+                return
+            self._send_json(200, {"triggers": store.recent(20)})
             return
 
         if self.path == "/api/tv-alerts":

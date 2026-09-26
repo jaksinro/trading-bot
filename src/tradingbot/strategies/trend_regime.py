@@ -64,6 +64,22 @@ class TrendRegimeStrategy(Strategy):
     def ema(self) -> float | None:
         return self._ema
 
+    def chart_levels(self) -> list[dict]:
+        """Niveaux a tracer sur le graphique du bot (EF-88) : la tendance de
+        fond, le seuil au-dessus duquel la strategie achete, et celui sous
+        lequel elle vend. Vide tant que l'EMA n'existe pas."""
+        if self._ema is None:
+            return []
+        levels = [{"price": self._ema, "label": f"tendance (EMA{self.ema_period})", "kind": "trend"}]
+        entry = self._ema * (1 + self.entry_buffer_pct)
+        exit_ = self._ema * (1 - self.exit_buffer_pct)
+        levels.append({"price": entry, "label": f"achat au-dessus (+{self.entry_buffer_pct:.0%})", "kind": "entry"})
+        if abs(exit_ - self._ema) > 1e-12:
+            levels.append({"price": exit_, "label": f"sortie en dessous (-{self.exit_buffer_pct:.0%})", "kind": "exit"})
+        else:
+            levels[0]["label"] += " - sortie en dessous"
+        return levels
+
     def on_candle(self, candle: Candle) -> Signal | None:
         self._ema = (
             candle.close if self._ema is None

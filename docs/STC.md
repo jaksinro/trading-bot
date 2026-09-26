@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.82 |
+| **Version** | 0.83 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -96,6 +96,7 @@
 | 0.80 | EF-85 (§3.71) : **une coupure reseau tuait un bot** - le bot ETH est mort a 02h09 sur un `ccxt.NetworkError` passager et est reste 6 h a l'arret avec une position ouverte. La lecture des donnees de marche reessaie desormais les erreurs reseau passageres ; les autres erreurs, et celles pendant un ordre, continuent d'arreter le bot. **Le journal etait efface a chaque relance** : il est desormais complete et tourne au-dela de 2 Mo |
 | 0.81 | EF-86 (§3.72) : **HTTPS optionnel pour l'acces reseau au dashboard** (`DASHBOARD_TLS_CERT`/`DASHBOARD_TLS_KEY`) ; poignee de main TLS dans le thread de la requete ; configuration incomplete = refus de demarrer ; certificat auto-signe genere par `scripts/generate_dashboard_cert.sh` ; scripts de demarrage compatibles |
 | 0.82 | EF-87 (§3.73) : **graphique TradingView Lightweight Charts** (version figee + SRI, repli sur le dessin maison, zoom/reticule/legende OHLC, heure alignee sur l'heure locale) et **reception des alertes TradingView** par webhook : fermee sans secret, secret dans le corps (aucun en-tete possible), seule route avant l'auth du dashboard, ordres paper automatiques desactives par defaut et plafonnes, execution en arriere-plan (limite TradingView de 3 s). Exposition internet laissee a la decision de l'utilisateur |
+| 0.83 | EF-88 (§3.74) : **ordres d'achat declenches poses au clic sur le graphique d'un bot**, stockes par le serveur et executes par le bot par le MEME chemin qu'un signal de la strategie (aucun garde-fou contourne), declenchement unique, annulation prioritaire ; **zones activables** (stop-loss/objectifs/trailing/verrou, seuils de la strategie via `chart_levels()`, ordres en attente). Verifie en reel : ordre releve en 22 s et refuse par le gestionnaire de risque, sans achat |
 
 ---
 
@@ -1685,6 +1686,30 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Verification reelle** : reponse du webhook en 0,23 s ; mauvais secret -> 401 ; alerte d'achat valide consignee sans ordre (ordres automatiques desactives) ; graphique verifie dans le navigateur (bibliotheque 4.2.3 chargee, sans repli, fleche d'achat de la position ETH, legende au survol, heure alignee) ; onglet Alertes affichant les deux alertes recues.
 
 **Validation** : `tests/test_tv_alerts.py`, 27 tests - fermeture sans secret, secret absent/faux, secret jamais stocke, texte brut avec jeton, corps trop long, correspondance des tickers, decision d'ordre (desactive, plafond, montant par defaut, vente totale, ticker inconnu, alerte informative), alerte stockee avec sa decision, filtre d'IP, **ordre en arriere-plan avec reponse en moins d'une seconde pendant qu'il s'execute**, echec d'ordre consigne, et trois tests par un vrai serveur HTTP dont celui verifiant que l'exception d'authentification reste limitee au webhook. Suite complete : **829 tests**.
+
+---
+
+### 3.74 EF-88 : ordres d'achat declenches poses au clic sur le graphique d'un bot, et zones activables
+
+**Demande** : "j'aimerais pouvoir poser une action manuelle sur les bots, en cliquant sur le graphique des bots, je veux pouvoir mettre un ordre d'achat (si le cours descend sous cette valeur alors on achete) et j'aimerais voir sur le graphique (activable ou desactivable) les zones de stop loss et les autres zones".
+
+**Ordre declenche - conception** (`manual_triggers.py`) : un clic sur le graphique donne le prix sous le curseur ; apres confirmation, l'ordre "acheter si le cours descend sous X" est **stocke par le serveur dans la base du bot** et **execute par le bot lui-meme**, qui le verifie a chaque passage de sa boucle (toutes les minutes) sur le cours du moment. Choix structurant : l'ordre passe par `Engine.process_manual_signal`, qui reutilise `_handle_signal` - **exactement** le chemin d'un signal de la strategie (gestionnaire de risque : nombre de positions, perte journaliere ; panier commun ; journal des ordres). Un ordre manuel ne contourne donc AUCUN garde-fou, et le lot achete devient une position ordinaire du bot, geree par ses sorties habituelles. La strategie, elle, n'est pas appelee : son etat (EMA) n'avance qu'avec les vraies bougies closes.
+
+Details qui evitent des erreurs reelles :
+- **declenchement unique** : `claim` reserve l'ordre juste avant l'execution (`en attente` -> `en cours`) ; un ordre annule entre le releve du cours et l'execution ne part pas (teste) ;
+- etat final `execute` ou `refuse`, avec le cours, le seuil et le motif exact ;
+- une erreur PENDANT l'execution reste fatale pour le bot (etat ambigu, meme regle qu'EF-85) ;
+- le nom du bot sert a construire le chemin de sa base : il est verifie contre les configs existantes (`../shared_pool` et assimiles refuses, teste) ;
+- si le cours est deja sous le seuil au moment du clic, la confirmation previent que l'achat partira au prochain passage ;
+- **limites dites dans le code et au manuel** : un creux plus court qu'une minute entre deux releves peut ne pas etre vu ; l'achat part au marche, donc a un prix pouvant differer un peu du seuil.
+
+**Zones** (trois familles, chacune activable par une case a cocher memorisee dans le navigateur) : "Stop-loss et objectifs" (stop-loss, objectif, **trailing stop calcule depuis le plus haut atteint**, verrou de gain arme/vente, prix d'achat - `build_orders_table` publie desormais trailing et verrou pour les positions ouvertes), "Seuils de la strategie" (via une methode facultative `chart_levels()` ; pour `trend_regime` : tendance EMA, seuil d'achat, seuil de sortie - confondu avec la tendance quand la marge de sortie est nulle), "Ordres manuels" (ordres en attente). Lignes horizontales de Lightweight Charts avec etiquette sur l'axe. Un `chart_levels()` defaillant ne peut pas faire planter le bot (teste). Les trois bots `trend_regime` n'ont ni stop-loss ni objectif : sur eux, la famille "Stop-loss et objectifs" n'affiche que le prix d'achat - c'est leur configuration, pas un oubli d'affichage.
+
+**Verification reelle, sans aucun achat** : un ordre pose sur ETH au-dessus du cours (2 800 pour 2 692,89) a ete releve par le bot 22 secondes plus tard, soumis au gestionnaire de risque, et **refuse** (deja une position, maximum 1) - motif consigne en base et au journal, aucun ordre parti. Dans le navigateur : cases a cocher et lignes affichees (prix d'achat 2 737, seuil d'achat +3 % a 2 666, tendance a 2 589), clic sur le graphique donnant 2 644,72 avec le bon texte de confirmation, reponse "non" -> rien de pose ; la case "Seuils de la strategie" retire puis retablit ses lignes.
+
+**Consequence a connaitre** : les trois bots actuels ont `max_concurrent_positions: 1` et sont tous en position ; tout ordre manuel pose sur eux sera refuse tant qu'ils le restent. Relever ce maximum est une decision de gestion du risque laissee a l'utilisateur.
+
+**Validation** : `tests/test_manual_triggers.py`, 20 tests (registre, annulation qui gagne sur l'execution, declenchement unique, execution par le vrai moteur, limite de positions respectee, strategie non appelee, journalisation, niveaux de `trend_regime`, repli sur une strategie defaillante, trailing et verrou dans le tableau des ordres, routes HTTP reelles dont le refus des noms de bot invalides). Suite complete : **849 tests**.
 
 ---
 

@@ -54,6 +54,7 @@ def write_dashboard(
     price_level_sizer_status: dict | None = None,
     pool_available_cash: float | None = None,
     effective_cap: float | None = None,
+    chart_levels: list[dict] | None = None,
 ) -> None:
     DASHBOARD_DIR.mkdir(exist_ok=True)
     _update_registry(instance_name)
@@ -96,6 +97,9 @@ def write_dashboard(
         # module par sa performance recente). None en mode backtest (pas de panier).
         "pool_available_cash": pool_available_cash,
         "effective_cap": effective_cap,
+        # EF-88 : niveaux de la strategie (ex. tendance et seuils d'achat/sortie
+        # de trend_regime), traces sur le graphique si l'utilisateur les active.
+        "chart_levels": chart_levels or [],
     }
     js_content = (
         "window.BOT_INSTANCES = window.BOT_INSTANCES || {};\n"
@@ -530,14 +534,17 @@ function renderPriceChartSection(name, data) {
   // EF-84 : chandeliers + triangles d'achat/vente, meme dessin que l'onglet
   // Test. Le canvas ne peut etre dessine qu'une fois insere dans la page :
   // on memorise ce qu'il faut tracer, `drawPendingBotChart()` le fait ensuite.
-  pendingBotChart = points ? { points, orders: data.orders, name } : null;
+  pendingBotChart = points ? { points, orders: data.orders, name, levels: data.chart_levels || [], price: data.current_price } : null;
   const chartHtml = points
-    ? `<div style="position:relative;">
+    ? `${renderChartZoneToggles()}
+       <div style="position:relative;">
          <div id="bot_price_chart" style="width:100%; height:340px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;"></div>
          <div id="bot_price_legend" class="chart-ohlc"></div>
        </div>
        <p class="muted" style="font-size:11px; margin-top:6px;">Molette = zoom, glisser = se deplacer, survol = ouverture / haut / bas / cloture de la bougie.
-       Fleche verte = achat, fleche rouge = vente, "ouvert" = position encore ouverte. Graphique : TradingView Lightweight Charts.</p>`
+       Fleche verte = achat, fleche rouge = vente, "ouvert" = position encore ouverte. Graphique : TradingView Lightweight Charts.
+       <strong>Clique sur le graphique</strong> pour poser un ordre : acheter si le cours descend sous le prix clique.</p>
+       <div id="bot_triggers_list"></div>`
     : '<p class="muted">Chargement du cours historique...</p>';
   return `${renderPriceRangeSelector(name)}${chartHtml}`;
 }
@@ -590,6 +597,8 @@ function drawPendingBotChart() {
     try { drawTradingViewChart(host, candles, closed, open, hasOhlc); return; }
     catch (e) { console.error("graphique TradingView indisponible, repli sur le dessin maison :", e); host.innerHTML = ""; }
   }
+  botChartSeries = null;
+  refreshBotTriggers(pendingBotChart.name, null);
   host.innerHTML = '<canvas id="bot_price_canvas" style="width:100%; height:100%; display:block;"></canvas>';
   drawBacktestCandlestickChart(candles, closed, open, hasOhlc, "bot_price_canvas");
 }
@@ -668,11 +677,168 @@ function drawTradingViewChart(host, candles, closed, open, hasOhlc) {
   };
   chart.subscribeCrosshairMove(param => showLegend(param && param.time ? param.seriesData.get(series) : null));
 
+  // EF-88 : zones (stop-loss, objectifs, seuils de la strategie, ordres manuels)
+  // tracees en lignes horizontales, chaque famille activable a part.
+  botChartSeries = series;
+  drawChartZones(series);
+  refreshBotTriggers(pendingBotChart.name, series);
+
+  // Clic sur le graphique : poser un ordre "acheter si le cours descend sous X".
+  const clickedName = pendingBotChart.name, clickedPrice = pendingBotChart.price;
+  chart.subscribeClick(param => {
+    if (!param || !param.point) return;
+    const price = series.coordinateToPrice(param.point.y);
+    if (price === null || !isFinite(price) || price <= 0) return;
+    placeBuyTrigger(clickedName, price, clickedPrice);
+  });
+
   // Le dashboard se redessine toutes les 15 s : on conserve le zoom choisi.
   const saved = botChartRanges[key];
   if (saved) chart.timeScale().setVisibleLogicalRange(saved);
   else chart.timeScale().fitContent();
   chart.timeScale().subscribeVisibleLogicalRangeChange(range => { if (range) botChartRanges[key] = range; });
+}
+
+// --- Zones et ordres declenches sur le graphique des bots (EF-88) ------------
+const CHART_ZONE_KINDS = [
+  { id: "risk", label: "Stop-loss et objectifs" },
+  { id: "strategy", label: "Seuils de la strategie" },
+  { id: "triggers", label: "Ordres manuels" },
+];
+let botChartSeries = null;
+let botZoneLines = [];
+let botTriggerLines = [];
+let botTriggersCache = {};
+
+function zoneEnabled(id) {
+  try { return localStorage.getItem("zone_" + id) !== "off"; } catch (e) { return true; }
+}
+
+function toggleZone(id, on) {
+  try { localStorage.setItem("zone_" + id, on ? "on" : "off"); } catch (e) {}
+  if (botChartSeries) { drawChartZones(botChartSeries); drawTriggerLines(botChartSeries); }
+}
+
+function renderChartZoneToggles() {
+  const boxes = CHART_ZONE_KINDS.map(k =>
+    `<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); cursor:pointer;">
+       <input type="checkbox" ${zoneEnabled(k.id) ? "checked" : ""} onchange="toggleZone('${k.id}', this.checked)"> ${k.label}</label>`
+  ).join("");
+  return `<div style="display:flex; gap:16px; flex-wrap:wrap; margin:4px 0 8px 0;">${boxes}</div>`;
+}
+
+function tokenColor(name, fallback) {
+  return (getComputedStyle(document.documentElement).getPropertyValue(name) || fallback).trim();
+}
+
+function addLine(series, store, price, color, title, style) {
+  if (price === null || price === undefined || !isFinite(price) || price <= 0) return;
+  store.push(series.createPriceLine({
+    price, color, title, lineWidth: 1, axisLabelVisible: true,
+    lineStyle: style === undefined ? LightweightCharts.LineStyle.Dashed : style,
+  }));
+}
+
+function drawChartZones(series) {
+  botZoneLines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} });
+  botZoneLines = [];
+  if (!pendingBotChart) return;
+  const red = tokenColor("--red", "#ff6b6b"), green = tokenColor("--green", "#2fd699");
+  const amber = tokenColor("--amber", "#f5b74f"), purple = tokenColor("--purple", "#b18cff");
+  const accent = tokenColor("--accent", "#5b8def");
+  const L = LightweightCharts.LineStyle;
+  if (zoneEnabled("risk")) {
+    (pendingBotChart.orders || []).filter(o => o.status === "ouvert").forEach(o => {
+      addLine(series, botZoneLines, o.target_stop_loss, red, "stop-loss", L.Dashed);
+      addLine(series, botZoneLines, o.target_take_profit, green, "objectif", L.Dashed);
+      addLine(series, botZoneLines, o.target_trailing_stop, amber, "trailing stop", L.Dashed);
+      addLine(series, botZoneLines, o.profit_lock_arm, purple, "verrou arme au-dessus", L.Dotted);
+      addLine(series, botZoneLines, o.profit_lock_trigger, purple, "verrou : vente sous", L.Dashed);
+      addLine(series, botZoneLines, o.buy_price, tokenColor("--text-dim", "#9aa2b5"), "prix d'achat", L.Dotted);
+    });
+  }
+  if (zoneEnabled("strategy")) {
+    (pendingBotChart.levels || []).forEach(lv => {
+      const color = lv.kind === "entry" ? green : lv.kind === "exit" ? red : accent;
+      addLine(series, botZoneLines, lv.price, color, lv.label, lv.kind === "trend" ? L.Solid : L.Dotted);
+    });
+  }
+}
+
+function drawTriggerLines(series) {
+  botTriggerLines.forEach(l => { try { series.removePriceLine(l); } catch (e) {} });
+  botTriggerLines = [];
+  if (!pendingBotChart || !zoneEnabled("triggers")) return;
+  const list = botTriggersCache[pendingBotChart.name] || [];
+  list.filter(tr => tr.status === "en attente").forEach(tr =>
+    addLine(series, botTriggerLines, tr.trigger_price, tokenColor("--amber", "#f5b74f"),
+            "achat si <= " + Number(tr.trigger_price).toLocaleString("fr-FR", { maximumFractionDigits: 6 }) + " (#" + tr.id + ")",
+            LightweightCharts.LineStyle.LargeDashed));
+}
+
+async function refreshBotTriggers(name, series) {
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/bot-triggers?name=${encodeURIComponent(name)}`);
+    const d = await resp.json();
+    if (d.error) return;
+    botTriggersCache[name] = d.triggers || [];
+  } catch (e) { return; }
+  if (series && botChartSeries === series) drawTriggerLines(series);
+  renderBotTriggersList(name);
+}
+
+function renderBotTriggersList(name) {
+  const el = document.getElementById("bot_triggers_list");
+  if (!el || !pendingBotChart || pendingBotChart.name !== name) return;
+  const list = botTriggersCache[name] || [];
+  if (!list.length) { el.innerHTML = ""; return; }
+  const fmt = v => Number(v).toLocaleString("fr-FR", { maximumFractionDigits: 6 });
+  const color = s => s === "execute" ? "var(--green)" : s === "refuse" ? "var(--red)" : s === "en attente" ? "var(--amber)" : "var(--text-faint)";
+  const rows = list.map(tr => `<tr>
+    <td>#${tr.id}</td>
+    <td>achat si le cours descend sous <strong>${fmt(tr.trigger_price)}</strong></td>
+    <td style="color:${color(tr.status)};">${tr.status}</td>
+    <td class="muted" style="white-space:normal; font-size:11.5px;">${(tr.detail || "").replace(/</g, "&lt;")}</td>
+    <td>${tr.status === "en attente" ? `<button onclick="cancelBuyTrigger('${name}', ${tr.id})" style="font-size:11.5px; padding:4px 9px;">Annuler</button>` : ""}</td>
+  </tr>`).join("");
+  el.innerHTML = `<h2 style="font-size:13px; color:#9098a5; margin-top:16px;">Ordres manuels sur ce bot</h2>
+    <table class="bi"><thead><tr><th>#</th><th>Ordre</th><th>Etat</th><th>Detail</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function placeBuyTrigger(name, price, currentPrice) {
+  const digits = price >= 100 ? 2 : price >= 1 ? 4 : 6;
+  const rounded = Number(price.toFixed(digits));
+  const fmt = v => Number(v).toLocaleString("fr-FR", { maximumFractionDigits: 6 });
+  // Retours a la ligne sans antislash : ce JS vit dans une chaine Python non
+  // brute, ou la sequence d'echappement serait interpretee avant d'arriver
+  // au navigateur (piege rencontre trois fois).
+  const NL = String.fromCharCode(10);
+  const lines = ["Poser un ordre sur " + name + " :", "", "ACHETER si le cours descend sous " + fmt(rounded) + "."];
+  if (currentPrice) lines.push("Cours actuel : " + fmt(currentPrice) + ".");
+  if (currentPrice && currentPrice <= rounded) lines.push("", "ATTENTION : le cours est DEJA sous ce seuil - l'achat partira au prochain passage du bot (moins d'une minute).");
+  lines.push("", "L'ordre passe par les memes garde-fous que la strategie (nombre de positions, panier commun) : il peut etre refuse. Argent fictif (testnet).");
+  const text = lines.join(NL);
+  if (!confirm(text)) return;
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/bot-trigger`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, price: rounded }),
+    });
+    const d = await resp.json();
+    if (d.error) { alert(d.error); return; }
+  } catch (e) { alert("Serveur de controle injoignable : " + e); return; }
+  refreshBotTriggers(name, botChartSeries);
+}
+
+async function cancelBuyTrigger(name, id) {
+  try {
+    const resp = await fetch(`${CONTROL_SERVER}/api/bot-trigger-cancel`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, id }),
+    });
+    const d = await resp.json();
+    if (d.error) alert(d.error);
+  } catch (e) { alert("Serveur de controle injoignable : " + e); }
+  refreshBotTriggers(name, botChartSeries);
 }
 
 // --- Onglet Alertes : alertes TradingView recues par webhook (EF-87) ---------

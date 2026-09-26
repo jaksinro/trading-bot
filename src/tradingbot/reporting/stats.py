@@ -95,6 +95,21 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
             "quantity": position.quantity,
             "target_take_profit": take_profit,
             "target_stop_loss": stop_loss,
+            # EF-88 : niveaux supplementaires traces sur le graphique. Le trailing
+            # stop suit le plus haut atteint depuis l'achat ; le verrou de gain
+            # s'arme au-dessus d'un premier seuil puis vend sous un second.
+            "target_trailing_stop": (
+                max(position.peak_price, position.avg_entry_price) * (1 - risk_config.trailing_stop_pct)
+                if risk_config.trailing_stop_pct else None
+            ),
+            "profit_lock_arm": (
+                position.avg_entry_price * (1 + risk_config.profit_lock_arm_pct)
+                if risk_config.profit_lock_arm_pct else None
+            ),
+            "profit_lock_trigger": (
+                position.avg_entry_price * (1 + risk_config.profit_lock_trigger_pct)
+                if risk_config.profit_lock_arm_pct and risk_config.profit_lock_trigger_pct is not None else None
+            ),
             "sell_price": None,
             "reason": "",
             "pnl": None,
