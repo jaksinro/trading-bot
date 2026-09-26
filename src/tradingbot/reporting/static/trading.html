@@ -274,6 +274,9 @@ function createChart() {
 
 async function loadSymbol(symbol) {
   state.symbol = symbol;
+  // Les bougies de la paire precedente restent sinon affichees (et dans l'echelle)
+  // jusqu'a l'arrivee des nouvelles.
+  state.candles = []; state.series.setData([]);
   history.replaceState(null, "", "?symbol=" + encodeURIComponent(symbol));
   $("sym").textContent = symbol;
   await refreshState();
@@ -285,7 +288,23 @@ async function setTimeframe(tf) {
   state.timeframe = tf;
   $("tf").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
   await loadCandles(true);
+  recenter();
+}
+
+// Recentre le graphique sur le cours de la paire affichee. Glisser l'echelle des
+// prix a la souris coupe son ajustement automatique, et il ne revenait jamais :
+// en passant de BTC (~100 000) a ETH (~4 000), le graphique restait cadre sur BTC.
+function recenter() {
+  const last = state.candles[state.candles.length - 1];
+  if (last) state.series.applyOptions({ priceFormat: priceFormatFor(last.close) });
+  state.chart.priceScale("right").applyOptions({ autoScale: true });
   state.chart.timeScale().fitContent();
+}
+
+// Nombre de decimales adapte au niveau de prix (BTC en centimes, DOGE a 5 decimales).
+function priceFormatFor(price) {
+  const precision = price >= 100 ? 2 : price >= 1 ? 4 : price >= 0.01 ? 5 : 8;
+  return { type: "price", precision, minMove: Math.pow(10, -precision) };
 }
 
 function toBars(rows) {

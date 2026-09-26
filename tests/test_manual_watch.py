@@ -280,3 +280,14 @@ def test_protections_are_saved_and_bounded_over_http(server):
 
 def test_a_malformed_pair_is_refused(server):
     assert call(server, "/api/manual-state?symbol=ETHUSDT")[0] == 400
+
+
+def test_changing_pair_recenters_the_price_scale():
+    """Passer de BTC (~100 000) a ETH (~4 000) doit recadrer l'echelle des prix,
+    meme si l'utilisateur l'avait glissee a la main (ajustement auto coupe)."""
+    from tradingbot.control_server import TRADING_PAGE_PATH
+
+    page = TRADING_PAGE_PATH.read_text(encoding="utf-8")
+    assert 'priceScale("right").applyOptions({ autoScale: true })' in page
+    assert "state.series.setData([])" in page          # plus de bougies de l'ancienne paire
+    assert "priceFormatFor(" in page                    # decimales adaptees au niveau de prix

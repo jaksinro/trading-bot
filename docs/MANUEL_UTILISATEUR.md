@@ -695,7 +695,8 @@ aux bots.
 
 **Choisir ce que tu regardes** — la paire en haut à gauche (BTC/USDT,
 ETH/USDT…), puis l'unité de temps (1m, 5m, 15m, 1h, 4h, 1d). Molette pour
-zoomer, glisser pour se déplacer, survol pour lire une bougie. Tes achats et
+zoomer, glisser pour se déplacer, survol pour lire une bougie. Changer de
+paire ou d'unité de temps recentre le graphique sur le cours. Tes achats et
 tes ventes passés apparaissent en flèches sur le graphique, et une ligne
 pointillée marque ton prix d'achat.
 
@@ -799,3 +800,4 @@ même paire.
 | 2026-09-26 | **Nouvelle page « Espace Trading »**, demandée par l'utilisateur, accessible depuis l'onglet Bot. Graphique avec choix de l'unité de temps (1 minute à 1 jour), ordres de vente posés d'un clic (prise de profit au-dessus du cours, stop en dessous) ou d'achat, et panneau de réglages (stop-loss, trailing stop, objectif, verrou de gain...) avec aperçu des lignes sur le graphique avant d'appliquer. Voir §12 |
 | 2026-09-26 | **Correction du lien « Ouvrir l'espace de trading »** : quand le dashboard était ouvert comme fichier (ce que font les bots au démarrage), le lien menait à une page introuvable (« Impossible d'accéder à votre fichier »). Il pointe désormais vers le serveur, et s'ouvre dans un nouvel onglet |
 | 2026-09-26 | **L'Espace Trading devient indépendant des bots**, à la demande de l'utilisateur. Il pilote désormais ton panier Manuel, paire par paire : ordre immédiat, ordres posés à la souris, stop-loss, objectif et trailing stop surveillés par le serveur toutes les 20 secondes. Le lien passe de l'onglet Bot à l'onglet Manuel. Voir §12 |
+| 2026-09-26 | **Espace Trading : le graphique se recentre quand tu changes de paire** (passer du Bitcoin à l'Ethereum gardait l'échelle du Bitcoin si tu l'avais déplacée à la souris). Le nombre de décimales s'adapte aussi au prix (DOGE à 5 décimales) |
