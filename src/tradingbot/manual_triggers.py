@@ -31,6 +31,7 @@ _SCHEMA = """
         created_at TEXT NOT NULL,
         side TEXT NOT NULL,
         trigger_price REAL NOT NULL,
+        direction TEXT NOT NULL DEFAULT 'below',
         status TEXT NOT NULL,
         resolved_at TEXT,
         detail TEXT
@@ -58,28 +59,49 @@ class TriggerStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.executescript(_SCHEMA)
+        # EF-89 : colonne `direction` ajoutee pour les ventes (au-dessus / en
+        # dessous). Une base creee avant l'a pas : on la complete sur place, les
+        # ordres existants (tous des achats "sous X") prennent 'below'.
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(manual_triggers)")}
+        if "direction" not in columns:
+            connection.execute("ALTER TABLE manual_triggers ADD COLUMN direction TEXT NOT NULL DEFAULT 'below'")
+            connection.commit()
         return connection
 
-    def add_buy_below(self, trigger_price: float) -> int:
-        if not trigger_price or trigger_price <= 0:
+    def add(self, side: str, direction: str, trigger_price: float) -> int:
+        """Pose un ordre. `side` : buy / sell. `direction` : below = se declenche
+        quand le cours descend AU NIVEAU ou SOUS le seuil ; above = quand il
+        monte AU NIVEAU ou AU-DESSUS. Un achat ne se pose qu'en dessous
+        ("acheter si le cours descend sous X") ; une vente dans les deux sens
+        (au-dessus = prise de profit, en dessous = stop)."""
+        if side not in ("buy", "sell") or direction not in ("below", "above"):
+            raise ValueError("ordre invalide : side buy/sell, direction below/above")
+        if side == "buy" and direction != "below":
+            raise ValueError("un achat se declenche sous un prix, pas au-dessus")
+        if trigger_price is None or not float(trigger_price) > 0:
             raise ValueError("le seuil de declenchement doit etre un prix strictement positif")
         connection = self._connect()
         try:
             cursor = connection.execute(
-                "INSERT INTO manual_triggers (created_at, side, trigger_price, status) VALUES (?, 'buy', ?, ?)",
-                (_now(), float(trigger_price), PENDING),
+                "INSERT INTO manual_triggers (created_at, side, trigger_price, status, direction) VALUES (?, ?, ?, ?, ?)",
+                (_now(), side, float(trigger_price), PENDING, direction),
             )
             connection.commit()
             return cursor.lastrowid
         finally:
             connection.close()
 
+    def add_buy_below(self, trigger_price: float) -> int:
+        return self.add("buy", "below", trigger_price)
+
     def due(self, current_price: float) -> list[dict]:
-        """Ordres en attente dont le seuil est atteint : cours AU NIVEAU ou
-        SOUS le seuil ("si le cours descend sous cette valeur")."""
+        """Ordres en attente dont le seuil est atteint, selon leur sens."""
         if current_price is None:
             return []
-        return [t for t in self.pending() if current_price <= t["trigger_price"]]
+        return [
+            t for t in self.pending()
+            if (current_price <= t["trigger_price"] if t["direction"] == "below" else current_price >= t["trigger_price"])
+        ]
 
     def pending(self) -> list[dict]:
         return [t for t in self.recent(200) if t["status"] == PENDING]
@@ -133,10 +155,10 @@ class TriggerStore:
         connection = self._connect()
         try:
             rows = connection.execute(
-                "SELECT id, created_at, side, trigger_price, status, resolved_at, detail "
+                "SELECT id, created_at, side, trigger_price, status, resolved_at, detail, direction "
                 "FROM manual_triggers ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         finally:
             connection.close()
-        keys = ("id", "created_at", "side", "trigger_price", "status", "resolved_at", "detail")
+        keys = ("id", "created_at", "side", "trigger_price", "status", "resolved_at", "detail", "direction")
         return [dict(zip(keys, r)) for r in rows]

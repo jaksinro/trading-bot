@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espace Trading</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%235b8def'/%3E%3Cpath d='M7 21l5-6 4 3 4-7 5 5' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<!--
+  Espace Trading (EF-89) : graphique d'un bot, unite de temps au choix, ordres
+  poses a la souris, et reglages de risque dans un panneau a cote.
+
+  Page STATIQUE servie par le serveur de controle (jamais reecrite par les
+  bots, contrairement a dashboard.html) et SANS rafraichissement global : seules
+  les donnees se mettent a jour, jamais le zoom ni un reglage en cours de saisie.
+
+  Bibliotheque TradingView Lightweight Charts, version figee + empreinte SRI
+  (meme fichier que le dashboard, EF-87).
+-->
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"
+        integrity="sha384-stKllnUqA9AD0gsKCuUtf5XlqAW7PwIgDagoNsTWkjkBmJ/GZ/uHTgEBxdLV2VSK"
+        crossorigin="anonymous"></script>
+<style>
+  :root {
+    --bg: #0a0c11;
+    --surface: #12151d;
+    --surface-2: #171b25;
+    --surface-hover: #1c212c;
+    --border: rgba(255,255,255,0.07);
+    --border-strong: rgba(255,255,255,0.14);
+    --text: #eceef4;
+    --text-dim: #9aa2b5;
+    --text-faint: #666f84;
+    --accent: #5b8def;
+    --accent-soft: rgba(91,141,239,0.14);
+    --green: #2fd699;
+    --green-soft: rgba(47,214,153,0.14);
+    --red: #ff6b6b;
+    --red-soft: rgba(255,107,107,0.14);
+    --amber: #f5b74f;
+    --amber-soft: rgba(245,183,79,0.14);
+    --purple: #b18cff;
+    --radius-lg: 14px;
+    --radius-md: 10px;
+    --radius-sm: 7px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px;
+    display: flex; flex-direction: column;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* --- barre du haut --- */
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  header .brand { font-weight: 650; letter-spacing: -0.01em; }
+  header select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; font-family: inherit;
+  }
+  .quote { display: flex; align-items: baseline; gap: 10px; }
+  .quote .px { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+  .quote .sym { color: var(--text-dim); }
+  .status { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; font-weight: 600; }
+  .status.on { background: var(--green-soft); color: var(--green); }
+  .status.off { background: var(--red-soft); color: var(--red); }
+  header .spacer { flex: 1; }
+
+  /* --- espace principal : graphique + panneau --- */
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } .panel { border-left: none; border-top: 1px solid var(--border); } }
+  .chart-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 12px 12px 12px 16px; gap: 10px; }
+  .toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 3px; gap: 2px; }
+  .seg button { background: transparent; border: none; color: var(--text-dim); font-size: 12px; font-weight: 600; padding: 6px 10px; border-radius: var(--radius-sm); }
+  .seg button.active { background: var(--accent-soft); color: var(--accent); }
+  .seg button:hover:not(.active) { color: var(--text); }
+  .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+  .toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+  .chart-wrap { position: relative; flex: 1; min-height: 380px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+  #chart { position: absolute; inset: 0; }
+  #ohlc { position: absolute; top: 8px; left: 12px; z-index: 3; font-size: 11.5px; color: var(--text-dim); pointer-events: none; }
+  .hint { font-size: 11.5px; color: var(--text-faint); }
+
+  /* menu contextuel du clic sur le graphique */
+  #menu {
+    position: absolute; z-index: 10; display: none; min-width: 250px;
+    background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md);
+    box-shadow: 0 16px 40px -12px rgba(0,0,0,0.7); padding: 6px;
+  }
+  #menu .title { font-size: 11px; color: var(--text-faint); padding: 6px 10px 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  #menu button { display: block; width: 100%; text-align: left; background: transparent; border: none; color: var(--text); padding: 9px 10px; border-radius: var(--radius-sm); font-size: 13px; }
+  #menu button:hover { background: var(--surface-hover); }
+  #menu button .k { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+  #menu button small { display: block; color: var(--text-faint); font-size: 11px; margin: 2px 0 0 18px; }
+
+  /* --- panneau de droite --- */
+  .panel { border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); font-weight: 650; margin: 0 0 10px; }
+  .rows { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
+  .rows dt { color: var(--text-dim); }
+  .rows dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .field { display: grid; grid-template-columns: 1fr 96px; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .field:last-of-type { border-bottom: none; }
+  .field .lbl { display: flex; align-items: center; gap: 8px; }
+  .field .sw { width: 10px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  .field .sub { display: block; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+  .field .inp { position: relative; }
+  .field input {
+    width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm); padding: 7px 26px 7px 9px; font-size: 13px; font-family: inherit; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field .unit { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 12px; pointer-events: none; }
+  .field.changed input { border-color: var(--amber); }
+  .note { font-size: 12px; line-height: 1.5; color: var(--text-dim); background: var(--amber-soft); border: 1px solid rgba(245,183,79,0.25); border-radius: var(--radius-sm); padding: 9px 11px; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-primary { flex: 1; background: linear-gradient(135deg, var(--accent), #4a7de0); color: #fff; border: none; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; font-weight: 600; }
+  .btn-primary:disabled { opacity: 0.45; cursor: default; }
+  .btn-ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; }
+  .msg { font-size: 12.5px; margin-top: 8px; min-height: 1em; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); }
+  .order { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); }
+  .order:last-child { border-bottom: none; }
+  .order .tag { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 7px; border-radius: 5px; }
+  .tag.buy { background: var(--green-soft); color: var(--green); }
+  .tag.sell { background: var(--red-soft); color: var(--red); }
+  .order .what { font-size: 12.5px; }
+  .order .detail { grid-column: 2 / 4; font-size: 11px; color: var(--text-faint); }
+  .order .st { font-size: 11px; font-weight: 600; }
+  .order button { background: transparent; border: 1px solid var(--border-strong); color: var(--text-dim); border-radius: 6px; font-size: 11px; padding: 3px 8px; }
+  .empty { color: var(--text-faint); font-size: 12px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand">Espace Trading</span>
+  <select id="bot" aria-label="Bot"></select>
+  <div class="quote"><span class="px num" id="px">-</span><span class="sym" id="sym"></span></div>
+  <span class="status" id="status"></span>
+  <span class="spacer"></span>
+  <span class="hint" id="updated"></span>
+  <a href="/dashboard.html">Retour au dashboard</a>
+</header>
+
+<main>
+  <section class="chart-col">
+    <div class="toolbar">
+      <div class="seg" id="tf" role="group" aria-label="Unite de temps"></div>
+      <div class="toggles" id="toggles"></div>
+    </div>
+    <div class="chart-wrap" id="wrap">
+      <div id="chart"></div>
+      <div id="ohlc" class="num"></div>
+      <div id="menu" role="menu"></div>
+    </div>
+    <div class="hint">Clique sur le graphique pour poser un ordre au prix du curseur. Molette = zoom, glisser = se deplacer.
+      Les ordres sont executes par le bot lui-meme, avec les memes garde-fous que sa strategie (argent fictif, testnet).</div>
+  </section>
+
+  <aside class="panel">
+    <section>
+      <h2>Position</h2>
+      <dl class="rows" id="position"></dl>
+    </section>
+
+    <section>
+      <h2>Reglages de risque</h2>
+      <div id="strategyNote"></div>
+      <form id="riskForm" autocomplete="off"></form>
+      <div class="actions">
+        <button class="btn-primary" id="apply" disabled>Appliquer au bot</button>
+        <button class="btn-ghost" id="reset" type="button">Annuler</button>
+      </div>
+      <div class="msg" id="riskMsg"></div>
+      <div class="hint" style="margin-top:6px;">Vide = protection desactivee. Les lignes en pointilles gris sur le graphique montrent l'effet AVANT d'appliquer.
+        Appliquer relance le bot (quelques secondes) ; sa position ouverte est conservee.</div>
+    </section>
+
+    <section>
+      <h2>Ordres poses</h2>
+      <div id="orders"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+// ----------------------------------------------------------------- etat
+const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const RISK_FIELDS = [
+  { key: "stop_loss_pct", label: "Stop-loss", sub: "vend si le cours tombe de X % sous le prix d'achat", color: "--red", unit: "%" },
+  { key: "take_profit_pct", label: "Objectif", sub: "vend avec X % de gain", color: "--green", unit: "%" },
+  { key: "trailing_stop_pct", label: "Trailing stop", sub: "vend si le cours retombe de X % sous son plus haut", color: "--amber", unit: "%" },
+  { key: "profit_lock_arm_pct", label: "Verrou : armement", sub: "s'arme une fois X % de gain atteint", color: "--purple", unit: "%" },
+  { key: "profit_lock_trigger_pct", label: "Verrou : vente", sub: "puis vend si le gain retombe a X %", color: "--purple", unit: "%" },
+  { key: "max_daily_loss_pct", label: "Perte max du jour", sub: "bloque les achats au-dela", color: null, unit: "%" },
+  { key: "max_concurrent_positions", label: "Positions simultanees", sub: "nombre maximal de lots ouverts", color: null, unit: "" },
+];
+const ZONES = [
+  { id: "risk", label: "Stop-loss et objectifs" },
+  { id: "strategy", label: "Seuils de la strategie" },
+  { id: "orders", label: "Ordres poses" },
+];
+
+const state = {
+  bot: null, symbol: null, timeframe: null, info: null, triggers: [],
+  chart: null, series: null, candles: [], lines: { zones: [], orders: [], preview: [] },
+  tzShift: -new Date().getTimezoneOffset() * 60, pollTimer: null, lastPrice: null,
+};
+const $ = id => document.getElementById(id);
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const fmt = v => (v === null || v === undefined || !isFinite(v)) ? "-" : Number(v).toLocaleString("fr-FR", { maximumFractionDigits: v >= 100 ? 2 : 6 });
+const pct = v => (v === null || v === undefined) ? "" : String(Math.round(v * 10000) / 100);
+const zoneOn = id => { try { return localStorage.getItem("trading_zone_" + id) !== "off"; } catch (e) { return true; } };
+
+async function api(path, body) {
+  const resp = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data.error) throw new Error(data.error || ("erreur " + resp.status));
+  return data;
+}
+
+// ----------------------------------------------------------------- demarrage
+async function init() {
+  if (!window.LightweightCharts) {
+    $("wrap").innerHTML = '<p class="empty" style="padding:20px;">La bibliotheque de graphiques n\'a pas pu etre chargee (connexion internet ?). Recharge la page.</p>';
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  let configs = [];
+  try { configs = (await api("/api/list-configs")).configs || []; } catch (e) { $("status").textContent = "serveur injoignable"; return; }
+  const select = $("bot");
+  select.innerHTML = configs.map(c => `<option value="${c.name}">${c.name} - ${c.symbol || ""}</option>`).join("");
+  const wanted = params.get("bot");
+  if (wanted && configs.some(c => c.name === wanted)) select.value = wanted;
+  select.onchange = () => loadBot(select.value, true);
+
+  $("tf").innerHTML = TIMEFRAMES.map(tf => `<button data-tf="${tf}" type="button">${tf}</button>`).join("");
+  $("tf").querySelectorAll("button").forEach(b => b.onclick = () => setTimeframe(b.dataset.tf));
+
+  $("toggles").innerHTML = ZONES.map(z =>
+    `<label><input type="checkbox" data-zone="${z.id}" ${zoneOn(z.id) ? "checked" : ""}> ${z.label}</label>`).join("");
+  $("toggles").querySelectorAll("input").forEach(i => i.onchange = () => {
+    try { localStorage.setItem("trading_zone_" + i.dataset.zone, i.checked ? "on" : "off"); } catch (e) {}
+    drawZones(); drawOrderLines();
+  });
+
+  createChart();
+  $("apply").onclick = applyRisk;
+  $("reset").onclick = () => renderRiskForm(true);
+  // Un clic sur le graphique OUVRE le menu (subscribeClick), puis remonte
+  // jusqu'ici : sans exclure le graphique, ce gestionnaire le refermait dans la
+  // foulee (constate en verifiant la page).
+  document.addEventListener("click", e => {
+    if (!$("menu").contains(e.target) && !$("chart").contains(e.target)) hideMenu();
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") hideMenu(); });
+
+  if (select.value) await loadBot(select.value, false);
+  setInterval(refreshBotData, 15000);   // etat du bot : positions, ordres
+}
+
+function createChart() {
+  const grid = css("--border");
+  const chart = LightweightCharts.createChart($("chart"), {
+    autoSize: true,
+    layout: { background: { type: "solid", color: "transparent" }, textColor: css("--text-dim"), fontSize: 11 },
+    grid: { vertLines: { color: grid }, horzLines: { color: grid } },
+    rightPriceScale: { borderColor: grid },
+    timeScale: { borderColor: grid, timeVisible: true, secondsVisible: false },
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    localization: { locale: "fr-FR" },
+  });
+  const up = css("--green"), down = css("--red");
+  const series = chart.addCandlestickSeries({ upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down });
+  chart.subscribeCrosshairMove(p => {
+    const bar = p && p.time ? p.seriesData.get(series) : null;
+    $("ohlc").textContent = bar
+      ? new Date(bar.time * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" })
+        + "   O " + fmt(bar.open) + "   H " + fmt(bar.high) + "   B " + fmt(bar.low) + "   C " + fmt(bar.close)
+      : "";
+  });
+  chart.subscribeClick(p => {
+    if (!p || !p.point) return;
+    const price = series.coordinateToPrice(p.point.y);
+    if (price === null || !isFinite(price) || price <= 0) return;
+    showMenu(p.point.x, p.point.y, price);
+  });
+  state.chart = chart; state.series = series;
+}
+
+// ----------------------------------------------------------------- bot et bougies
+async function loadBot(name, resetView) {
+  state.bot = name;
+  history.replaceState(null, "", "?bot=" + encodeURIComponent(name));
+  await refreshBotData();
+  if (!state.info) return;
+  state.symbol = state.info.symbol;
+  const tf = TIMEFRAMES.includes(state.info.timeframe) ? state.info.timeframe : "1h";
+  await setTimeframe(tf, true);
+  renderRiskForm(true);
+}
+
+async function setTimeframe(tf, fit) {
+  state.timeframe = tf;
+  $("tf").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
+  await loadCandles(true);
+  if (fit !== false) state.chart.timeScale().fitContent();
+}
+
+function toBars(rows) {
+  const seen = new Set();
+  return rows.filter(r => { if (seen.has(r[0])) return false; seen.add(r[0]); return true; })
+    .sort((a, b) => a[0] - b[0])
+    .map(r => ({ time: Math.floor(r[0] / 1000) + state.tzShift, open: r[1], high: r[2], low: r[3], close: r[4] }));
+}
+
+async function loadCandles(full) {
+  if (!state.symbol) return;
+  clearTimeout(state.pollTimer);
+  try {
+    const url = `/api/candles?symbol=${encodeURIComponent(state.symbol)}&timeframe=${state.timeframe}&limit=${full ? 500 : 3}`;
+    const bars = toBars((await api(url)).candles || []);
+    if (full) {
+      state.candles = bars;
+      state.series.setData(bars);
+    } else {
+      // Mise a jour sans toucher au zoom : seules les dernieres bougies changent.
+      bars.forEach(b => {
+        const last = state.candles[state.candles.length - 1];
+        if (!last || b.time >= last.time) {
+          state.series.update(b);
+          if (last && b.time === last.time) state.candles[state.candles.length - 1] = b; else state.candles.push(b);
+        }
+      });
+    }
+    if (state.candles.length) setPrice(state.candles[state.candles.length - 1].close);
+    drawMarkers();
+  } catch (e) {
+    $("updated").textContent = "cours indisponible : " + e.message;
+  }
+  state.pollTimer = setTimeout(() => loadCandles(false), 10000);
+}
+
+async function refreshBotData() {
+  if (!state.bot) return;
+  try {
+    const [info, trig] = await Promise.all([
+      api("/api/bot-state?name=" + encodeURIComponent(state.bot)),
+      api("/api/bot-triggers?name=" + encodeURIComponent(state.bot)),
+    ]);
+    state.info = info;
+    state.triggers = trig.triggers || [];
+  } catch (e) {
+    $("status").className = "status off"; $("status").textContent = "indisponible";
+    return;
+  }
+  $("sym").textContent = state.info.symbol || "";
+  $("status").className = "status " + (state.info.running ? "on" : "off");
+  $("status").textContent = state.info.running ? "bot actif" : "bot arrete";
+  $("updated").textContent = state.info.updated_at ? "donnees du bot : " + state.info.updated_at : "";
+  renderPosition();
+  renderOrders();
+  drawMarkers(); drawZones(); drawOrderLines(); drawPreview();
+}
+
+function setPrice(price) {
+  state.lastPrice = price;
+  $("px").textContent = fmt(price);
+  document.title = fmt(price) + " " + (state.symbol || "") + " - Espace Trading";
+}
+
+// ----------------------------------------------------------------- dessin
+function snapTime(ms) {
+  const bars = state.candles;
+  if (!bars.length) return null;
+  const s = Math.floor(ms / 1000) + state.tzShift;
+  const step = bars.length > 1 ? bars[bars.length - 1].time - bars[bars.length - 2].time : 3600;
+  if (s < bars[0].time || s > bars[bars.length - 1].time + step) return null;
+  let lo = 0, hi = bars.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (bars[mid].time <= s) lo = mid; else hi = mid - 1; }
+  return bars[lo].time;
+}
+
+function drawMarkers() {
+  if (!state.info || !state.candles.length) return;
+  const up = css("--green"), down = css("--red"), markers = [];
+  (state.info.orders || []).forEach(o => {
+    const b = o.entry_timestamp ? snapTime(o.entry_timestamp) : null;
+    if (b !== null) markers.push({ time: b, position: "belowBar", color: up, shape: "arrowUp",
+      text: "achat " + fmt(o.buy_price) + (o.status === "ouvert" ? " (ouvert)" : "") });
+    const s = o.exit_timestamp ? snapTime(o.exit_timestamp) : null;
+    if (s !== null && o.sell_price !== null && o.sell_price !== undefined)
+      markers.push({ time: s, position: "aboveBar", color: down, shape: "arrowDown", text: "vente " + fmt(o.sell_price) });
+  });
+  markers.sort((a, b) => a.time - b.time);
+  state.series.setMarkers(markers);
+}
+
+function clearLines(group) {
+  state.lines[group].forEach(l => { try { state.series.removePriceLine(l); } catch (e) {} });
+  state.lines[group] = [];
+}
+
+function line(group, price, color, title, style) {
+  if (price === null || price === undefined || !isFinite(price) || price <= 0) return;
+  state.lines[group].push(state.series.createPriceLine({
+    price, color, title, lineWidth: 1, axisLabelVisible: true,
+    lineStyle: style === undefined ? LightweightCharts.LineStyle.Dashed : style,
+  }));
+}
+
+function openPositions() { return (state.info && state.info.orders || []).filter(o => o.status === "ouvert"); }
+
+function drawZones() {
+  clearLines("zones");
+  if (!state.info) return;
+  const L = LightweightCharts.LineStyle;
+  if (zoneOn("risk")) openPositions().forEach(o => {
+    line("zones", o.buy_price, css("--text-dim"), "prix d'achat", L.Dotted);
+    line("zones", o.target_stop_loss, css("--red"), "stop-loss");
+    line("zones", o.target_take_profit, css("--green"), "objectif");
+    line("zones", o.target_trailing_stop, css("--amber"), "trailing stop");
+    line("zones", o.profit_lock_arm, css("--purple"), "verrou arme au-dessus", L.Dotted);
+    line("zones", o.profit_lock_trigger, css("--purple"), "verrou : vente sous");
+  });
+  if (zoneOn("strategy")) (state.info.chart_levels || []).forEach(lv => {
+    const color = lv.kind === "entry" ? css("--green") : lv.kind === "exit" ? css("--red") : css("--accent");
+    line("zones", lv.price, color, lv.label, lv.kind === "trend" ? L.Solid : L.Dotted);
+  });
+}
+
+function orderLabel(t) {
+  if (t.side === "buy") return "achat si <= " + fmt(t.trigger_price);
+  return t.direction === "above" ? "vente si >= " + fmt(t.trigger_price) : "vente si <= " + fmt(t.trigger_price);
+}
+
+function drawOrderLines() {
+  clearLines("orders");
+  if (!zoneOn("orders")) return;
+  state.triggers.filter(t => t.status === "en attente").forEach(t =>
+    line("orders", t.trigger_price, t.side === "buy" ? css("--green") : css("--red"),
+         orderLabel(t) + " (#" + t.id + ")", LightweightCharts.LineStyle.LargeDashed));
+}
+
+// Apercu : lignes que DONNERAIENT les reglages saisis, avant de les appliquer.
+function drawPreview() {
+  clearLines("preview");
+  const form = readForm();
+  if (!form.changed || !openPositions().length) return;
+  const grey = "rgba(236,238,244,0.55)", L = LightweightCharts.LineStyle.SparseDotted;
+  openPositions().forEach(o => {
+    const entry = o.buy_price;
+    // Le trailing part du PLUS HAUT atteint depuis l'achat (publie par le bot),
+    // pas du prix d'achat : sinon l'apercu placerait la ligne trop bas.
+    const peak = Math.max(entry, state.lastPrice || entry, o.peak_price || 0);
+    const v = form.values;
+    if (v.stop_loss_pct) line("preview", entry * (1 - v.stop_loss_pct), grey, "apercu stop-loss", L);
+    if (v.take_profit_pct) line("preview", entry * (1 + v.take_profit_pct), grey, "apercu objectif", L);
+    if (v.trailing_stop_pct) line("preview", peak * (1 - v.trailing_stop_pct), grey, "apercu trailing", L);
+    if (v.profit_lock_arm_pct) line("preview", entry * (1 + v.profit_lock_arm_pct), grey, "apercu verrou arme", L);
+    if (v.profit_lock_arm_pct && v.profit_lock_trigger_pct !== null && v.profit_lock_trigger_pct !== undefined)
+      line("preview", entry * (1 + v.profit_lock_trigger_pct), grey, "apercu verrou vente", L);
+  });
+}
+
+// ----------------------------------------------------------------- panneau
+function renderPosition() {
+  const open = openPositions();
+  const price = state.lastPrice || (state.info && state.info.current_price);
+  if (!open.length) {
+    $("position").innerHTML = `<dt>Position</dt><dd>aucune</dd><dt>Cours</dt><dd>${fmt(price)}</dd>`;
+    return;
+  }
+  const qty = open.reduce((s, o) => s + o.quantity, 0);
+  const cost = open.reduce((s, o) => s + o.quantity * o.buy_price, 0);
+  const avg = cost / qty, pnl = price ? (price - avg) * qty : null;
+  const color = pnl === null ? "" : pnl >= 0 ? "var(--green)" : "var(--red)";
+  $("position").innerHTML = `
+    <dt>Quantite</dt><dd>${fmt(qty)}</dd>
+    <dt>Prix d'achat moyen</dt><dd>${fmt(avg)}</dd>
+    <dt>Cours</dt><dd>${fmt(price)}</dd>
+    <dt>Gain / perte latent</dt><dd style="color:${color};">${pnl === null ? "-" : (pnl >= 0 ? "+" : "") + pnl.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USDT"}
+      (${price ? ((price / avg - 1) * 100).toFixed(2) : "-"} %)</dd>`;
+}
+
+function renderRiskForm(fromBot) {
+  if (!state.info) return;
+  const risk = state.info.risk || {};
+  const note = $("strategyNote");
+  note.innerHTML = state.info.strategy_type === "trend_regime"
+    ? `<div class="note">Cette strategie a ete validee <strong>sans</strong> stop-loss, objectif ni verrou de gain :
+       ils coupaient les tendances qu'elle existe pour capter (mesure deux fois dans ce projet). Sa protection est la
+       sortie quand le cours repasse sous la tendance. En ajouter, c'est s'ecarter du reglage teste.</div>`
+    : "";
+  $("riskForm").innerHTML = RISK_FIELDS.map(f => {
+    const raw = risk[f.key];
+    const shown = f.key === "max_concurrent_positions" ? (raw ?? 1) : pct(raw);
+    return `<label class="field" data-key="${f.key}">
+      <span class="lbl">${f.color ? `<span class="sw" style="background:var(${f.color});"></span>` : ""}
+        <span>${f.label}<span class="sub">${f.sub}</span></span></span>
+      <span class="inp"><input name="${f.key}" inputmode="decimal" value="${shown}" data-initial="${shown}"
+        placeholder="${f.key === "max_concurrent_positions" ? "" : "off"}"><span class="unit">${f.unit}</span></span>
+    </label>`;
+  }).join("");
+  $("riskForm").querySelectorAll("input").forEach(i => i.addEventListener("input", onFormInput));
+  if (fromBot) $("riskMsg").textContent = "";
+  onFormInput();
+}
+
+function readForm() {
+  const values = {}, changes = {};
+  let changed = false;
+  $("riskForm").querySelectorAll("input").forEach(i => {
+    const key = i.name, text = i.value.trim().replace(",", ".");
+    let value;
+    if (key === "max_concurrent_positions") value = text === "" ? null : Number(text);
+    else value = text === "" ? null : Number(text) / 100;
+    values[key] = value;
+    const isChanged = text !== String(i.dataset.initial).replace(",", ".");
+    i.closest(".field").classList.toggle("changed", isChanged);
+    if (isChanged) { changes[key] = value; changed = true; }
+  });
+  return { values, changes, changed };
+}
+
+function onFormInput() {
+  const form = readForm();
+  $("apply").disabled = !form.changed;
+  drawPreview();
+}
+
+async function applyRisk() {
+  const form = readForm();
+  if (!form.changed) return;
+  const summary = Object.entries(form.changes).map(([k, v]) => {
+    const f = RISK_FIELDS.find(x => x.key === k);
+    return f.label + " : " + (v === null ? "desactive" : k === "max_concurrent_positions" ? v : (v * 100).toFixed(2) + " %");
+  });
+  const NL = String.fromCharCode(10);
+  if (!confirm("Appliquer au bot " + state.bot + " :" + NL + NL + summary.join(NL) + NL + NL +
+               "Le bot sera relance (quelques secondes) ; sa position ouverte est conservee.")) return;
+  $("apply").disabled = true;
+  $("riskMsg").className = "msg"; $("riskMsg").textContent = "Application en cours...";
+  try {
+    const r = await api("/api/bot-risk", { name: state.bot, risk: form.changes });
+    $("riskMsg").className = "msg ok";
+    $("riskMsg").textContent = "Reglages appliques" + (r.restarted ? ", bot relance." : " (bot arrete : pris en compte a son prochain demarrage).");
+    await refreshBotData();
+    renderRiskForm(false);
+  } catch (e) {
+    $("riskMsg").className = "msg err"; $("riskMsg").textContent = e.message;
+    $("apply").disabled = false;
+  }
+}
+
+function renderOrders() {
+  const el = $("orders");
+  if (!state.triggers.length) { el.innerHTML = '<p class="empty">Aucun ordre. Clique sur le graphique pour en poser un.</p>'; return; }
+  const color = s => s === "execute" ? "var(--green)" : s === "refuse" ? "var(--red)" : s === "en attente" ? "var(--amber)" : "var(--text-faint)";
+  el.innerHTML = state.triggers.map(t => `<div class="order">
+    <span class="tag ${t.side}">${t.side === "buy" ? "achat" : "vente"}</span>
+    <span class="what num">${orderLabel(t)}</span>
+    <span>${t.status === "en attente" ? `<button type="button" data-cancel="${t.id}">Annuler</button>` : `<span class="st" style="color:${color(t.status)};">${t.status}</span>`}</span>
+    ${t.detail ? `<span class="detail">${t.detail.replace(/</g, "&lt;")}</span>` : ""}
+  </div>`).join("");
+  el.querySelectorAll("[data-cancel]").forEach(b => b.onclick = () => cancelOrder(Number(b.dataset.cancel)));
+}
+
+// ----------------------------------------------------------------- menu du clic
+function showMenu(x, y, price) {
+  const cur = state.lastPrice;
+  const rounded = Number(price.toFixed(price >= 100 ? 2 : price >= 1 ? 4 : 6));
+  const above = cur !== null && rounded > cur;
+  const items = above ? [
+    { side: "sell", direction: "above", color: "--red", text: "Vendre si le cours monte a " + fmt(rounded), sub: "prise de profit" },
+  ] : [
+    { side: "sell", direction: "below", color: "--red", text: "Vendre si le cours descend a " + fmt(rounded), sub: "stop : limite la perte" },
+    { side: "buy", direction: "below", color: "--green", text: "Acheter si le cours descend a " + fmt(rounded), sub: "achat sur repli" },
+  ];
+  const menu = $("menu");
+  menu.innerHTML = `<div class="title num">${fmt(rounded)} &middot; cours ${fmt(cur)}</div>` + items.map((it, i) =>
+    `<button type="button" role="menuitem" data-i="${i}"><span class="k" style="background:var(${it.color});"></span>${it.text}<small>${it.sub}</small></button>`
+  ).join("");
+  menu.querySelectorAll("button").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const it = items[Number(b.dataset.i)];
+    hideMenu();
+    placeOrder(it.side, it.direction, rounded);
+  });
+  const wrap = $("wrap").getBoundingClientRect();
+  menu.style.display = "block";
+  menu.style.left = Math.min(x + 8, wrap.width - menu.offsetWidth - 8) + "px";
+  menu.style.top = Math.min(y + 8, wrap.height - menu.offsetHeight - 8) + "px";
+  setTimeout(() => { const first = menu.querySelector("button"); if (first) first.focus(); }, 0);
+}
+
+function hideMenu() { $("menu").style.display = "none"; }
+
+async function placeOrder(side, direction, price) {
+  if (side === "sell" && !openPositions().length) {
+    if (!confirm("Ce bot n'a aucune position ouverte : l'ordre de vente sera refuse s'il se declenche avant un achat. Le poser quand meme ?")) return;
+  }
+  try {
+    await api("/api/bot-trigger", { name: state.bot, side, direction, price });
+  } catch (e) { alert(e.message); return; }
+  await refreshBotData();
+}
+
+async function cancelOrder(id) {
+  try { await api("/api/bot-trigger-cancel", { name: state.bot, id }); } catch (e) { alert(e.message); }
+  await refreshBotData();
+}
+
+init();
+</script>
+</body>
+</html>

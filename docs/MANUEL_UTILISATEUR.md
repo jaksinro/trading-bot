@@ -686,6 +686,47 @@ ou refusé (et pourquoi).
 Le bouton **« Envoyer une alerte de test »** simule une alerte depuis l'app,
 pour vérifier que tout fonctionne sans compte TradingView.
 
+## 12. L'Espace Trading : graphique, ordres et réglages sur une seule page
+
+Ouvre-la depuis l'onglet Bot avec le lien **« Ouvrir l'espace de trading »**,
+ou directement à l'adresse `/trading.html`. Choisis le bot en haut à gauche.
+
+**Le graphique** — boutons **1m, 5m, 15m, 1h, 4h, 1d** pour changer l'unité
+de temps (la durée de chaque bougie). Molette pour zoomer, glisser pour se
+déplacer, survol pour lire les valeurs d'une bougie. Les cases à cocher
+affichent ou masquent les zones (stop-loss et objectifs, seuils de la
+stratégie, ordres posés). Le graphique se met à jour tout seul, sans perdre
+ton zoom.
+
+**Poser un ordre à la souris** — clique sur le graphique, à la hauteur du prix
+voulu. Un petit menu apparaît :
+- **au-dessus du cours** : « Vendre si le cours monte à … » — une prise de
+  profit ;
+- **en dessous du cours** : « Vendre si le cours descend à … » — un stop, pour
+  limiter une perte — ou « Acheter si le cours descend à … ».
+
+Le bot surveille le seuil toutes les minutes et agit **lui-même**, avec les
+mêmes protections que sa stratégie. Une vente revend **toute** la position du
+bot. S'il n'a aucune position, une vente sera refusée : la page te prévient
+avant de la poser. Tes ordres sont listés à droite, avec un bouton **Annuler**.
+
+**Les réglages, à droite** — stop-loss, objectif, trailing stop, verrou de
+gain, perte maximale du jour, nombre de positions simultanées. Tape un
+pourcentage ; **laisse vide pour désactiver** une protection. Dès que tu
+modifies une valeur :
+- le champ se surligne en orange ;
+- une **ligne grise en pointillés** apparaît sur le graphique, à l'endroit où
+  la protection se déclencherait — **avant** d'appliquer quoi que ce soit.
+
+**« Appliquer au bot »** enregistre et relance le bot en quelques secondes. Sa
+position ouverte est conservée, et les explications écrites dans sa
+configuration ne sont pas effacées. **« Annuler »** remet les valeurs
+actuelles du bot.
+
+Pour les bots « trend_regime », un encadré te rappelle que leur stratégie a
+été testée **sans** stop-loss ni objectif : en ajouter, c'est s'écarter du
+réglage qui a été validé.
+
 ## Historique des changements de l'interface
 
 | Date | Changement |
@@ -759,3 +800,4 @@ pour vérifier que tout fonctionne sans compte TradingView.
 | 2026-09-26 | **Connexion chiffrée (HTTPS) possible pour ouvrir le dashboard depuis un autre appareil.** Le mot de passe et les ordres ne voyagent plus en clair sur le réseau de la maison une fois un certificat créé (une commande) ; l'adresse commence alors par `https://`, et le navigateur affiche un avertissement la première fois, à accepter. Sans certificat, rien ne change. Voir §9 |
 | 2026-09-26 | **Graphique TradingView et onglet « 🔔 Alertes »**, demandés par l'utilisateur. Le graphique de l'onglet Bot utilise désormais la bibliothèque de TradingView : zoom à la molette, déplacement, et valeurs de la bougie survolée. Nouvel onglet Alertes : reçoit les alertes envoyées par TradingView, avec les instructions pour les brancher, un bouton de test, et la liste des alertes reçues. Une alerte ne passe aucun ordre sauf si tu l'actives (ordres fictifs, panier Manuel, plafonnés). Voir §4.2 et §11 |
 | 2026-09-26 | **Ordres d'achat au clic et zones sur le graphique des bots**, demandés par l'utilisateur. Un clic sur le graphique propose d'acheter si le cours descend sous le prix cliqué ; le bot surveille et achète lui-même, avec les mêmes protections que sa stratégie. Trois cases à cocher affichent ou masquent les zones : stop-loss et objectifs, seuils de la stratégie, ordres en attente. Nouveau tableau « Ordres manuels sur ce bot » avec bouton Annuler. Voir §4.2 |
+| 2026-09-26 | **Nouvelle page « Espace Trading »**, demandée par l'utilisateur, accessible depuis l'onglet Bot. Graphique avec choix de l'unité de temps (1 minute à 1 jour), ordres de vente posés d'un clic (prise de profit au-dessus du cours, stop en dessous) ou d'achat, et panneau de réglages (stop-loss, trailing stop, objectif, verrou de gain...) avec aperçu des lignes sur le graphique avant d'appliquer. Voir §12 |

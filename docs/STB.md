@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.80 |
+| **Version** | 0.81 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -94,6 +94,7 @@
 | 0.78 | EF-86 : HTTPS optionnel pour l'acces reseau au dashboard (mot de passe et ordres chiffres), certificat auto-signe genere par script |
 | 0.79 | EF-87 : graphique TradingView dans l'onglet Bot ; reception des alertes TradingView (onglet Alertes), ordres automatiques desactives par defaut |
 | 0.80 | EF-88 : ordre d'achat declenche pose au clic sur le graphique d'un bot ; zones de stop-loss, objectifs et seuils activables |
+| 0.81 | EF-89 : page Espace Trading - graphique et unite de temps, ordres de vente a la souris, reglages de risque avec apercu |
 ---
 
 ## 1. Introduction
@@ -261,6 +262,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-86 | L'acces reseau au dashboard doit pouvoir etre chiffre : le mot de passe HTTP Basic et les ordres ne doivent pas circuler en clair - point ouvert de la revue du 2026-09-20 (limite assumee d'EF-82) | Devrait - **realise**. HTTPS active par `DASHBOARD_TLS_CERT` + `DASHBOARD_TLS_KEY` ; sans eux, comportement inchange (HTTP). Configuration a moitie remplie ou certificat illisible = refus de demarrer, jamais de repli silencieux sur HTTP. Certificat auto-signe genere par `scripts/generate_dashboard_cert.sh`. Voir STC §3.72 |
 | EF-87 | Automatiser des analyses avec TradingView, et utiliser sa bibliotheque de graphiques - demande de l'utilisateur | Devrait - **realise en partie, limite dite**. TradingView n'a pas d'API d'analyse : l'automatisation passe par ses alertes (Pine Script -> webhook), desormais recues par l'app (onglet Alertes), fermees sans secret, et pouvant devenir des ordres paper plafonnes si l'utilisateur l'active. Graphique des bots sur TradingView Lightweight Charts. **Reste a faire par l'utilisateur** : rendre le serveur joignable en HTTPS sur le port 443 (tunnel), et disposer d'un abonnement TradingView donnant droit aux webhooks. Voir STC §3.73 |
 | EF-88 | Poser a la main, en cliquant sur le graphique d'un bot, un ordre d'achat declenche sous un prix, et voir les zones de stop-loss et autres niveaux, chaque famille activable - demande de l'utilisateur | Devrait - **realise**. L'ordre est execute par le bot lui-meme par le chemin d'un signal de la strategie : memes garde-fous, le lot devient une position ordinaire du bot. Zones : stop-loss, objectif, trailing stop, verrou de gain, prix d'achat, seuils de la strategie, ordres en attente. Limites : cours verifie toutes les minutes, achat au marche. Voir STC §3.74 |
+| EF-89 | Une page de trading dediee : graphique avec unite de temps au choix, ordres de vente poses a la souris, reglages de risque (stop-loss, trailing stop...) dans un panneau a cote - demande de l'utilisateur | Devrait - **realise**. Page `/trading.html` (lien depuis l'onglet Bot). Ventes au-dessus (prise de profit) ou en dessous (stop) du cours, executees par le bot avec ses garde-fous ; reglages appliques avec apercu prealable sur le graphique, commentaires de la config conserves, bot relance sans perdre sa position. Voir STC §3.75 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

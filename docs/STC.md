@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.83 |
+| **Version** | 0.84 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -97,6 +97,7 @@
 | 0.81 | EF-86 (§3.72) : **HTTPS optionnel pour l'acces reseau au dashboard** (`DASHBOARD_TLS_CERT`/`DASHBOARD_TLS_KEY`) ; poignee de main TLS dans le thread de la requete ; configuration incomplete = refus de demarrer ; certificat auto-signe genere par `scripts/generate_dashboard_cert.sh` ; scripts de demarrage compatibles |
 | 0.82 | EF-87 (§3.73) : **graphique TradingView Lightweight Charts** (version figee + SRI, repli sur le dessin maison, zoom/reticule/legende OHLC, heure alignee sur l'heure locale) et **reception des alertes TradingView** par webhook : fermee sans secret, secret dans le corps (aucun en-tete possible), seule route avant l'auth du dashboard, ordres paper automatiques desactives par defaut et plafonnes, execution en arriere-plan (limite TradingView de 3 s). Exposition internet laissee a la decision de l'utilisateur |
 | 0.83 | EF-88 (§3.74) : **ordres d'achat declenches poses au clic sur le graphique d'un bot**, stockes par le serveur et executes par le bot par le MEME chemin qu'un signal de la strategie (aucun garde-fou contourne), declenchement unique, annulation prioritaire ; **zones activables** (stop-loss/objectifs/trailing/verrou, seuils de la strategie via `chart_levels()`, ordres en attente). Verifie en reel : ordre releve en 22 s et refuse par le gestionnaire de risque, sans achat |
+| 0.84 | EF-89 (§3.75) : **page Espace Trading** (`/trading.html`, statique, jamais reecrite par les bots, sans rafraichissement global) : graphique Lightweight Charts avec unites de temps 1m-1d (`/api/candles`), **ordres de vente a la souris** (au-dessus = prise de profit, en dessous = stop ; registre etendu avec migration en place), **panneau de reglages** avec apercu sur le graphique et application par reecriture ciblee du bloc `risk:` (commentaires conserves), bot relance. Verifie en reel : reglage applique puis retire, config revenue a l'identique |
 
 ---
 
@@ -1710,6 +1711,28 @@ Details qui evitent des erreurs reelles :
 **Consequence a connaitre** : les trois bots actuels ont `max_concurrent_positions: 1` et sont tous en position ; tout ordre manuel pose sur eux sera refuse tant qu'ils le restent. Relever ce maximum est une decision de gestion du risque laissee a l'utilisateur.
 
 **Validation** : `tests/test_manual_triggers.py`, 20 tests (registre, annulation qui gagne sur l'execution, declenchement unique, execution par le vrai moteur, limite de positions respectee, strategie non appelee, journalisation, niveaux de `trend_regime`, repli sur une strategie defaillante, trailing et verrou dans le tableau des ordres, routes HTTP reelles dont le refus des noms de bot invalides). Suite complete : **849 tests**.
+
+---
+
+### 3.75 EF-89 : page "Espace Trading" - graphique, unite de temps, ordres de vente a la souris, reglages a cote
+
+**Demande** : "une nouvelle page, en gros je veux pouvoir voir le graphique, changer le time frame, poser avec la souris des ordres de vente et gerer les parametres (stop loss, trailing stop etc) dans une fenetre juste a cote".
+
+**Page statique a part** (`reporting/static/trading.html`, servie a `/trading.html`, lien depuis l'onglet Bot). Deux choix d'architecture, chacun motive par un defaut deja rencontre : (1) elle n'est **pas** generee par les bots, contrairement a `dashboard.html` que chaque bot reecrit a chaque cycle avec le modele charge en memoire (§3.64) - une evolution de la page ne demande donc pas de relancer les bots ; (2) **aucun rafraichissement global** : seules les donnees se mettent a jour (dernieres bougies toutes les 10 s, etat du bot toutes les 15 s, par `series.update`), jamais le zoom ni un reglage en cours de saisie. Fichier HTML ordinaire : plus de JS dans une chaine Python non brute, source recurrente d'erreurs d'echappement (trois fois dans cette session).
+
+**Graphique** : TradingView Lightweight Charts (meme version figee + SRI qu'EF-87), unites de temps 1m / 5m / 15m / 1h / 4h / 1d via une nouvelle route `/api/candles` (marche public, liste blanche d'unites, 10 a 1 000 bougies, cache 5 s), heure locale, marqueurs des trades du bot, legende OHLC au survol, zones activables (reprises d'EF-88).
+
+**Ordres a la souris** : un clic ouvre un menu au prix du curseur. Au-dessus du cours : **vendre si le cours monte a X** (prise de profit). En dessous : **vendre si le cours descend a X** (stop) ou acheter si le cours descend a X. Les ventes etendent le registre d'EF-88 (`side`, `direction` below/above) ; **migration en place** d'une base anterieure sans colonne `direction` - verifiee sur la vraie base d'ETH, dont l'ordre #1 d'hier est relu comme un achat "sous". Une vente passe par le chemin d'un signal de vente de la strategie : elle ferme TOUTES les positions du bot. Sans position, elle est refusee (la page le signale avant de la poser).
+
+**Panneau de reglages** : stop-loss, objectif, trailing stop, verrou de gain (armement / vente), perte max du jour, positions simultanees. Saisie en pourcentage, champ vide = protection desactivee, champs modifies surlignes. **Apercu** : les lignes que donneraient les valeurs saisies sont tracees en pointilles gris AVANT d'appliquer, a partir du prix d'achat et du **plus haut atteint depuis l'achat** - que `build_orders_table` publie desormais meme sans trailing actif (sans lui, l'apercu partait du prix d'achat et placait la ligne trop bas, constate en verifiant). Pour `trend_regime`, le panneau rappelle que la strategie a ete validee sans stop-loss ni objectif.
+
+**Application** (`/api/bot-risk`, `config_edit.py`) : valeurs validees et bornees (stop-loss a 0 % refuse - il vendrait au premier tick ; verrou dont la vente serait au-dessus de l'armement refuse ; cles hors liste refusees), puis **seules les lignes concernees du bloc `risk:` sont reecrites** - les commentaires, qui expliquent pourquoi ces bots n'ont pas de stop-loss, sont conserves (le `_handle_update` existant, lui, reecrit tout le fichier via `yaml.safe_dump` et les efface : limite constatee, non traitee ici). La config est relue avant ecriture (jamais de fichier illisible sur le disque), puis le bot est relance s'il tournait, ses positions restaurees.
+
+**Defaut trouve en verifiant la page, corrige** : le menu du clic ne s'affichait jamais - le clic sur le graphique l'ouvrait puis remontait jusqu'au document, dont le gestionnaire "fermer si on clique ailleurs" le refermait aussitot.
+
+**Verification reelle** : unite 15 m (500 bougies a 900 s) ; clic au-dessus du cours -> menu "Vendre si le cours monte a 2 862,4" -> ordre #2 pose, ligne tracee, liste a jour, puis annule depuis la page ; apercu stop-loss 8 % a 2 518,09 (= 2 737,05 - 8 %) ; **reglage reellement applique** (trailing 10 % sur ETH) : une seule ligne modifiee dans la config, bot relance avec sa position, trailing publie a 2 464,50 (= 2 738,33 - 10 %, identique a l'apercu) ; puis retrait du trailing depuis la page -> config **identique a l'original** (`git diff` vide).
+
+**Validation** : `tests/test_trading_page.py`, 28 tests - reecriture ciblee (commentaires conserves, rien hors du bloc, cle absente ajoutee dans le bloc, desactivation, config sans bloc refusee, vraie config ETH), bornes refusees et valeurs normalisees, ventes dans les deux sens, achat au-dessus refuse, migration d'une ancienne base, vente manuelle fermant la position et vente sans position refusee, routes reelles (page servie, bougies par unite de temps, unite inconnue refusee, etat du bot, reglages ecrits avec commentaires, reglages invalides laissant le fichier intact, ordre de vente), plus haut publie. Suite complete : **877 tests**.
 
 ---
 

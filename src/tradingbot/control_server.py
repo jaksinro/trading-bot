@@ -789,6 +789,66 @@ def tv_settings() -> dict:
     }
 
 
+# ----------------------------------------------------------------------------
+# Page Trading (EF-89)
+# ----------------------------------------------------------------------------
+TRADING_PAGE_PATH = Path(__file__).resolve().parent / "reporting" / "static" / "trading.html"
+CANDLE_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
+_candles_cache: dict[tuple, tuple[float, list]] = {}
+
+
+def fetch_candles(symbol: str, timeframe: str, limit: int, exchange=None) -> list[list]:
+    """Bougies [t, ouverture, haut, bas, cloture, volume] du marche PUBLIC (le
+    testnet n'a que ~14 jours d'historique, EF-83). Unite de temps limitee a
+    une liste connue ; cache de 5 s pour ne pas marteler l'exchange."""
+    if timeframe not in CANDLE_TIMEFRAMES:
+        raise ValueError(f"unite de temps inconnue : {timeframe}")
+    limit = max(10, min(1000, int(limit)))
+    key = (symbol, timeframe, limit)
+    cached = _candles_cache.get(key)
+    if cached is not None and time.time() - cached[0] < 5:
+        return cached[1]
+    rows = (exchange or _public_exchange).fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    candles = [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5] or 0)] for r in rows]
+    _candles_cache[key] = (time.time(), candles)
+    return candles
+
+
+def read_bot_dashboard_data(name: str) -> dict:
+    """Etat publie par le bot a chaque cycle (dashboard_data/{name}.js). Vide
+    si le bot n'a encore jamais tourne."""
+    path = ROOT / "dashboard_data" / f"{name}.js"
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text.split("] = ", 1)[1].rstrip().rstrip(";"))
+    except (IndexError, ValueError):
+        return {}
+
+
+def bot_state(name: str) -> dict | None:
+    """Tout ce que la page Trading affiche pour un bot, ou None s'il n'existe pas."""
+    path = get_config_path_for_name(name)
+    if path is None:
+        return None
+    config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    published = read_bot_dashboard_data(name)
+    return {
+        "name": name,
+        "symbol": config.get("symbol"),
+        "timeframe": config.get("timeframe"),
+        "strategy_type": (config.get("strategy") or {}).get("type"),
+        "risk": config.get("risk") or {},
+        "running": is_bot_running(name),
+        "current_price": published.get("current_price"),
+        "orders": published.get("orders") or [],
+        "chart_levels": published.get("chart_levels") or [],
+        "open_positions_count": published.get("open_positions_count"),
+        "updated_at": published.get("updated_at"),
+    }
+
+
 def bot_trigger_store(name: str):
     """Registre des ordres declenches d'un bot EXISTANT, ou None. Le nom est
     verifie contre les configs connues : il sert a construire un chemin de
@@ -946,6 +1006,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/tv-test": self._handle_tv_test,
             "/api/bot-trigger": self._handle_bot_trigger,
             "/api/bot-trigger-cancel": self._handle_bot_trigger_cancel,
+            "/api/bot-risk": self._handle_bot_risk,
             "/api/manual-deposit": self._handle_manual_deposit,
             "/api/manual-reset": self._handle_manual_reset,
         }
@@ -1299,11 +1360,51 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             price = float(payload.get("price"))
-            trigger_id = store.add_buy_below(price)
+            # EF-89 : ventes (au-dessus = prise de profit, en dessous = stop) en plus
+            # de l'achat sous un prix ; par defaut, l'achat d'EF-88.
+            side = str(payload.get("side") or "buy")
+            direction = str(payload.get("direction") or "below")
+            trigger_id = store.add(side, direction, price)
         except (TypeError, ValueError) as e:
-            self._send_json(400, {"error": f"seuil invalide : {e}"})
+            self._send_json(400, {"error": f"ordre invalide : {e}"})
             return
-        self._send_json(200, {"status": "ok", "id": trigger_id, "price": price})
+        self._send_json(200, {"status": "ok", "id": trigger_id, "price": price, "side": side, "direction": direction})
+
+    def _handle_bot_risk(self, payload: dict) -> None:
+        """Change les reglages de risque d'un bot depuis la page Trading (EF-89).
+        Seules les lignes concernees du bloc `risk:` sont reecrites
+        (commentaires conserves), puis le bot est relance s'il tournait : il ne
+        relit sa config qu'au demarrage. Ses positions ouvertes sont restaurees
+        a la relance, pas vendues."""
+        from tradingbot.config_edit import update_risk_block, validate_risk_updates
+
+        name = str(payload.get("name", ""))
+        path = get_config_path_for_name(name)
+        if path is None:
+            self._send_json(404, {"error": f"bot '{name}' introuvable"})
+            return
+        try:
+            updates = validate_risk_updates(payload.get("risk") or {})
+            if not updates:
+                self._send_json(400, {"error": "aucun reglage a modifier"})
+                return
+            new_text = update_risk_block(path.read_text(encoding="utf-8"), updates)
+            yaml.safe_load(new_text)  # jamais de config illisible ecrite sur le disque
+        except (TypeError, ValueError, yaml.YAMLError) as e:
+            self._send_json(400, {"error": str(e)})
+            return
+
+        was_running = is_bot_running(name)
+        if was_running:
+            self._kill_by_name(name)
+            time.sleep(0.5)
+        path.write_text(new_text, encoding="utf-8")
+        if was_running:
+            ok, error = launch_process(path, name)
+            if not ok:
+                self._send_json(500, {"error": f"reglages enregistres, mais le bot a plante au redemarrage : {error}"})
+                return
+        self._send_json(200, {"status": "ok", "applied": updates, "restarted": was_running})
 
     def _handle_bot_trigger_cancel(self, payload: dict) -> None:
         store = bot_trigger_store(str(payload.get("name", "")))
@@ -1542,6 +1643,41 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, read_price_history(config, db_path_for(config.name), days=days))
             except Exception as e:
                 self._send_json(500, {"error": f"historique indisponible : {e}"})
+            return
+
+        if urlsplit(self.path).path == "/trading.html":
+            try:
+                body = TRADING_PAGE_PATH.read_bytes()
+            except OSError:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if self.path.startswith("/api/candles"):
+            query = parse_qs(urlsplit(self.path).query)
+            symbol = unquote((query.get("symbol") or [""])[0]).upper()
+            try:
+                candles = fetch_candles(symbol, (query.get("timeframe") or ["1h"])[0],
+                                        int((query.get("limit") or ["500"])[0]))
+            except Exception as e:
+                self._send_json(400, {"error": f"bougies indisponibles : {e}"})
+                return
+            self._send_json(200, {"symbol": symbol, "candles": candles})
+            return
+
+        if self.path.startswith("/api/bot-state"):
+            name = unquote((parse_qs(urlsplit(self.path).query).get("name") or [""])[0])
+            state = bot_state(name)
+            if state is None:
+                self._send_json(404, {"error": f"bot '{name}' introuvable"})
+                return
+            self._send_json(200, state)
             return
 
         if self.path.startswith("/api/bot-triggers"):

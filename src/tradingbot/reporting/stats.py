@@ -98,6 +98,10 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
             # EF-88 : niveaux supplementaires traces sur le graphique. Le trailing
             # stop suit le plus haut atteint depuis l'achat ; le verrou de gain
             # s'arme au-dessus d'un premier seuil puis vend sous un second.
+            # EF-89 : plus haut atteint depuis l'achat, publie meme sans trailing
+            # actif - l'apercu du trailing dans la page Trading en a besoin, sinon
+            # il partirait du prix d'achat et placerait la ligne trop bas.
+            "peak_price": max(position.peak_price, position.avg_entry_price),
             "target_trailing_stop": (
                 max(position.peak_price, position.avg_entry_price) * (1 - risk_config.trailing_stop_pct)
                 if risk_config.trailing_stop_pct else None

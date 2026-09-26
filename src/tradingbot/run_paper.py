@@ -781,17 +781,23 @@ def main(config_path: str) -> None:
                     now_ms = int(time.time() * 1000)
                     tick = Candle(timestamp=now_ms, open=current_price, high=current_price,
                                   low=current_price, close=current_price, volume=0.0)
+                    # EF-89 : un ordre de vente ferme TOUTES les positions du bot, comme
+                    # un signal de vente de la strategie (meme chemin, memes garde-fous).
+                    is_sell = trigger.get("side") == "sell"
                     try:
-                        results = engine.process_manual_signal(Signal(side=Side.BUY, reason="ordre_manuel"), tick)
+                        results = engine.process_manual_signal(
+                            Signal(side=Side.SELL if is_sell else Side.BUY, reason="ordre_manuel"), tick,
+                        )
                     except Exception as e:
                         manual_triggers.finish(trigger["id"], REJECTED, f"erreur : {type(e).__name__}: {e}")
                         logger.log_event("warning", f"Ordre manuel #{trigger['id']} en erreur : {e}")
                         raise  # une erreur pendant un ordre reste fatale : etat ambigu (voir EF-85)
                     detail = " ; ".join(results) or "aucun resultat"
-                    ok = any(r.startswith("Achat execute") for r in results)
+                    ok = any(r.startswith("Vente executee" if is_sell else "Achat execute") for r in results)
                     manual_triggers.finish(trigger["id"], EXECUTED if ok else REJECTED,
                                            f"cours {current_price} (seuil {trigger['trigger_price']}) : {detail}")
-                    logger.log_event("info", f"Ordre manuel #{trigger['id']} (achat sous {trigger['trigger_price']}) : {detail}")
+                    sens = "au-dessus de" if trigger.get("direction") == "above" else "sous"
+                    logger.log_event("info", f"Ordre manuel #{trigger['id']} ({'vente' if is_sell else 'achat'} {sens} {trigger['trigger_price']}) : {detail}")
                     print(f"[ordre manuel #{trigger['id']}] {detail}", flush=True)
                     logger.save_open_positions(executor.portfolio.positions)
 
