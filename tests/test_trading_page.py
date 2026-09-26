@@ -268,3 +268,16 @@ def test_open_orders_publish_the_peak_even_without_trailing():
     portfolio.positions[0].peak_price = 130.0
     row = [r for r in build_orders_table(portfolio, RiskConfig()) if r["status"] == "ouvert"][0]
     assert row["peak_price"] == 130.0
+
+
+def test_applying_settings_keeps_the_file_line_endings(server):
+    """Un fichier en fins de ligne Unix ne doit pas etre converti en entier
+    (Windows ecrit du CRLF en mode texte) pour une modification d'une ligne."""
+    base, root = server
+    path = root / "config" / "ETH_TEST.yml"
+    path.write_bytes(CONFIG.encode("utf-8"))  # fins de ligne Unix
+    call(base, "/api/bot-risk", {"name": "ETH_TEST", "risk": {"stop_loss_pct": 0.08}})
+    raw = path.read_bytes()
+    assert b"\r\n" not in raw
+    changed = [l for l in raw.decode().splitlines() if l not in CONFIG.splitlines()]
+    assert changed == ["  stop_loss_pct: 0.08"]

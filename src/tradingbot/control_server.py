@@ -1398,7 +1398,11 @@ class Handler(BaseHTTPRequestHandler):
         if was_running:
             self._kill_by_name(name)
             time.sleep(0.5)
-        path.write_text(new_text, encoding="utf-8")
+        # Meme style de fin de ligne que le fichier d'origine. En mode texte,
+        # Windows ecrit des fins de ligne CRLF : un fichier en fins de ligne
+        # Unix serait converti EN ENTIER pour une modification d'une ligne.
+        newline = "\r\n" if b"\r\n" in path.read_bytes() else "\n"
+        path.write_text(new_text, encoding="utf-8", newline=newline)
         if was_running:
             ok, error = launch_process(path, name)
             if not ok:
