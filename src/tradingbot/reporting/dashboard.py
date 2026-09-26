@@ -1596,6 +1596,8 @@ async function renderManualTab() {
   if (!document.getElementById("manual-root")) {
     contentEl.innerHTML = `<div id="manual-root">
       <h1>Trading manuel</h1>
+      <p><a href="${CONTROL_SERVER}/trading.html" target="_blank" rel="noopener" style="font-weight:600;">Ouvrir l'Espace Trading</a>
+      <span class="muted" style="font-size:12px;"> - graphique, ordres poses a la souris, stop-loss et trailing sur ce panier, sans aucun bot.</span></p>
       <p class="muted">Un panier <strong>a part</strong> : son capital est celui que tu y verses, il ne touche pas
       au panier commun des bots. Les ordres partent <strong>reellement</strong> sur le testnet Binance
       (argent fictif, prix reels), avec les memes arrondis et limites de paire que les bots.</p>
@@ -3083,7 +3085,6 @@ function renderBotContent() {
 
   contentEl.innerHTML = `
     <span class="badge">Mode ${data.mode}</span>${statusHtml}${stopBtn}
-    <a href="${CONTROL_SERVER}/trading.html?bot=${encodeURIComponent(currentBotName)}" target="_blank" rel="noopener" style="margin-left:8px; font-size:12px; font-weight:600;">Ouvrir l'espace de trading</a>
     <h1 style="margin-top:8px;">${currentBotName} &middot; ${data.symbol}</h1>
     <p class="muted">Derniere mise a jour : ${data.updated_at}${hasPool ? ` &middot; Panier commun disponible : ${fmtMoney(data.pool_available_cash)}` : ""}</p>
 

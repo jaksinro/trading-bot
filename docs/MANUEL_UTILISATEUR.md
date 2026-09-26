@@ -686,46 +686,42 @@ ou refusé (et pourquoi).
 Le bouton **« Envoyer une alerte de test »** simule une alerte depuis l'app,
 pour vérifier que tout fonctionne sans compte TradingView.
 
-## 12. L'Espace Trading : graphique, ordres et réglages sur une seule page
+## 12. L'Espace Trading : ton trading à la main, sans aucun bot
 
-Ouvre-la depuis l'onglet Bot avec le lien **« Ouvrir l'espace de trading »**,
-ou directement à l'adresse `/trading.html`. Choisis le bot en haut à gauche.
+Ouvre-le depuis l'onglet **Manuel** avec le lien **« Ouvrir l'Espace
+Trading »**. Tout ce que tu y fais concerne ton **panier Manuel** (le capital
+que tu y as versé) : les bots n'y touchent jamais, et la page ne touche jamais
+aux bots.
 
-**Le graphique** — boutons **1m, 5m, 15m, 1h, 4h, 1d** pour changer l'unité
-de temps (la durée de chaque bougie). Molette pour zoomer, glisser pour se
-déplacer, survol pour lire les valeurs d'une bougie. Les cases à cocher
-affichent ou masquent les zones (stop-loss et objectifs, seuils de la
-stratégie, ordres posés). Le graphique se met à jour tout seul, sans perdre
-ton zoom.
+**Choisir ce que tu regardes** — la paire en haut à gauche (BTC/USDT,
+ETH/USDT…), puis l'unité de temps (1m, 5m, 15m, 1h, 4h, 1d). Molette pour
+zoomer, glisser pour se déplacer, survol pour lire une bougie. Tes achats et
+tes ventes passés apparaissent en flèches sur le graphique, et une ligne
+pointillée marque ton prix d'achat.
+
+**Acheter ou vendre tout de suite** — dans le panneau de droite : un montant
+en USDT et « Acheter », ou « Tout vendre ».
 
 **Poser un ordre à la souris** — clique sur le graphique, à la hauteur du prix
-voulu. Un petit menu apparaît :
-- **au-dessus du cours** : « Vendre si le cours monte à … » — une prise de
-  profit ;
-- **en dessous du cours** : « Vendre si le cours descend à … » — un stop, pour
-  limiter une perte — ou « Acheter si le cours descend à … ».
+voulu :
+- **au-dessus du cours** : « Vendre si le cours monte à … » (prise de profit) ;
+- **en dessous** : « Vendre si le cours descend à … » (stop), ou « Acheter si
+  le cours descend à … » — pour le montant indiqué dans le panneau.
 
-Le bot surveille le seuil toutes les minutes et agit **lui-même**, avec les
-mêmes protections que sa stratégie. Une vente revend **toute** la position du
-bot. S'il n'a aucune position, une vente sera refusée : la page te prévient
-avant de la poser. Tes ordres sont listés à droite, avec un bouton **Annuler**.
+**Protéger ta position** — stop-loss, objectif et trailing stop, en
+pourcentage (vide = désactivé). Une ligne grise montre le seuil avant que tu
+enregistres. Ces réglages restent actifs pour ta prochaine position sur la
+même paire.
 
-**Les réglages, à droite** — stop-loss, objectif, trailing stop, verrou de
-gain, perte maximale du jour, nombre de positions simultanées. Tape un
-pourcentage ; **laisse vide pour désactiver** une protection. Dès que tu
-modifies une valeur :
-- le champ se surligne en orange ;
-- une **ligne grise en pointillés** apparaît sur le graphique, à l'endroit où
-  la protection se déclencherait — **avant** d'appliquer quoi que ce soit.
-
-**« Appliquer au bot »** enregistre et relance le bot en quelques secondes. Sa
-position ouverte est conservée, et les explications écrites dans sa
-configuration ne sont pas effacées. **« Annuler »** remet les valeurs
-actuelles du bot.
-
-Pour les bots « trend_regime », un encadré te rappelle que leur stratégie a
-été testée **sans** stop-loss ni objectif : en ajouter, c'est s'écarter du
-réglage qui a été validé.
+**Qui surveille tes ordres ?** Le serveur de l'application, toutes les
+20 secondes (pastille « surveillant actif » en haut). Ce qu'il faut savoir :
+- si le serveur est **arrêté** (PC éteint), rien n'est surveillé : tes ordres
+  et protections reprennent à son redémarrage, mais ce qui s'est passé
+  entre-temps n'est pas rattrapé ;
+- un mouvement plus bref que 20 secondes peut passer inaperçu, et l'ordre part
+  au prix du marché, qui peut différer un peu du seuil ;
+- chaque ordre est listé à droite : en attente (avec **Annuler**), exécuté,
+  ou refusé avec la raison.
 
 ## Historique des changements de l'interface
 
@@ -802,3 +798,4 @@ réglage qui a été validé.
 | 2026-09-26 | **Ordres d'achat au clic et zones sur le graphique des bots**, demandés par l'utilisateur. Un clic sur le graphique propose d'acheter si le cours descend sous le prix cliqué ; le bot surveille et achète lui-même, avec les mêmes protections que sa stratégie. Trois cases à cocher affichent ou masquent les zones : stop-loss et objectifs, seuils de la stratégie, ordres en attente. Nouveau tableau « Ordres manuels sur ce bot » avec bouton Annuler. Voir §4.2 |
 | 2026-09-26 | **Nouvelle page « Espace Trading »**, demandée par l'utilisateur, accessible depuis l'onglet Bot. Graphique avec choix de l'unité de temps (1 minute à 1 jour), ordres de vente posés d'un clic (prise de profit au-dessus du cours, stop en dessous) ou d'achat, et panneau de réglages (stop-loss, trailing stop, objectif, verrou de gain...) avec aperçu des lignes sur le graphique avant d'appliquer. Voir §12 |
 | 2026-09-26 | **Correction du lien « Ouvrir l'espace de trading »** : quand le dashboard était ouvert comme fichier (ce que font les bots au démarrage), le lien menait à une page introuvable (« Impossible d'accéder à votre fichier »). Il pointe désormais vers le serveur, et s'ouvre dans un nouvel onglet |
+| 2026-09-26 | **L'Espace Trading devient indépendant des bots**, à la demande de l'utilisateur. Il pilote désormais ton panier Manuel, paire par paire : ordre immédiat, ordres posés à la souris, stop-loss, objectif et trailing stop surveillés par le serveur toutes les 20 secondes. Le lien passe de l'onglet Bot à l'onglet Manuel. Voir §12 |

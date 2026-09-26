@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.81 |
+| **Version** | 0.82 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -95,6 +95,7 @@
 | 0.79 | EF-87 : graphique TradingView dans l'onglet Bot ; reception des alertes TradingView (onglet Alertes), ordres automatiques desactives par defaut |
 | 0.80 | EF-88 : ordre d'achat declenche pose au clic sur le graphique d'un bot ; zones de stop-loss, objectifs et seuils activables |
 | 0.81 | EF-89 : page Espace Trading - graphique et unite de temps, ordres de vente a la souris, reglages de risque avec apercu |
+| 0.82 | EF-90 : Espace Trading independant des bots - panier Manuel par paire, ordres conditionnels et protections executes par un surveillant du serveur |
 ---
 
 ## 1. Introduction
@@ -263,6 +264,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-87 | Automatiser des analyses avec TradingView, et utiliser sa bibliotheque de graphiques - demande de l'utilisateur | Devrait - **realise en partie, limite dite**. TradingView n'a pas d'API d'analyse : l'automatisation passe par ses alertes (Pine Script -> webhook), desormais recues par l'app (onglet Alertes), fermees sans secret, et pouvant devenir des ordres paper plafonnes si l'utilisateur l'active. Graphique des bots sur TradingView Lightweight Charts. **Reste a faire par l'utilisateur** : rendre le serveur joignable en HTTPS sur le port 443 (tunnel), et disposer d'un abonnement TradingView donnant droit aux webhooks. Voir STC §3.73 |
 | EF-88 | Poser a la main, en cliquant sur le graphique d'un bot, un ordre d'achat declenche sous un prix, et voir les zones de stop-loss et autres niveaux, chaque famille activable - demande de l'utilisateur | Devrait - **realise**. L'ordre est execute par le bot lui-meme par le chemin d'un signal de la strategie : memes garde-fous, le lot devient une position ordinaire du bot. Zones : stop-loss, objectif, trailing stop, verrou de gain, prix d'achat, seuils de la strategie, ordres en attente. Limites : cours verifie toutes les minutes, achat au marche. Voir STC §3.74 |
 | EF-89 | Une page de trading dediee : graphique avec unite de temps au choix, ordres de vente poses a la souris, reglages de risque (stop-loss, trailing stop...) dans un panneau a cote - demande de l'utilisateur | Devrait - **realise**. Page `/trading.html` (lien depuis l'onglet Bot). Ventes au-dessus (prise de profit) ou en dessous (stop) du cours, executees par le bot avec ses garde-fous ; reglages appliques avec apercu prealable sur le graphique, commentaires de la config conserves, bot relance sans perdre sa position. Voir STC §3.75 |
+| EF-90 | La fenetre de trading doit etre independante des bots - precision de l'utilisateur apres EF-89 ("on ne s'est pas compris") | Devrait - **realise**. L'Espace Trading pilote le panier Manuel, paire par paire. Ordres conditionnels (achat sous un prix, vente au-dessus ou en dessous) et protections de position (stop-loss, objectif, trailing) executes par un surveillant integre au serveur de controle, releve toutes les 20 s, sans aucun bot. Limite : serveur arrete = rien n'est surveille jusqu'a sa relance. Voir STC §3.76 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

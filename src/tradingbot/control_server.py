@@ -743,17 +743,18 @@ def execute_manual_order(payload: dict) -> tuple[int, dict]:
         return 400, {"error": f"testnet injoignable ou paire inconnue : {e}"}
 
     book = ManualBook()
+    reason = str(payload.get("reason") or "manuel")[:80]   # EF-90 : stop-loss, conditionnel #n...
     try:
         if side == "buy":
             amount = float(payload.get("amount", 0) or 0)
             quote = symbol.split("/")[1]
             free = executor.exchange.fetch_balance().get(quote, {}).get("free")
             report = book.buy(symbol, amount, price, executor,
-                              free_quote_on_exchange=float(free) if free is not None else None)
+                              free_quote_on_exchange=float(free) if free is not None else None, reason=reason)
         else:
             raw_qty = payload.get("quantity")
             quantity = None if raw_qty in (None, "", "all") else float(raw_qty)
-            report = book.sell(symbol, quantity, price, executor)
+            report = book.sell(symbol, quantity, price, executor, reason=reason)
     except Exception as e:
         return 500, {"error": f"echec de l'ordre : {e}"}
 
@@ -786,6 +787,76 @@ def tv_settings() -> dict:
         "auto_orders": os.environ.get(TV_AUTO_ORDERS_ENV, "0").strip().lower() in ("1", "true", "oui", "yes"),
         "max_order_usdt": max_order,
         "allowed_ips": allowed,
+    }
+
+
+# ----------------------------------------------------------------------------
+# Surveillant du panier manuel (EF-90)
+# ----------------------------------------------------------------------------
+WATCHER_STATUS = {"running": False, "last_cycle": None, "last_error": None, "events": []}
+WATCH_LOG_PATH = ROOT / "logs" / "manual_watch.log"
+
+
+def _watch_log(message: str) -> None:
+    try:
+        WATCH_LOG_PATH.parent.mkdir(exist_ok=True)
+        with open(WATCH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except OSError:
+        pass
+
+
+def manual_watcher_loop(stop_event: threading.Event, interval: float | None = None) -> None:
+    """Execute les ordres conditionnels et les protections du panier manuel,
+    independamment de tout bot. Une erreur d'un passage est journalisee et le
+    passage suivant a lieu quand meme : le surveillant ne doit jamais mourir en
+    silence (lecon d'EF-85)."""
+    from tradingbot.manual_trading import ManualBook
+    from tradingbot.manual_watch import WATCH_INTERVAL_SECONDS, ConditionalOrders, PositionRisk, watch_cycle
+
+    interval = interval or WATCH_INTERVAL_SECONDS
+    WATCHER_STATUS["running"] = True
+    _watch_log("surveillant du panier manuel demarre")
+    while not stop_event.is_set():
+        try:
+            events = watch_cycle(ManualBook(), ConditionalOrders(), PositionRisk(),
+                                 manual_last_price, execute_manual_order)
+            WATCHER_STATUS["last_cycle"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            WATCHER_STATUS["last_error"] = None
+            for event in events:
+                _watch_log(event)
+            if events:
+                WATCHER_STATUS["events"] = (events + WATCHER_STATUS["events"])[:20]
+        except Exception as e:
+            WATCHER_STATUS["last_error"] = f"{type(e).__name__}: {e}"
+            _watch_log(f"ERREUR du passage : {type(e).__name__}: {e}")
+        stop_event.wait(interval)
+    WATCHER_STATUS["running"] = False
+
+
+def manual_symbol_state(symbol: str) -> dict:
+    """Tout ce que l'Espace Trading affiche pour une paire du panier manuel."""
+    from tradingbot.manual_trading import ManualBook
+    from tradingbot.manual_watch import ConditionalOrders, PositionRisk
+
+    book = ManualBook()
+    held = book.positions().get(symbol)
+    try:
+        price = manual_last_price(symbol)
+    except Exception:
+        price = None
+    summary = book.summary({symbol: price} if price else {})
+    position = None
+    if held:
+        quantity, avg = held
+        position = {"quantity": quantity, "avg_price": avg,
+                    "value": quantity * price if price else None,
+                    "pnl": (price - avg) * quantity if price else None}
+    return {
+        "symbol": symbol, "price": price, "cash": summary["cash"], "deposited": summary["deposited"],
+        "position": position, "risk": PositionRisk().get(symbol),
+        "orders": ConditionalOrders().recent(symbol, 30), "fills": book.fills(symbol),
+        "watcher": {k: WATCHER_STATUS[k] for k in ("running", "last_cycle", "last_error")},
     }
 
 
@@ -1007,6 +1078,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/bot-trigger": self._handle_bot_trigger,
             "/api/bot-trigger-cancel": self._handle_bot_trigger_cancel,
             "/api/bot-risk": self._handle_bot_risk,
+            "/api/manual-conditional": self._handle_manual_conditional,
+            "/api/manual-conditional-cancel": self._handle_manual_conditional_cancel,
+            "/api/manual-risk": self._handle_manual_risk,
             "/api/manual-deposit": self._handle_manual_deposit,
             "/api/manual-reset": self._handle_manual_reset,
         }
@@ -1370,6 +1444,52 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"status": "ok", "id": trigger_id, "price": price, "side": side, "direction": direction})
 
+    def _handle_manual_conditional(self, payload: dict) -> None:
+        """Ordre conditionnel du panier manuel (EF-90), execute par le surveillant."""
+        from tradingbot.manual_watch import ConditionalOrders
+
+        try:
+            order_id = ConditionalOrders().add(
+                payload.get("symbol", ""), str(payload.get("side") or ""), str(payload.get("direction") or ""),
+                payload.get("price"), payload.get("amount"),
+                None if payload.get("quantity") in (None, "", "all") else payload.get("quantity"),
+            )
+        except (TypeError, ValueError) as e:
+            self._send_json(400, {"error": f"ordre invalide : {e}"})
+            return
+        self._send_json(200, {"status": "ok", "id": order_id})
+
+    def _handle_manual_conditional_cancel(self, payload: dict) -> None:
+        from tradingbot.manual_watch import ConditionalOrders
+
+        try:
+            cancelled = ConditionalOrders().cancel(int(payload.get("id")))
+        except (TypeError, ValueError):
+            self._send_json(400, {"error": "identifiant invalide"})
+            return
+        if not cancelled:
+            self._send_json(409, {"error": "ordre deja execute, refuse ou annule : rien a annuler"})
+            return
+        self._send_json(200, {"status": "annule"})
+
+    def _handle_manual_risk(self, payload: dict) -> None:
+        """Protections de la position du panier manuel sur une paire (EF-90).
+        Memes bornes que pour les bots (`validate_risk_updates`)."""
+        from tradingbot.config_edit import validate_risk_updates
+        from tradingbot.manual_watch import PositionRisk
+
+        symbol = str(payload.get("symbol", "")).upper().strip()
+        if "/" not in symbol:
+            self._send_json(400, {"error": "paire attendue sous la forme ETH/USDT"})
+            return
+        raw = {k: payload.get(k) for k in PositionRisk.FIELDS if k in payload}
+        try:
+            clean = validate_risk_updates(raw)
+        except (TypeError, ValueError) as e:
+            self._send_json(400, {"error": str(e)})
+            return
+        self._send_json(200, {"status": "ok", "risk": PositionRisk().set(symbol, clean)})
+
     def _handle_bot_risk(self, payload: dict) -> None:
         """Change les reglages de risque d'un bot depuis la page Trading (EF-89).
         Seules les lignes concernees du bloc `risk:` sont reecrites
@@ -1675,6 +1795,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"symbol": symbol, "candles": candles})
             return
 
+        if self.path.startswith("/api/manual-state"):
+            symbol = unquote((parse_qs(urlsplit(self.path).query).get("symbol") or [""])[0]).upper()
+            if "/" not in symbol:
+                self._send_json(400, {"error": "paire attendue sous la forme ETH/USDT"})
+                return
+            self._send_json(200, manual_symbol_state(symbol))
+            return
+
         if self.path.startswith("/api/bot-state"):
             name = unquote((parse_qs(urlsplit(self.path).query).get("name") or [""])[0])
             state = bot_state(name)
@@ -1918,6 +2046,9 @@ def main() -> None:
                 print(f"  note : sans HTTPS, ce mot de passe circule en clair sur le reseau ({TLS_CERT_ENV}/{TLS_KEY_ENV})")
         else:
             print(f"  ATTENTION : aucun {PASSWORD_ENV} dans .env - les autres appareils recevront un refus (403)")
+    watcher_stop = threading.Event()
+    threading.Thread(target=manual_watcher_loop, args=(watcher_stop,), daemon=True, name="manual-watcher").start()
+    print("Surveillant du panier manuel actif (ordres conditionnels, stop-loss, trailing).")
     print("Ctrl+C pour arreter.")
     try:
         server.serve_forever()

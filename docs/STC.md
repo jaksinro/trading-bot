@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.84 |
+| **Version** | 0.85 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -98,6 +98,7 @@
 | 0.82 | EF-87 (§3.73) : **graphique TradingView Lightweight Charts** (version figee + SRI, repli sur le dessin maison, zoom/reticule/legende OHLC, heure alignee sur l'heure locale) et **reception des alertes TradingView** par webhook : fermee sans secret, secret dans le corps (aucun en-tete possible), seule route avant l'auth du dashboard, ordres paper automatiques desactives par defaut et plafonnes, execution en arriere-plan (limite TradingView de 3 s). Exposition internet laissee a la decision de l'utilisateur |
 | 0.83 | EF-88 (§3.74) : **ordres d'achat declenches poses au clic sur le graphique d'un bot**, stockes par le serveur et executes par le bot par le MEME chemin qu'un signal de la strategie (aucun garde-fou contourne), declenchement unique, annulation prioritaire ; **zones activables** (stop-loss/objectifs/trailing/verrou, seuils de la strategie via `chart_levels()`, ordres en attente). Verifie en reel : ordre releve en 22 s et refuse par le gestionnaire de risque, sans achat |
 | 0.84 | EF-89 (§3.75) : **page Espace Trading** (`/trading.html`, statique, jamais reecrite par les bots, sans rafraichissement global) : graphique Lightweight Charts avec unites de temps 1m-1d (`/api/candles`), **ordres de vente a la souris** (au-dessus = prise de profit, en dessous = stop ; registre etendu avec migration en place), **panneau de reglages** avec apercu sur le graphique et application par reecriture ciblee du bloc `risk:` (commentaires conserves), bot relance. Verifie en reel : reglage applique puis retire, config revenue a l'identique |
+| 0.85 | EF-90 (§3.76) : **Espace Trading independant des bots** (malentendu d'EF-89 corrige) : la page pilote le panier Manuel par paire ; ordres conditionnels et protections (stop-loss, objectif, trailing) executes par un **surveillant integre au serveur** (releve 20 s, meme chemin d'ordre que l'onglet Manuel, survit a ses propres erreurs). Verifie en reel sans toucher au panier. Constat rapporte : le premier lancement d'`ETH_youenn` a liquide sur le compte partage la position manuelle ET celle d'`ETH_TREND_REGIME` |
 
 ---
 
@@ -1733,6 +1734,29 @@ Details qui evitent des erreurs reelles :
 **Verification reelle** : unite 15 m (500 bougies a 900 s) ; clic au-dessus du cours -> menu "Vendre si le cours monte a 2 862,4" -> ordre #2 pose, ligne tracee, liste a jour, puis annule depuis la page ; apercu stop-loss 8 % a 2 518,09 (= 2 737,05 - 8 %) ; **reglage reellement applique** (trailing 10 % sur ETH) : une seule ligne modifiee dans la config, bot relance avec sa position, trailing publie a 2 464,50 (= 2 738,33 - 10 %, identique a l'apercu) ; puis retrait du trailing depuis la page -> config **identique a l'original** (`git diff` vide).
 
 **Validation** : `tests/test_trading_page.py`, 28 tests - reecriture ciblee (commentaires conserves, rien hors du bloc, cle absente ajoutee dans le bloc, desactivation, config sans bloc refusee, vraie config ETH), bornes refusees et valeurs normalisees, ventes dans les deux sens, achat au-dessus refuse, migration d'une ancienne base, vente manuelle fermant la position et vente sans position refusee, routes reelles (page servie, bougies par unite de temps, unite inconnue refusee, etat du bot, reglages ecrits avec commentaires, reglages invalides laissant le fichier intact, ordre de vente), plus haut publie. Suite complete : **877 tests**.
+
+---
+
+### 3.76 EF-90 : l'Espace Trading rendu independant des bots - panier Manuel et surveillant integre au serveur
+
+**Demande** : "on ne s'est pas compris, je veux que la fenetre de trading soit independante du bot". EF-89 avait construit une page qui pilotait un BOT (ses ordres, ses reglages). Le besoin reel etait un outil de trading **a la main** : choisir une paire, regarder le graphique, poser ses ordres et gerer ses protections, sans aucun bot. Erreur de comprehension de l'assistant, corrigee ici.
+
+**Conception** : la page pilote le **panier Manuel** (EF-81 : capital a part, jamais celui des bots) ; on choisit une **paire**, plus un bot. Question structurante : sans bot, **qui execute** un ordre "vendre si le cours monte a X" ou un stop-loss ? Reponse : un **surveillant** (`manual_watch.py`) qui tourne dans un thread du serveur de controle, releve les cours publics toutes les 20 s et passe les ordres par `execute_manual_order` - exactement le chemin de l'onglet Manuel (ordre reel sur le testnet, cash du panier et solde testnet verifies, vente plafonnee a la position).
+
+- **Ordres conditionnels** (table `conditional_orders`) : achat sous un prix (montant en USDT obligatoire), vente au-dessus (prise de profit) ou en dessous (stop), quantite = toute la position par defaut. Declenchement unique, annulation prioritaire sur l'execution (`claim`), motif du refus conserve.
+- **Protections de position** (table `position_risk`, par paire) : stop-loss et objectif relatifs au prix d'achat moyen, trailing stop relatif au plus haut releve depuis l'achat (suivi par le surveillant, remis a zero quand la position est soldee). Ordre d'examen : stop-loss, trailing, objectif - une perte se coupe avant tout. Les reglages survivent a la cloture et s'appliquent a la position suivante. Memes bornes que pour les bots (`validate_risk_updates`).
+- **Robustesse** (lecon d'EF-85) : une paire sans cours est ignoree pour ce passage sans bloquer les autres ; une erreur d'un passage est journalisee (`logs/manual_watch.log`, etat expose a la page) et le passage suivant a lieu quand meme - teste en faisant echouer chaque passage.
+- **Motif lisible** : chaque execution du panier porte son origine ("stop-loss", "trailing stop", "conditionnel #3"...) dans l'historique et sur le graphique. Au passage, un refus de l'exchange affichait comme motif... "manuel" (le libelle passe a l'executeur, renvoye tel quel) : remplace par le statut reel.
+
+**Limites, dites dans le code, la page et le manuel** : releve toutes les 20 s (un mouvement plus bref peut passer entre deux releves) ; execution au marche ; **surveillant = serveur de controle** : serveur arrete, ordres et protections non surveilles jusqu'a sa relance (tout est en base, rien n'est perdu, mais rien n'est rattrape).
+
+**Page** (`trading.html`, reecrite) : selection de la paire, unite de temps, graphique avec les executions du panier en marqueurs et la ligne du prix d'achat, clic -> menu (vendre au-dessus / vendre en dessous / acheter en dessous avec le montant du panneau), ordre immediat (acheter pour N USDT / tout vendre), protections avec apercu avant enregistrement, liste des ordres, etat du surveillant et solde du panier dans l'en-tete. Le lien depuis le dashboard passe de l'onglet Bot a l'onglet Manuel. Les routes bots d'EF-88/89 (`/api/bot-trigger`, `/api/bot-risk`) restent en place : l'onglet Bot utilise toujours la premiere ; la seconde n'a plus d'interface.
+
+**Verification reelle, sans toucher au panier de l'utilisateur** : ordre conditionnel de vente sur XRP (aucune position) pose via l'API, pris en charge par le surveillant en 10 s, refuse "aucune position sur ce symbole", motif en base et au journal ; panier inchange. Page verifiee dans le navigateur sur ETH/USDT : executions manuelles reelles de l'utilisateur en marqueurs, ligne du prix d'achat, surveillant actif.
+
+**Constat collateral grave, rapporte a l'utilisateur, non corrige (decision en attente)** : les echanges d'environ 0,19 ETH des 24-26/09 que l'assistant n'avait pas su attribuer etaient les ordres MANUELS de l'utilisateur. Le premier lancement du bot `ETH_youenn` (liquidation des soldes preexistants, `flatten_on_start`) a donc revendu sur le compte testnet PARTAGE a la fois la position manuelle (0,1898 ETH) et celle du bot `ETH_TREND_REGIME` (0,0731 ETH). Les deux registres croient detenir de l'ETH que le compte n'a plus. Correctif structurel propose : au premier lancement, ne liquider que la part du solde qu'aucun registre (bots et panier manuel) ne declare.
+
+**Validation** : `tests/test_manual_watch.py`, 21 tests (achat sous un prix declenche une seule fois, vente au-dessus, vente sans position refusee avec son motif, annulation, invalidites, paire sans cours isolee, priorite et niveaux des protections, stop-loss vendant la position avec motif conserve, trailing suivant le plus haut, plus haut remis a zero apres cloture, reglage desactivable individuellement, surveillant survivant a un passage en erreur, routes HTTP reelles). Suite complete : **901 tests**.
 
 ---
 

@@ -120,6 +120,21 @@ class ManualBook:
 
     # ------------------------------------------------------------------ lecture
 
+    def fills(self, symbol: str, limit: int = 200) -> list[dict]:
+        """Executions d'une paire, les plus anciennes d'abord (marqueurs du
+        graphique de l'Espace Trading, EF-90)."""
+        if not self.db_path.exists():
+            return []
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT ts, side, quantity, price, reason FROM orders WHERE symbol = ? AND status = 'filled' "
+                "ORDER BY id DESC LIMIT ?", (symbol, limit)
+            ).fetchall()
+        finally:
+            connection.close()
+        return [{"ts": ts, "side": s, "quantity": q, "price": p, "reason": r} for ts, s, q, p, r in reversed(rows)]
+
     def positions(self) -> dict[str, tuple[float, float]]:
         connection = self._connect()
         try:
@@ -176,14 +191,14 @@ class ManualBook:
     # ------------------------------------------------------------------ ordres
 
     def buy(self, symbol: str, quote_amount: float, price: float, executor,
-            free_quote_on_exchange: float | None = None) -> ManualOrderReport:
+            free_quote_on_exchange: float | None = None, reason: str = "manuel") -> ManualOrderReport:
         """Achete pour `quote_amount` USDT de `symbol` au marche.
 
         `free_quote_on_exchange` : solde libre du testnet, si connu. Le
         testnet etant partage avec les bots, un ordre que le registre local
         peut se permettre peut quand meme echouer faute de solde reel - on
         prefere le refuser AVANT, avec un message clair."""
-        report = ManualOrderReport(symbol=symbol, side="buy", status="rejected")
+        report = ManualOrderReport(symbol=symbol, side="buy", status="rejected", reason=reason)
         connection = self._connect()
         try:
             cash = float(self._read(connection, "cash", "0"))
@@ -213,11 +228,12 @@ class ManualBook:
         finally:
             connection.close()
 
-    def sell(self, symbol: str, quantity: float | None, price: float, executor) -> ManualOrderReport:
+    def sell(self, symbol: str, quantity: float | None, price: float, executor,
+             reason: str = "manuel") -> ManualOrderReport:
         """Vend `quantity` (ou TOUT si None/<=0). Plafonne a la position
         detenue : une faute de frappe ne doit jamais ouvrir une vente a
         decouvert."""
-        report = ManualOrderReport(symbol=symbol, side="sell", status="rejected")
+        report = ManualOrderReport(symbol=symbol, side="sell", status="rejected", reason=reason)
         connection = self._connect()
         try:
             cash = float(self._read(connection, "cash", "0"))
@@ -242,9 +258,13 @@ class ManualBook:
 
     def _record(self, connection, report: ManualOrderReport, result: OrderResult, cash: float) -> ManualOrderReport:
         ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        report.origin = report.reason or "manuel"   # motif d'ORIGINE (EF-90), avant qu'un refus ne l'ecrase
         if result.status != "filled" or result.quantity <= 0:
             report.status = result.status
-            report.reason = result.reason or "ordre non execute par l'exchange"
+            # L'executeur renvoie en `reason` le libelle qu'on lui a passe ("manuel") :
+            # ce n'est pas un motif de refus. On l'ecarte au profit du statut.
+            given = result.reason if result.reason and result.reason not in ("manuel", report.origin) else ""
+            report.reason = given or f"ordre non execute par l'exchange ({result.status})"
             connection.execute(
                 "INSERT INTO orders (ts, symbol, side, quantity, price, fee, status, reason) VALUES (?,?,?,?,?,?,?,?)",
                 (ts, report.symbol, report.side, result.quantity, result.price, 0.0, result.status, report.reason),
@@ -277,7 +297,7 @@ class ManualBook:
         self._write(connection, "cash", cash)
         connection.execute(
             "INSERT INTO orders (ts, symbol, side, quantity, price, fee, status, reason) VALUES (?,?,?,?,?,?,?,?)",
-            (ts, report.symbol, report.side, result.quantity, result.price, fee, "filled", "manuel"),
+            (ts, report.symbol, report.side, result.quantity, result.price, fee, "filled", report.origin),
         )
         connection.commit()
         report.status, report.quantity, report.price, report.fee, report.cash_after = "filled", result.quantity, result.price, fee, cash
