@@ -16,15 +16,25 @@ mkdir -p "$ROOT/logs"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 log "Autostart declenche."
 
+# EF-86 : si le serveur est en HTTPS (certificat dans .env), lui parler en
+# HTTPS. `-k` : appel en boucle locale vers notre propre certificat
+# auto-signe, il n'y a personne a authentifier entre les deux.
+BASE="http://127.0.0.1:8765"
+CURL=(curl -s)
+if grep -q "^DASHBOARD_TLS_CERT=.\+" .env 2> /dev/null; then
+    BASE="https://127.0.0.1:8765"
+    CURL=(curl -s -k)
+fi
+
 # Le serveur peut deja tourner (unite systemd separee) : on ne le lance ici
 # que s'il ne repond pas, sinon son verrou le refuserait de toute facon.
-if ! curl -s -m 2 -o /dev/null "http://127.0.0.1:8765/api/list-configs"; then
+if ! "${CURL[@]}" -m 2 -o /dev/null "$BASE/api/list-configs"; then
     nohup "$PYTHON" -m tradingbot.control_server >> "$ROOT/logs/control_server.out" 2>&1 &
 fi
 
 ready=0
 for _ in $(seq 1 60); do
-    if curl -s -m 2 -o /dev/null "http://127.0.0.1:8765/api/list-configs"; then
+    if "${CURL[@]}" -m 2 -o /dev/null "$BASE/api/list-configs"; then
         ready=1; break
     fi
     sleep 1
@@ -39,9 +49,9 @@ log "Serveur de controle pret."
 for cfg in "$ROOT"/config/*.yml; do
     [ -e "$cfg" ] || continue
     name="config/$(basename "$cfg")"
-    code=$(curl -s -m 30 -o /dev/null -w "%{http_code}" -X POST \
+    code=$("${CURL[@]}" -m 30 -o /dev/null -w "%{http_code}" -X POST \
         -H "Content-Type: application/json" \
-        -d "{\"config_path\":\"$name\"}" "http://127.0.0.1:8765/api/start-bot")
+        -d "{\"config_path\":\"$name\"}" "$BASE/api/start-bot")
     log "start-bot $name -> HTTP $code"
 done
 log "Autostart termine."

@@ -32,9 +32,18 @@ Start-Process -FilePath $python -ArgumentList "-m tradingbot.control_server" -Wo
 # pleinement charge - bug reel constate le 2026-09-16 (60 tentatives, 0 succes,
 # alors que le meme appel fonctionnait instantanement en session interactive).
 $curl = "$env:SystemRoot\System32\curl.exe"
+# EF-86 : si le serveur est en HTTPS (certificat dans .env), lui parler en
+# HTTPS. `-k` : appel en boucle locale vers notre propre certificat
+# auto-signe, il n'y a personne a authentifier entre les deux.
+$base = "http://localhost:8765"
+$tlsFlag = @()
+if (Select-String -Path (Join-Path $root ".env") -Pattern '^DASHBOARD_TLS_CERT=.+' -Quiet) {
+    $base = "https://localhost:8765"
+    $tlsFlag = @("-k")
+}
 $ready = $false
 for ($i = 0; $i -lt 60; $i++) {
-    & $curl -s -m 2 -o NUL -w "%{http_code}" "http://localhost:8765/api/list-configs" 2>$null | Out-Null
+    & $curl -s @tlsFlag -m 2 -o NUL -w "%{http_code}" "$base/api/list-configs" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $ready = $true
         break
@@ -59,7 +68,7 @@ Get-ChildItem (Join-Path $root "config\*.yml") | ForEach-Object {
     $configPath = "config/$($_.Name)"
     $tmpFile = [System.IO.Path]::GetTempFileName()
     Set-Content -Path $tmpFile -Value "{`"config_path`":`"$configPath`"}" -NoNewline -Encoding ascii
-    $response = & $curl -s -m 10 -X POST -H "Content-Type: application/json" --data-binary "@$tmpFile" "http://localhost:8765/api/start-bot" 2>$null
+    $response = & $curl -s @tlsFlag -m 10 -X POST -H "Content-Type: application/json" --data-binary "@$tmpFile" "$base/api/start-bot" 2>$null
     Remove-Item $tmpFile -ErrorAction SilentlyContinue
     Write-Log "$configPath -> $response"
 }

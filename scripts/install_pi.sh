@@ -30,6 +30,13 @@ fi
 if ! grep -q "^DASHBOARD_PASSWORD=.\+" .env; then
     echo "   ATTENTION : DASHBOARD_PASSWORD absent de .env - le dashboard refusera les autres appareils (403)."
 fi
+SCHEME="http"
+if grep -q "^DASHBOARD_TLS_CERT=.\+" .env; then
+    SCHEME="https"
+else
+    echo "   Conseil : sans HTTPS, le mot de passe circule en clair sur le reseau local."
+    echo "   bash scripts/generate_dashboard_cert.sh puis ajouter DASHBOARD_TLS_CERT/KEY dans .env (EF-86)."
+fi
 
 echo "== 4/5 Tests (rapide sanity check)"
 .venv/bin/python -m pytest -q tests/test_process_lock.py tests/test_control_server.py 2>&1 | tail -1
@@ -48,6 +55,6 @@ sudo systemctl start tradingbot-bots.service
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
-echo "Termine. Dashboard : http://${IP:-<ip-du-pi>}:8765/dashboard.html"
+echo "Termine. Dashboard : $SCHEME://${IP:-<ip-du-pi>}:8765/dashboard.html"
 echo "Journal serveur : journalctl -u tradingbot-server -f"
 echo "Journal bots    : $ROOT/logs/autostart.log"

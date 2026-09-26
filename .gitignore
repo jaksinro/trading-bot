@@ -20,3 +20,6 @@ data/
 *.egg-info/
 *.bat
 scratch_*
+
+# EF-86 : certificat HTTPS du dashboard (la cle privee ne doit jamais etre versionnee)
+certs/
