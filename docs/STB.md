@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.77 |
-| **Date** | 2026-09-17 |
+| **Version** | 0.78 |
+| **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
 | **Étape du cycle en V** | Expression du besoin |
@@ -91,6 +91,7 @@
 | 0.75 | EF-83 : **les bots crypto ne pouvaient pas acheter** (historique du testnet trop court pour leur rechauffement). Corrige, trois achats reels constates ; decisions desormais conservees |
 | 0.76 | EF-84 : graphique des bots en chandeliers avec triangles d'achat et de vente, comme l'onglet Test |
 | 0.77 | EF-85 : un bot ne meurt plus sur une coupure reseau passagere ; le journal d'un bot n'est plus efface a sa relance |
+| 0.78 | EF-86 : HTTPS optionnel pour l'acces reseau au dashboard (mot de passe et ordres chiffres), certificat auto-signe genere par script |
 ---
 
 ## 1. Introduction
@@ -255,6 +256,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-83 | Les bots crypto doivent reellement pouvoir acheter en paper - question de l'utilisateur ("il aurait du acheter depuis le debut ?") | Doit - **realise**. Les trois bots n'avaient passe aucun ordre en six jours de regime haussier : le testnet ne fournit que ~14 jours d'historique, leur strategie ne sortait jamais de sa phase de rechauffement. Donnees de marche prises sur le marche public, ordres sur le testnet ; rechauffement incomplet desormais signale ; decisions conservees a travers les redemarrages. Verifie par trois achats reels a la bougie suivante. Voir STC §3.69 |
 | EF-84 | Le graphique de cours des bots doit ressembler a celui des tests : bougies, et triangles pour les achats et ventes - demande de l'utilisateur | Pourrait - **realise**. Meme fonction de dessin pour les deux onglets ; historique des bots en bougies completes. Voir STC §3.70 |
 | EF-85 | Un bot ne doit pas mourir sur une coupure reseau passagere, et la trace d'un plantage doit survivre a la relance - signale par l'utilisateur ("regarde pourquoi le bot ETH a plante") | Doit - **realise**. Le bot ETH est mort sur une coupure de quelques secondes et est reste 6 h a l'arret avec une position ouverte. Les erreurs reseau passageres sont desormais reessayees a la lecture des donnees ; le journal n'est plus efface a chaque lancement. Voir STC §3.71 |
+| EF-86 | L'acces reseau au dashboard doit pouvoir etre chiffre : le mot de passe HTTP Basic et les ordres ne doivent pas circuler en clair - point ouvert de la revue du 2026-09-20 (limite assumee d'EF-82) | Devrait - **realise**. HTTPS active par `DASHBOARD_TLS_CERT` + `DASHBOARD_TLS_KEY` ; sans eux, comportement inchange (HTTP). Configuration a moitie remplie ou certificat illisible = refus de demarrer, jamais de repli silencieux sur HTTP. Certificat auto-signe genere par `scripts/generate_dashboard_cert.sh`. Voir STC §3.72 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

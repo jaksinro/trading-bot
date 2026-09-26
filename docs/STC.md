@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.80 |
-| **Date** | 2026-09-22 |
+| **Version** | 0.81 |
+| **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -94,6 +94,7 @@
 | 0.78 | EF-83 (§3.69) : **les bots crypto n'ont jamais pu acheter** - rechauffes sur le testnet, qui ne garde que ~14 jours (339 bougies 1h) pour un besoin de 500/1000/2000, leur strategie restait muette ; redemarres chaque jour, ils ne l'auraient jamais ete. Donnees de marche basculees sur le marche public, ordres toujours sur le testnet ; decisions journalisees en base, console non tamponnee. Verifie : les 3 bots ont achete a la bougie suivante. Les 6 jours de paper precedents ne valident rien |
 | 0.79 | EF-84 (§3.70) : **graphique des bots en chandeliers** avec triangles d'achat/vente, meme fonction de dessin que l'onglet Test (canvas cible en parametre). Historique du bot et `/api/price-history` en bougies completes `[t, cloture, ouverture, haut, bas]`, compatibles avec l'ancien format. Ancien graphique SVG supprime |
 | 0.80 | EF-85 (§3.71) : **une coupure reseau tuait un bot** - le bot ETH est mort a 02h09 sur un `ccxt.NetworkError` passager et est reste 6 h a l'arret avec une position ouverte. La lecture des donnees de marche reessaie desormais les erreurs reseau passageres ; les autres erreurs, et celles pendant un ordre, continuent d'arreter le bot. **Le journal etait efface a chaque relance** : il est desormais complete et tourne au-dela de 2 Mo |
+| 0.81 | EF-86 (§3.72) : **HTTPS optionnel pour l'acces reseau au dashboard** (`DASHBOARD_TLS_CERT`/`DASHBOARD_TLS_KEY`) ; poignee de main TLS dans le thread de la requete ; configuration incomplete = refus de demarrer ; certificat auto-signe genere par `scripts/generate_dashboard_cert.sh` ; scripts de demarrage compatibles |
 
 ---
 
@@ -1544,7 +1545,7 @@ Le versement de septembre etant consomme dans la table d'idempotence, le bot **n
 - client local (127.0.0.1, ::1) : libre - usage sur la machine et script de demarrage automatique ;
 - client distant et `DASHBOARD_PASSWORD` vide : **403** avec un message disant exactement quoi faire ;
 - client distant : HTTP Basic (`DASHBOARD_USER`, defaut `trader`), comparaison en temps constant, 401 avec `WWW-Authenticate` pour que le navigateur demande l'identifiant une fois et s'en souvienne.
-Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le reseau LOCAL (pas de HTTPS) - convenable chez soi, pas depuis Internet.
+Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le reseau LOCAL (pas de HTTPS) - convenable chez soi, pas depuis Internet. *(Levee par EF-86, §3.72 : HTTPS optionnel.)*
 
 **Verification reelle sur le poste actuel, via son IP reseau (192.168.1.42), pas seulement en tests** : local 200 sans identifiant ; distant sans mot de passe configure -> 403 ; mot de passe configure : sans identifiant 401 + invite du navigateur, mauvais 401, bon 200 ; dashboard ouvert dans le navigateur par l'IP reseau, connecte a l'API, 3/3 bots. Le fichier `dashboard.html` a du etre regenere ET les bots redemarres (ils le reecrivent a chaque cycle avec le modele en memoire, §3.64).
 
@@ -1637,6 +1638,25 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 **Limite qui demeure** : un bot mort pour une autre raison reste mort jusqu'au prochain demarrage du PC - aucun superviseur ne le relance. Voir la proposition faite a l'utilisateur.
 
 **Validation** : `tests/test_network_resilience.py` (13 tests : l'erreur exacte du plantage, les familles d'erreurs reseau reessayees, et celles qui doivent continuer a arreter le bot) ; 3 tests de journal dans `tests/test_control_server.py` (trace precedente conservee apres relance, message de crash propre au lancement courant, rotation). **Limite du test** : la boucle principale n'est pas extraite en fonction testable ; c'est le classement des erreurs qui est teste, pas la boucle elle-meme. Suite complete : **795 tests**. Les trois bots ont ete relances avec le correctif, positions restaurees.
+
+---
+
+### 3.72 EF-86 : HTTPS optionnel pour l'acces reseau au dashboard
+
+**Origine** : limite assumee d'EF-82 (§3.65) - "mot de passe en clair sur le reseau LOCAL (pas de HTTPS)" - reprise comme point ouvert par la revue des projets du 2026-09-20 et traitee par la tache planifiee de developpement. Sur un Wi-Fi domestique, n'importe quel appareil compromis du reseau pouvait lire l'en-tete `Authorization` (base64, pas un chiffrement) puis passer des ordres ou arreter des bots.
+
+**Conception** :
+- Activation par deux variables, `DASHBOARD_TLS_CERT` et `DASHBOARD_TLS_KEY` (PEM, chemins absolus ou relatifs a la racine du projet). Aucune des deux : HTTP comme avant, rien ne change pour l'usage local sous Windows.
+- `tls_context_from_env()` : contexte `PROTOCOL_TLS_SERVER`, TLS 1.2 minimum. **Une seule des deux variables renseignee, ou certificat illisible = `ValueError` et refus de demarrer** (message pointant le script de generation) - un repli silencieux sur HTTP laisserait croire a l'utilisateur que sa connexion est chiffree.
+- `TLSThreadingHTTPServer` : la poignee de main TLS est faite dans `finish_request`, donc **dans le thread de la requete**, et non en chiffrant la socket d'ecoute - sinon elle aurait lieu dans `accept()`, dans la boucle principale, ou un seul client muet (ou un navigateur qui tape `http://` par erreur) bloquerait tout le serveur. Delai de poignee de main 10 s ; echec TLS = connexion fermee sans trace. `wrap_socket` detachant la socket d'origine, la socket TLS est fermee explicitement.
+- L'authentification (§3.65) est inchangee et s'applique par-dessus : exemption loopback, 403 sans mot de passe, HTTP Basic sinon.
+- `scripts/generate_dashboard_cert.sh` : certificat auto-signe ECDSA P-256, 10 ans (un certificat maison qui expire casse le dashboard sans prevenir), SAN = `localhost`, nom de la machine (+ `.local`), IP du moment (`hostname -I`) et noms/IP passes en argument ; ne remplace jamais un certificat existant ; `certs/` ignore par git (cle privee).
+- Scripts de demarrage (`autostart_bots.sh`/`.ps1`) : detectent `DASHBOARD_TLS_CERT` dans `.env` et appellent alors `https://127.0.0.1:8765` avec `curl -k` (boucle locale vers notre propre certificat, personne a authentifier). `install_pi.sh` affiche l'adresse avec le bon schema et conseille HTTPS s'il est absent.
+- La page n'a rien a changer : depuis EF-82 elle derive l'adresse du serveur de `window.location.origin`, schema compris.
+
+**Limites** : certificat auto-signe -> avertissement du navigateur a la premiere visite sur chaque appareil (a accepter) ; si l'IP du Pi change, regenerer le certificat. HTTPS ne rend pas le dashboard apte a une exposition Internet (pas de limitation des tentatives de mot de passe) - le conseil "pas de redirection de port" demeure.
+
+**Validation** : 8 tests dans `tests/test_control_server.py` sur un vrai serveur TLS avec certificat genere a la volee (`cryptography`, deja tiree par ccxt) : absence de variables = HTTP ; configuration a moitie remplie refusee (x2) ; fichier absent = erreur claire ; mot de passe toujours exige en HTTPS (401 puis 200) ; un client HTTP en clair ne casse pas le serveur ; un client muet n'en bloque pas d'autres. Verifie en plus de bout en bout avec un certificat produit par le script (openssl) : 200 en `https://localhost`. Scripts shell verifies par `bash -n`, script PowerShell par son analyseur syntaxique.
 
 ---
 

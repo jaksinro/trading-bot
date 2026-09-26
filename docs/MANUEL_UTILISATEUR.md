@@ -625,6 +625,20 @@ navigateur demande l'identifiant — `trader` par défaut — une seule fois.
 
 Sur la machine du serveur elle-même, rien ne change : pas de mot de passe.
 
+**Chiffrer la connexion (HTTPS, recommandé).** Sans cela, le mot de passe et
+tes ordres voyagent en clair sur le Wi-Fi de la maison : un appareil
+indiscret sur le même réseau pourrait les lire. Pour chiffrer, lance une
+fois `bash scripts/generate_dashboard_cert.sh` sur le serveur, ajoute les
+deux lignes qu'il affiche dans `.env`, puis relance le serveur. L'adresse
+commence alors par `https://` au lieu de `http://`.
+
+La première fois, chaque navigateur affiche un avertissement du type
+« Votre connexion n'est pas privée ». C'est normal : le certificat a été
+fabriqué par toi et non par une autorité connue du navigateur. Clique sur
+« Paramètres avancés » puis « Continuer vers le site » ; le navigateur ne le
+redemandera plus. Si tu tapes par erreur l'ancienne adresse en `http://`, la
+page ne s'ouvre pas : remplace simplement par `https://`.
+
 ## Historique des changements de l'interface
 
 | Date | Changement |
@@ -695,3 +709,4 @@ Sur la machine du serveur elle-même, rien ne change : pas de mot de passe.
 | 2026-09-17 | **Nouvel onglet principal « 💰 Investissement »**, demandé par l'utilisateur ("créer une fenêtre séparée dans le dashboard pour pouvoir gérer tout ça") — gère les bots d'investissement régulier (versements mensuels sur une allocation cible, sans stop-loss), avec deux sous-onglets : **Suivi** (total versé, valeur, gain, rendement annualisé, baisse maximale subie, frais, allocation réelle vs cible ligne par ligne, et deux boutons « Simuler le passage du jour » / « Exécuter réellement ») et **Réglages** (créer, modifier ou supprimer un bot : allocation, versement mensuel, bande de rééquilibrage, frais, port IBKR). Voir §7 |
 | 2026-09-17 | Nouvelle strategie **« Régime de tendance »** dans le formulaire de création (§5.1/5.3), demandée par l'utilisateur (« un modèle rentable en haussier, et si possible aussi en baissier ») — le bot reste investi tant que le cours est au-dessus de sa tendance de fond et passe **tout en liquidités** dès qu'il repasse dessous, contrairement au « Filtre de tendance » qui bloquait seulement les nouveaux achats sans jamais fermer une position. Trois réglages : fenêtre de tendance, marge pour entrer, marge pour sortir (les marges évitent le va-et-vient coûteux autour de la ligne). Stop-loss optionnel : la sortie normale est le retournement de tendance. Mesuré sur ETH : +34,8 % en test hors échantillon contre -35,1 % pour un simple achat conservé, et quasi plat en marché baissier au lieu de -41 %. Gagner de l'argent quand ça baisse reste impossible (le bot ne peut qu'acheter), l'objectif est de ne plus subir |
 | 2026-09-18 | **Rafraîchissement de l'interface**, demandé par l'utilisateur (« rendre l'interface graphique plus jolie, moderne et intuitive »). Cinq changements visibles : (1) le contenu occupe désormais toute la largeur de l'écran au lieu d'être bloqué à 900 px — les tableaux ne sont plus comprimés et respirent, alors que l'en-tête s'étalait déjà sur 1360 px ; (2) les valeurs ne se coupent plus en deux lignes dans les tableaux (« +0,00 » puis « % »), et une alternance de teinte aide à suivre une ligne du regard ; (3) les chiffres clés (capital, gain, valeur) sont plus grands et plus lisibles ; (4) chaque intertitre de section porte un petit filet coloré pour se repérer en balayant la page, et les longs paragraphes d'aide apparaissent en encart plutôt que noyés dans le texte courant ; (5) **une légende explique enfin la pastille verte/rouge** à côté de chaque bot (« actif » / « arrêté »), avec le compte des bots en marche et une infobulle précisant qu'un bot est considéré actif s'il a envoyé des données il y a moins de 3 minutes. Ajout aussi d'une icône d'onglet. Les formulaires restent volontairement bornés en largeur : étalés sur tout l'écran, leurs champs se dispersaient sur six colonnes |
+| 2026-09-26 | **Connexion chiffrée (HTTPS) possible pour ouvrir le dashboard depuis un autre appareil.** Le mot de passe et les ordres ne voyagent plus en clair sur le réseau de la maison une fois un certificat créé (une commande) ; l'adresse commence alors par `https://`, et le navigateur affiche un avertissement la première fois, à accepter. Sans certificat, rien ne change. Voir §9 |

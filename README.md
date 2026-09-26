@@ -407,8 +407,26 @@ depuis un telephone : `http://<ip-du-pi>:8765/dashboard.html`.
 tout appareil autre que lui-meme tant que `DASHBOARD_PASSWORD` est vide
 dans `.env` (403 avec le message qui le dit). Une fois defini, le navigateur
 demande l'identifiant (`DASHBOARD_USER`, defaut `trader`) une fois et s'en
-souvient. Mot de passe en clair sur le reseau local : convenable chez soi,
-pas depuis Internet.
+souvient.
+
+**HTTPS (recommande).** Sans lui, le mot de passe et les ordres circulent en
+clair sur le reseau local. Pour chiffrer :
+
+```bash
+bash scripts/generate_dashboard_cert.sh    # certificat auto-signe dans certs/
+# puis dans .env :
+#   DASHBOARD_TLS_CERT=certs/dashboard.crt
+#   DASHBOARD_TLS_KEY=certs/dashboard.key
+sudo systemctl restart tradingbot-server
+```
+
+L'adresse devient `https://<ip-du-pi>:8765/dashboard.html`. Certificat
+auto-signe : chaque navigateur previent une premiere fois ("connexion non
+privee"), accepter l'exception. Le certificat couvre `localhost`, le nom du
+Pi et ses IP du moment ; si l'IP du Pi change, supprimer `certs/` et relancer
+le script (ou lui passer l'IP/le nom voulus en argument). Les scripts de
+demarrage automatique detectent HTTPS tout seuls. Meme avec HTTPS, ne pas
+exposer le dashboard a Internet (pas de redirection de port sur la box).
 
 **Limite** : IB Gateway (actions) n'existe officiellement qu'en Linux
 x86-64. Le Pi porte les cryptos et le dashboard ; les actions restent liees
