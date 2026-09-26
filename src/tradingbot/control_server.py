@@ -15,6 +15,7 @@ import base64
 import hmac
 import os
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -42,6 +43,16 @@ PASSWORD_ENV = "DASHBOARD_PASSWORD"
 USER_ENV = "DASHBOARD_USER"
 DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_USER = "trader"
+
+# EF-86 : HTTPS optionnel. Sans lui, le mot de passe HTTP Basic et les
+# ordres circulent en clair sur le reseau local. Les deux variables vont
+# ensemble (certificat + cle privee, au format PEM) ; n'en renseigner qu'une
+# est une erreur de demarrage, jamais un repli silencieux sur HTTP.
+TLS_CERT_ENV = "DASHBOARD_TLS_CERT"
+TLS_KEY_ENV = "DASHBOARD_TLS_KEY"
+# Delai maximal pour qu'un client termine la poignee de main TLS : au-dela,
+# la connexion est abandonnee plutot que d'immobiliser un thread.
+TLS_HANDSHAKE_TIMEOUT_S = 10
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SERVER_LOCK_PATH = ROOT / "control_server.lock"
 CONFIG_DIR = ROOT / "config"
@@ -1498,6 +1509,67 @@ def local_ip_addresses() -> list[str]:
     return sorted(ips)
 
 
+class TLSThreadingHTTPServer(ThreadingHTTPServer):
+    """Serveur HTTPS (EF-86). La poignee de main TLS se fait dans le thread
+    de la requete (`finish_request`) et non dans `accept()` : chiffrer la
+    socket d'ecoute la ferait dans la boucle principale, ou un seul client
+    lent ou un navigateur parlant HTTP en clair bloquerait tout le serveur."""
+
+    def __init__(self, server_address, handler_class, ssl_context: ssl.SSLContext):
+        self.ssl_context = ssl_context
+        super().__init__(server_address, handler_class)
+
+    def finish_request(self, request, client_address) -> None:
+        request.settimeout(TLS_HANDSHAKE_TIMEOUT_S)
+        try:
+            tls_request = self.ssl_context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError):
+            # Client en HTTP clair, certificat refuse, delai depasse : rien a
+            # servir, et surtout pas de trace d'erreur a chaque tentative.
+            return
+        try:
+            tls_request.settimeout(None)
+            super().finish_request(tls_request, client_address)
+        finally:
+            # `wrap_socket` detache la socket d'origine : c'est la socket TLS
+            # qu'il faut fermer, `shutdown_request` ne la connait pas.
+            try:
+                tls_request.close()
+            except OSError:
+                pass
+
+
+def tls_context_from_env() -> ssl.SSLContext | None:
+    """Contexte TLS si DASHBOARD_TLS_CERT et DASHBOARD_TLS_KEY sont definis,
+    None si aucun des deux ne l'est. Leve ValueError (message pret a
+    afficher) sur une configuration incomplete ou illisible."""
+    cert = os.environ.get(TLS_CERT_ENV, "").strip()
+    key = os.environ.get(TLS_KEY_ENV, "").strip()
+    if not cert and not key:
+        return None
+    if not cert or not key:
+        missing = TLS_KEY_ENV if cert else TLS_CERT_ENV
+        raise ValueError(
+            f"HTTPS a moitie configure : {missing} est vide. Renseigne les deux "
+            f"({TLS_CERT_ENV} et {TLS_KEY_ENV}) ou aucun."
+        )
+    cert_path, key_path = Path(cert), Path(key)
+    if not cert_path.is_absolute():
+        cert_path = ROOT / cert_path
+    if not key_path.is_absolute():
+        key_path = ROOT / key_path
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    except (OSError, ssl.SSLError) as exc:
+        raise ValueError(
+            f"certificat HTTPS illisible ({cert_path}, {key_path}) : {exc}. "
+            "Genere-le avec scripts/generate_dashboard_cert.sh."
+        ) from exc
+    return context
+
+
 def main() -> None:
     # CT-26 : deux instances de ce serveur ont deja tourne simultanement sur
     # le meme poste sans que rien ne le signale - `HTTPServer.allow_reuse_address`
@@ -1509,13 +1581,25 @@ def main() -> None:
     acquire_lock(CONTROL_SERVER_LOCK_PATH)
     load_dotenv()
     bind_host = os.environ.get(BIND_HOST_ENV, DEFAULT_BIND_HOST)
-    server = ThreadingHTTPServer((bind_host, PORT), Handler)
-    print(f"Serveur de controle demarre : http://localhost:{PORT}/dashboard.html")
+    try:
+        tls_context = tls_context_from_env()
+    except ValueError as exc:
+        print(f"ERREUR : {exc}", file=sys.stderr)
+        sys.exit(1)
+    if tls_context is not None:
+        server = TLSThreadingHTTPServer((bind_host, PORT), Handler, tls_context)
+        scheme = "https"
+    else:
+        server = ThreadingHTTPServer((bind_host, PORT), Handler)
+        scheme = "http"
+    print(f"Serveur de controle demarre : {scheme}://localhost:{PORT}/dashboard.html")
     if bind_host not in ("localhost", "127.0.0.1", "::1"):
         for ip in local_ip_addresses():
-            print(f"  depuis un autre appareil : http://{ip}:{PORT}/dashboard.html")
+            print(f"  depuis un autre appareil : {scheme}://{ip}:{PORT}/dashboard.html")
         if os.environ.get(PASSWORD_ENV, ""):
             print(f"  acces reseau protege par mot de passe (utilisateur '{os.environ.get(USER_ENV, DEFAULT_USER)}')")
+            if tls_context is None:
+                print(f"  note : sans HTTPS, ce mot de passe circule en clair sur le reseau ({TLS_CERT_ENV}/{TLS_KEY_ENV})")
         else:
             print(f"  ATTENTION : aucun {PASSWORD_ENV} dans .env - les autres appareils recevront un refus (403)")
     print("Ctrl+C pour arreter.")

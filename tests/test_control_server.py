@@ -802,3 +802,126 @@ def test_a_large_log_is_rotated_instead_of_growing_forever(tmp_path, monkeypatch
 
     assert (tmp_path / "ETH.log.1").read_text(encoding="utf-8") == "x" * 500
     assert "x" * 500 not in (tmp_path / "ETH.log").read_text(encoding="utf-8")
+
+
+# --- EF-86 : HTTPS optionnel pour l'acces reseau ----------------------------
+#
+# Sans HTTPS, le mot de passe HTTP Basic circule en clair sur le reseau. Le
+# serveur chiffre desormais si un certificat est fourni. Certificat
+# auto-signe genere a la volee (`cryptography`, deja tiree par ccxt) ; vrai
+# serveur, vraie poignee de main TLS, vrai client urllib.
+
+import datetime
+import socket
+import ssl
+
+
+def _self_signed_cert(tmp_path):
+    x509 = pytest.importorskip("cryptography.x509")
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    import ipaddress
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName([
+            x509.DNSName("localhost"),
+            x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+        ]), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = tmp_path / "cert.pem", tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ))
+    return cert_path, key_path
+
+
+@pytest.fixture
+def tls_remote_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(control_server, "_public_exchange", _FakeExchange())
+    cert_path, key_path = _self_signed_cert(tmp_path)
+    monkeypatch.setenv(control_server.TLS_CERT_ENV, str(cert_path))
+    monkeypatch.setenv(control_server.TLS_KEY_ENV, str(key_path))
+    context = control_server.tls_context_from_env()
+    server = control_server.TLSThreadingHTTPServer(("127.0.0.1", 0), _RemoteHandler, context)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client_context = ssl.create_default_context(cafile=str(cert_path))
+    yield server.server_address[1], client_context
+    server.shutdown()
+
+
+def _https_status(port, context, path, headers=None):
+    request = urllib.request.Request(f"https://localhost:{port}{path}", headers=headers or {})
+    try:
+        with urllib.request.urlopen(request, timeout=10, context=context) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+
+def test_no_tls_variables_means_plain_http(monkeypatch):
+    monkeypatch.delenv(control_server.TLS_CERT_ENV, raising=False)
+    monkeypatch.delenv(control_server.TLS_KEY_ENV, raising=False)
+    assert control_server.tls_context_from_env() is None
+
+
+@pytest.mark.parametrize("present", ["cert", "key"])
+def test_half_configured_tls_refuses_to_start_instead_of_falling_back(monkeypatch, present):
+    """Un seul des deux renseigne = une erreur, jamais un HTTP en clair
+    silencieux que l'utilisateur croirait chiffre."""
+    monkeypatch.delenv(control_server.TLS_CERT_ENV, raising=False)
+    monkeypatch.delenv(control_server.TLS_KEY_ENV, raising=False)
+    env = control_server.TLS_CERT_ENV if present == "cert" else control_server.TLS_KEY_ENV
+    monkeypatch.setenv(env, "certs/whatever.pem")
+    with pytest.raises(ValueError, match="moitie"):
+        control_server.tls_context_from_env()
+
+
+def test_missing_certificate_file_is_a_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setenv(control_server.TLS_CERT_ENV, str(tmp_path / "absent.pem"))
+    monkeypatch.setenv(control_server.TLS_KEY_ENV, str(tmp_path / "absent.key"))
+    with pytest.raises(ValueError, match="generate_dashboard_cert"):
+        control_server.tls_context_from_env()
+
+
+def test_https_server_still_requires_the_password(tls_remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "s3cret")
+    port, context = tls_remote_server
+    assert _https_status(port, context, "/api/list-configs") == 401
+    assert _https_status(port, context, "/api/list-configs", _basic("trader", "s3cret")) == 200
+
+
+def test_a_plain_http_client_does_not_break_the_https_server(tls_remote_server, monkeypatch):
+    """Un navigateur qui tape http:// par erreur echoue proprement, et le
+    serveur continue de servir les clients HTTPS ensuite."""
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "s3cret")
+    port, context = tls_remote_server
+    with pytest.raises((urllib.error.URLError, ConnectionError, OSError)):
+        urllib.request.urlopen(f"http://localhost:{port}/api/list-configs", timeout=5)
+    assert _https_status(port, context, "/api/list-configs", _basic("trader", "s3cret")) == 200
+
+
+def test_a_silent_client_does_not_block_other_clients(tls_remote_server, monkeypatch):
+    """La poignee de main se fait dans le thread de la requete : un client
+    qui se connecte sans rien dire n'immobilise pas le serveur."""
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "s3cret")
+    port, context = tls_remote_server
+    silent = socket.create_connection(("127.0.0.1", port))
+    try:
+        assert _https_status(port, context, "/api/list-configs", _basic("trader", "s3cret")) == 200
+    finally:
+        silent.close()
