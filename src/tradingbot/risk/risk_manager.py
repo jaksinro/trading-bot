@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from tradingbot.types import Position, Side, Signal
 
 
+TRAILING_MODES = ("distance", "gain")
+
+
 @dataclass
 class RiskConfig:
     max_position_size_pct: float = 0.10  # % du capital par position
@@ -23,6 +26,34 @@ class RiskConfig:
     partial_exit_fraction: float = 0.5  # part du lot vendue au palier partiel (le reste continue avec stop/trailing)
     profit_lock_arm_pct: float | None = None  # etape 9 : arme le verrou une fois ce gain latent depasse
     profit_lock_trigger_pct: float | None = None  # ... puis vend si le gain retombe a ou sous ce seuil
+    # EF-93 : sens de `trailing_stop_pct`.
+    # - "distance" (historique, EF-24) : vend si le cours retombe de X % sous son plus haut ;
+    # - "gain" (definition de l'utilisateur) : X % = part du GAIN (plus haut - achat) qu'on
+    #   accepte de rendre. Achat 2000, plus haut 2100, 50 % -> vend a 2050.
+    trailing_mode: str = "distance"
+    # Mode "gain" seulement : le trailing ne s'arme qu'une fois ce gain atteint par le plus
+    # haut. None = des que le plus haut couvre les frais aller-retour (2 x fee_pct). Sans
+    # ce seuil, juste apres l'achat (plus haut = achat) le seuil vaudrait le prix d'achat
+    # et le moindre recul ferait vendre, en perte une fois les frais payes.
+    trailing_arm_pct: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.trailing_mode not in TRAILING_MODES:
+            raise ValueError(f"trailing_mode inconnu : {self.trailing_mode!r} (attendu : {', '.join(TRAILING_MODES)})")
+
+    def trailing_stop_price(self, entry: float, peak: float) -> float | None:
+        """Seuil de vente du trailing stop, ou None s'il n'est pas actif (desactive,
+        ou pas encore arme en mode "gain"). Source unique pour la decision de vente
+        ET la ligne affichee sur le graphique."""
+        if self.trailing_stop_pct is None or entry <= 0:
+            return None
+        peak = max(peak, entry)
+        if self.trailing_mode == "distance":
+            return peak * (1 - self.trailing_stop_pct)
+        arm = self.trailing_arm_pct if self.trailing_arm_pct is not None else 2 * self.fee_pct
+        if (peak - entry) / entry < arm or peak <= entry:
+            return None
+        return entry + (peak - entry) * (1 - self.trailing_stop_pct)
 
 
 @dataclass
@@ -86,16 +117,14 @@ class RiskManager:
         return gain_pct >= self.config.take_profit_pct
 
     def should_trailing_stop(self, position: Position, current_price: float) -> bool:
-        """EF-24 : sort si le prix retombe de `trailing_stop_pct` sous le
-        plus haut observe depuis l'entree (pas depuis le prix d'achat) -
-        protege les gains acquis sans plafonner le potentiel de hausse."""
-        if not position.is_open or position.quantity <= 0 or self.config.trailing_stop_pct is None:
+        """EF-24 : sort si le prix retombe sous le seuil du trailing stop -
+        `trailing_stop_pct` sous le plus haut (mode "distance"), ou une fois
+        rendue cette part du gain acquis (mode "gain", EF-93). Voir
+        `RiskConfig.trailing_stop_price`."""
+        if not position.is_open or position.quantity <= 0:
             return False
-        peak = max(position.peak_price, position.avg_entry_price)
-        if peak <= 0:
-            return False
-        drop_from_peak_pct = (peak - current_price) / peak
-        return drop_from_peak_pct >= self.config.trailing_stop_pct
+        threshold = self.config.trailing_stop_price(position.avg_entry_price, position.peak_price)
+        return threshold is not None and current_price <= threshold
 
     def should_profit_lock(self, position: Position, current_price: float) -> bool:
         """Etape 9 (feuille de route performance) : verrou de gain a deux

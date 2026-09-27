@@ -46,19 +46,21 @@ WINDOWS = [
     ("S2 2026*", "2026-07-01", "2027-01-01"),
 ]
 
-# (libelle, stop_loss, trailing, verrou arme, verrou declenche)
+# (libelle, stop_loss, trailing, verrou arme, verrou declenche[, mode du trailing, armement])
+# Mode "gain" (EF-93, definition de l'utilisateur) : trailing = part du gain rendue ;
+# achat 2000, plus haut 2100, 50 % -> vente a 2050. Armement None = frais aller-retour.
 VARIANTS = [
     ("config actuelle : SL 2 %, trailing 1 %", 0.02, 0.01, None, None),
     ("SL 2 %, sans trailing", 0.02, None, None, None),
-    ("SL 2 %, trailing 2 %", 0.02, 0.02, None, None),
-    ("SL 2 %, trailing 3 %", 0.02, 0.03, None, None),
-    ("SL 2 %, trailing 5 %", 0.02, 0.05, None, None),
-    ("SL 2 %, trailing 10 %", 0.02, 0.10, None, None),
-    ("SL 2 %, trailing 15 %", 0.02, 0.15, None, None),
-    ("SL 2 %, trailing 1 % + verrou 1 %/0,2 %", 0.02, 0.01, 0.01, 0.002),
-    ("SL 2 %, trailing 2 % + verrou 1 %/0,2 %", 0.02, 0.02, 0.01, 0.002),
-    ("SL 2 %, verrou 1 %/0,2 % seul", 0.02, None, 0.01, 0.002),
+    ("SL 2 %, trailing 10 % (distance)", 0.02, 0.10, None, None),
     ("SL 2 %, verrou 2 %/0,5 % seul", 0.02, None, 0.02, 0.005),
+    ("SL 2 %, gain rendu 30 %, arme 0,2 %", 0.02, 0.30, None, None, "gain", None),
+    ("SL 2 %, gain rendu 50 %, arme 0,2 %", 0.02, 0.50, None, None, "gain", None),
+    ("SL 2 %, gain rendu 70 %, arme 0,2 %", 0.02, 0.70, None, None, "gain", None),
+    ("SL 2 %, gain rendu 50 %, arme 2 %", 0.02, 0.50, None, None, "gain", 0.02),
+    ("SL 2 %, gain rendu 50 %, arme 5 %", 0.02, 0.50, None, None, "gain", 0.05),
+    ("SL 2 %, gain rendu 30 %, arme 5 %", 0.02, 0.30, None, None, "gain", 0.05),
+    ("SL 2 %, gain rendu 50 %, arme 10 %", 0.02, 0.50, None, None, "gain", 0.10),
     ("aucune sortie de risque (strategie seule)", None, None, None, None),
 ]
 
@@ -67,7 +69,7 @@ def ms(day: str) -> int:
     return int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
-def run(h1, m5, start, end, sl, trail, arm, trig):
+def run(h1, m5, start, end, sl, trail, arm, trig, mode="distance", trail_arm=None):
     warm = [c for c in h1 if c.timestamp < start][-WARMUP:]
     entry = [c for c in h1 if start <= c.timestamp < end]
     fine = [c for c in m5 if start <= c.timestamp < end]
@@ -79,7 +81,7 @@ def run(h1, m5, start, end, sl, trail, arm, trig):
     risk = RiskManager(RiskConfig(
         max_position_size_pct=0.99, stop_loss_pct=sl, take_profit_pct=None, max_daily_loss_pct=0.05,
         max_concurrent_positions=1, trailing_stop_pct=trail, fee_pct=0.001,
-        profit_lock_arm_pct=arm, profit_lock_trigger_pct=trig,
+        profit_lock_arm_pct=arm, profit_lock_trigger_pct=trig, trailing_mode=mode, trailing_arm_pct=trail_arm,
     ))
     portfolio = Portfolio(starting_capital=CAPITAL, fee_pct=0.001)
     engine = Engine(strategy, risk, BacktestExecutor(portfolio), portfolio)
@@ -116,11 +118,11 @@ def main() -> None:
     print("* S2 2026 : fenetre partielle, jusqu'a la fin de l'historique 5m\n")
 
     results = {}
-    for label, sl, trail, arm, trig in VARIANTS:
-        results[label] = [run(h1, m5, ms(a), ms(b), sl, trail, arm, trig) for _, a, b in WINDOWS]
+    for label, *rules in VARIANTS:
+        results[label] = [run(h1, m5, ms(a), ms(b), *rules) for _, a, b in WINDOWS]
 
     bh = [r["bh"] for r in results[VARIANTS[0][0]]]
-    head = f"{'regle de sortie':<44}" + "".join(f"{w:>9}" for w, _, _ in WINDOWS) + f"{'fenetres gagnees*':>17}"
+    head = f"{'regle de sortie':<44}" + "".join(f"{w:>9}" for w, _, _ in WINDOWS) + f"{'fenetres gagnees*':>19}"
     print("=== Rendement par semestre (buy & hold ETH en derniere ligne) ===")
     print(head)
     print("-" * len(head))
@@ -129,7 +131,7 @@ def main() -> None:
         rows = results[label]
         better = sum(r["ret"] > ref["ret"] + 1e-9 for r, ref in zip(rows, reference))
         tail = "reference" if label == VARIANTS[0][0] else f"{better}/{len(rows)}"
-        print(f"{label:<44}" + "".join(f"{pct(r['ret']):>9}" for r in rows) + f"{tail:>17}")
+        print(f"{label:<44}" + "".join(f"{pct(r['ret']):>9}" for r in rows) + f"{tail:>19}")
     print(f"{'buy & hold ETH':<44}" + "".join(f"{pct(x):>9}" for x in bh))
     print("* fenetres ou la regle fait mieux que la config actuelle\n")
 

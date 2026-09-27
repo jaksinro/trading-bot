@@ -103,7 +103,7 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
             # il partirait du prix d'achat et placerait la ligne trop bas.
             "peak_price": max(position.peak_price, position.avg_entry_price),
             "target_trailing_stop": (
-                max(position.peak_price, position.avg_entry_price) * (1 - risk_config.trailing_stop_pct)
+                risk_config.trailing_stop_price(position.avg_entry_price, position.peak_price)
                 if risk_config.trailing_stop_pct else None
             ),
             "profit_lock_arm": (

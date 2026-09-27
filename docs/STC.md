@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.87 |
+| **Version** | 0.88 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -101,6 +101,7 @@
 | 0.85 | EF-90 (§3.76) : **Espace Trading independant des bots** (malentendu d'EF-89 corrige) : la page pilote le panier Manuel par paire ; ordres conditionnels et protections (stop-loss, objectif, trailing) executes par un **surveillant integre au serveur** (releve 20 s, meme chemin d'ordre que l'onglet Manuel, survit a ses propres erreurs). Verifie en reel sans toucher au panier. Constat rapporte : le premier lancement d'`ETH_youenn` a liquide sur le compte partage la position manuelle ET celle d'`ETH_TREND_REGIME` |
 | 0.86 | EF-91 (§3.77) : **verrou perime apres redemarrage** - PID reattribue a un svchost, serveur refusant de demarrer, relance automatique en echec ; `lock_owner` ecarte tout verrou anterieur au demarrage de la machine, et l'arret d'un bot ne tue plus jamais le PID d'un verrou perime |
 | 0.87 | EF-92 (§3.78) : plus haut du trailing stop enregistre a chaque verification 5 min (perdu au redemarrage sinon) ; mesure sur 4 ans des regles de sortie d'ETH_youenn - le trailing 1 % provoque 300 a 600 allers-retours par an (rachat a l'heure suivante) et perd sur les 4 annees ; decision laissee a l'utilisateur |
+| 0.88 | EF-93 (§3.79) : **trailing stop en part du gain** (definition de l'utilisateur : achat 2000, plus haut 2100, 50 % -> vente 2050), avec seuil d'armement ; meme seuil pour la vente et le graphique ; formulaire du dashboard qui ne perd plus le mode ; mesure 2025-2026 : efficace arme a 2 % ou plus, perdant arme a 0,2 % |
 
 ---
 
@@ -1813,6 +1814,33 @@ Details qui evitent des erreurs reelles :
 Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles larges ou absentes font mieux que lui sur les 4. Entre ces dernieres, les ecarts (quelques points) reposent sur une quarantaine de trades en 20 mois : non significatifs, aucune ne se detache. Toutes perdent au S1 2026 (moins que le buy & hold). Un trailing de 15 % ne se declenche jamais (identique a "sans trailing").
 
 **Decision laissee a l'utilisateur** : `config/ETH_youenn.yml` est sa configuration, non modifiee. Les chiffres lui sont rapportes. Idee proposee, non implementee : un delai de reentree apres une sortie de risque, pour casser l'aller-retour vente/rachat quel que soit le reglage.
+
+---
+
+### 3.79 EF-93 : trailing stop en part du gain - definition de l'utilisateur
+
+**Demande** : "tu as pas compris comment est cense fonctionner mon trailing stop [...] achat a 2000, prix max 2100, trailing stop a 50 % : on vendrait a 2050". Le trailing existant (EF-24) mesurait une distance sous le plus haut, independamment du prix d'achat ; l'utilisateur raisonne en part du GAIN rendue. L'assistant avait mesure et commente (EF-92) le mauvais objet.
+
+**Conception** : `RiskConfig.trailing_mode` ("distance" par defaut, inchange ; "gain") et `trailing_arm_pct`. Seuil unique `RiskConfig.trailing_stop_price(achat, plus haut)`, utilise a la fois par la decision de vente (`should_trailing_stop`) et par la ligne du graphique (`stats.build_orders_table`) : ce qui est affiche est exactement ce qui vend. Mode "gain" : seuil = achat + (plus haut - achat) x (1 - X). **Armement** : juste apres l'achat, plus haut = achat, donc seuil = prix d'achat et le moindre recul vendrait (en perte une fois les frais payes) ; le mode ne s'arme qu'une fois le plus haut a `trailing_arm_pct` au-dessus de l'achat (defaut : frais aller-retour, 2 x `fee_pct`). Mode inconnu refuse a la construction.
+
+**Piege corrige au passage** : le formulaire du dashboard reconstruit toute la config (`control_server.build_config`) a partir de ses seuls champs. Sans les nouveaux champs, enregistrer un bot aurait silencieusement fait redevenir un "50 % du gain" un "50 % sous le plus haut". Champs "Sens du trailing stop" et "Armement" ajoutes au formulaire, lus et renvoyes ; l'import d'un reglage depuis l'onglet Backtest remet le mode "distance" (le backtest ne mesure que celui-ci).
+
+**Mesure** (`scripts/bench_exit_rules.py`, 2025-2026 seulement, semestres) :
+
+| Regle de sortie | S1 2025 | S2 2025 | S1 2026 | S2 2026* | trades/semestre |
+|---|---|---|---|---|---|
+| config actuelle ETH_youenn : SL 2 %, trailing 1 % (distance) | -17,1 % | -49,6 % | -37,7 % | -23,4 % | 137-320 |
+| SL 2 %, sans trailing | +16,5 % | +25,7 % | -21,9 % | +35,6 % | 3-14 |
+| SL 2 %, gain rendu 30 %, arme 0,2 % | -37,0 % | -82,2 % | -51,0 % | -23,9 % | 216-524 |
+| SL 2 %, gain rendu 50 %, arme 0,2 % | +3,1 % | +2,7 % | -43,1 % | +7,7 % | 109-169 |
+| SL 2 %, gain rendu 50 %, arme 2 % | +14,7 % | +26,3 % | -11,2 % | +25,6 % | 24-40 |
+| SL 2 %, gain rendu 50 %, arme 5 % | +16,3 % | +32,7 % | -19,3 % | +28,8 % | 12-23 |
+| SL 2 %, gain rendu 30 %, arme 5 % | +17,5 % | +33,5 % | -17,7 % | +29,9 % | 22-37 |
+| buy & hold ETH | -25,5 % | +19,6 % | -47,1 % | +72,5 % | - |
+
+**Constat** : arme trop tot (0,2 %), le mode "gain" reproduit l'aller-retour vente/rachat du trailing 1 % (la strategie rachete a l'heure suivante) : des centaines de trades, pertes. Arme a 2 % ou plus, il rejoint le groupe des regles qui gagnent sur 3 semestres sur 4 ; "50 %, arme 2 %" a la plus faible perte du S1 2026 (-11,2 %) et les baisses maximales les plus basses, mais les ecarts entre regles armees restent de quelques points sur quelques dizaines de trades : non significatifs. Reglage laisse a l'utilisateur ; `config/ETH_youenn.yml` non modifie.
+
+**Validation** : `tests/test_trailing_gain_mode.py`, 9 tests (exemple de l'utilisateur : vente a 2050 et pas a 2051 ; seuil qui suit le plus haut ; pas arme juste apres l'achat ; armement par defaut = frais ; armement explicite ; mode "distance" inchange et par defaut ; mode inconnu refuse ; ligne du graphique = seuil de vente ; formulaire du dashboard conservant le mode). Suite complete : **917 tests**.
 
 ---
 

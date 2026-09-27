@@ -2672,6 +2672,8 @@ function renderCreationTab() {
         <div class="field"><label>Perte max journaliere (%)</label><input id="f_max_daily_loss_pct" type="number" step="0.01" value="5"></div>
         <div class="field"><label>Positions simultanees max</label><input id="f_max_concurrent_positions" type="number" step="1" min="1" value="1"></div>
         <div class="field"><label>Trailing stop (%, vide = desactive)</label><input id="f_trailing_stop_pct" type="number" step="0.01" placeholder="vide = desactive"></div>
+        <div class="field"><label>Sens du trailing stop</label><select id="f_trailing_mode"><option value="distance">% sous le plus haut atteint</option><option value="gain">% du gain rendu (achat 2000, plus haut 2100, 50 % : vend a 2050)</option></select></div>
+        <div class="field"><label>Armement (% de gain avant d'activer le trailing, mode gain ; vide = frais couverts)</label><input id="f_trailing_arm_pct" type="number" step="0.01" placeholder="vide = 0,2 %"></div>
         <div class="field"><label>Frais par ordre (%)</label><input id="f_fee_pct" type="number" step="0.01" value="0.1"></div>
         <div class="field"><label>Timeframe de surveillance des sorties (ex: 5m, vide = desactive)</label><input id="f_exit_check_timeframe" type="text" placeholder="vide = desactive"></div>
       </div>
@@ -2859,6 +2861,8 @@ function fillFormWithConfig(name, cfg) {
   document.getElementById("f_max_daily_loss_pct").value = cfg.risk.max_daily_loss_pct * 100;
   document.getElementById("f_max_concurrent_positions").value = cfg.risk.max_concurrent_positions ?? 1;
   document.getElementById("f_trailing_stop_pct").value = cfg.risk.trailing_stop_pct !== null && cfg.risk.trailing_stop_pct !== undefined ? cfg.risk.trailing_stop_pct * 100 : "";
+  document.getElementById("f_trailing_mode").value = cfg.risk.trailing_mode || "distance";
+  document.getElementById("f_trailing_arm_pct").value = cfg.risk.trailing_arm_pct !== null && cfg.risk.trailing_arm_pct !== undefined ? cfg.risk.trailing_arm_pct * 100 : "";
   const partialEnabled = cfg.risk.partial_take_profit_pct !== null && cfg.risk.partial_take_profit_pct !== undefined;
   document.getElementById("f_partial_take_profit_pct").value = partialEnabled ? cfg.risk.partial_take_profit_pct * 100 : "";
   document.getElementById("f_partial_exit_fraction_wrap").style.display = partialEnabled ? "block" : "none";
@@ -2977,6 +2981,9 @@ async function submitNewBotForm() {
     max_concurrent_positions: document.getElementById("f_max_concurrent_positions").value,
     trailing_stop_pct: document.getElementById("f_trailing_stop_pct").value
       ? document.getElementById("f_trailing_stop_pct").value / 100 : "",
+    trailing_mode: document.getElementById("f_trailing_mode").value,
+    trailing_arm_pct: document.getElementById("f_trailing_arm_pct").value
+      ? document.getElementById("f_trailing_arm_pct").value / 100 : "",
     fee_pct: document.getElementById("f_fee_pct").value / 100,
     exit_check_timeframe: document.getElementById("f_exit_check_timeframe").value.trim() || "",
     partial_take_profit_pct: document.getElementById("f_partial_take_profit_pct").value
@@ -3871,6 +3878,8 @@ function exportBacktestToNewBot() {
   if (exported.maxDailyLoss) document.getElementById("f_max_daily_loss_pct").value = exported.maxDailyLoss;
   if (exported.maxConcurrent) document.getElementById("f_max_concurrent_positions").value = exported.maxConcurrent;
   document.getElementById("f_trailing_stop_pct").value = exported.trailingStop || "";
+  document.getElementById("f_trailing_mode").value = "distance";  // le backtest mesure le trailing sous le plus haut
+  document.getElementById("f_trailing_arm_pct").value = "";
   if (exported.feePct) document.getElementById("f_fee_pct").value = exported.feePct;
   document.getElementById("f_exit_check_timeframe").value = exported.exitCheckTimeframe || "";
 

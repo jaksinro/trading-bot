@@ -607,6 +607,19 @@ def build_config(payload: dict) -> dict:
         trailing_stop_pct = _require_fraction(
             _to_float(payload, "trailing_stop_pct", "Trailing stop"), "le trailing stop"
         )
+    # EF-93 : sens du trailing ("distance" sous le plus haut, ou "gain" = part du gain
+    # rendue) et seuil d'armement du mode "gain". Absents du formulaire, ils etaient
+    # perdus a chaque enregistrement : un 50 % "part du gain" serait redevenu
+    # "50 % sous le plus haut" sans avertissement.
+    from tradingbot.risk.risk_manager import TRAILING_MODES
+
+    trailing_mode = str(payload.get("trailing_mode") or "distance")
+    if trailing_mode not in TRAILING_MODES:
+        raise ValueError(f"mode de trailing inconnu : {trailing_mode}")
+    trailing_arm_raw = payload.get("trailing_arm_pct")
+    trailing_arm_pct = None if trailing_arm_raw in (None, "") else _require_fraction(
+        _to_float(payload, "trailing_arm_pct", "Armement du trailing"), "l'armement du trailing"
+    )
 
     fee_pct = (
         _require_fraction(_to_float(payload, "fee_pct", "Frais"), "les frais")
@@ -644,6 +657,8 @@ def build_config(payload: dict) -> dict:
             "max_daily_loss_pct": max_daily_loss_pct,
             "max_concurrent_positions": max_concurrent_positions,
             "trailing_stop_pct": trailing_stop_pct,
+            "trailing_mode": trailing_mode,
+            "trailing_arm_pct": trailing_arm_pct,
             "fee_pct": fee_pct,
             "partial_take_profit_pct": partial_take_profit_pct,
             "partial_exit_fraction": partial_exit_fraction,

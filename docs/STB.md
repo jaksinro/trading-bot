@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.84 |
+| **Version** | 0.85 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -98,6 +98,7 @@
 | 0.82 | EF-90 : Espace Trading independant des bots - panier Manuel par paire, ordres conditionnels et protections executes par un surveillant du serveur |
 | 0.83 | EF-91 : relance automatique apres redemarrage fiabilisee (verrous perimes a PID reattribue) |
 | 0.84 | EF-92 : plus haut du trailing stop conserve au redemarrage ; mesure des regles de sortie |
+| 0.85 | EF-93 : trailing stop en part du gain rendue, avec seuil d'armement |
 ---
 
 ## 1. Introduction
@@ -269,6 +270,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-90 | La fenetre de trading doit etre independante des bots - precision de l'utilisateur apres EF-89 ("on ne s'est pas compris") | Devrait - **realise**. L'Espace Trading pilote le panier Manuel, paire par paire. Ordres conditionnels (achat sous un prix, vente au-dessus ou en dessous) et protections de position (stop-loss, objectif, trailing) executes par un surveillant integre au serveur de controle, releve toutes les 20 s, sans aucun bot. Limite : serveur arrete = rien n'est surveille jusqu'a sa relance. Voir STC §3.76 |
 | EF-91 | Les bots et le serveur doivent repartir seuls apres un redemarrage de la machine, meme quand les verrous de la session precedente sont restes en place - incident du 2026-09-27 | Doit - **realise**. Un verrou ecrit avant le dernier demarrage est perime quel que soit son PID ; arreter un bot ne tue jamais le PID d'un verrou perime. Voir STC §3.77 |
 | EF-92 | Le trailing stop doit reprendre au redemarrage du bot avec le plus haut reellement observe ; et l'utilisateur doit pouvoir juger ses regles de sortie sur des chiffres - question du 2026-09-27 | Doit - **realise** (plus haut enregistre a chaque verification 5 min) ; mesure fournie (`scripts/bench_exit_rules.py`), reglage laisse a l'utilisateur. Voir STC §3.78 |
+| EF-93 | Le trailing stop doit pouvoir se regler en part du gain rendue (achat 2000, plus haut 2100, 50 % -> vente a 2050) - definition de l'utilisateur du 2026-09-27 | Doit - **realise**. Mode "gain" a cote du mode historique "distance" (par defaut), avec seuil d'armement ; reglable dans le formulaire du dashboard. Voir STC §3.79 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---
