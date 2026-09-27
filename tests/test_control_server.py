@@ -13,6 +13,15 @@ def fake_binance_markets(monkeypatch):
     monkeypatch.setattr(control_server, "get_binance_markets", lambda: FAKE_MARKETS)
 
 
+@pytest.fixture(autouse=True)
+def fresh_login_throttle():
+    """Le compteur de mots de passe faux (EF-94) est global au serveur :
+    chaque test repart d'un compteur vide."""
+    control_server._login_throttle.reset()
+    yield
+    control_server._login_throttle.reset()
+
+
 def valid_sma_payload(**overrides):
     payload = {
         "name": "eth_custom_v1",
@@ -736,6 +745,109 @@ def test_the_user_name_is_configurable(remote_server, monkeypatch):
     monkeypatch.setenv(control_server.USER_ENV, "youenn")
     assert _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))[0] == 401
     assert _get_status(remote_server, "/api/list-configs", _basic("youenn", "secret"))[0] == 200
+
+
+# --- EF-94 : limitation des tentatives de mot de passe ----------------------
+
+
+def test_too_many_wrong_passwords_block_the_address_even_with_the_right_one(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    for _ in range(control_server.LOGIN_MAX_FAILURES - 1):
+        assert _get_status(remote_server, "/api/list-configs", _basic("trader", "faux"))[0] == 401
+    assert _get_status(remote_server, "/api/list-configs", _basic("trader", "faux"))[0] == 401
+    status, headers, body = _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))
+    assert status == 429, "sinon le blocage ne ralentit pas un essai systematique"
+    assert int(headers["Retry-After"]) > 0
+    assert "min".encode() in body
+
+
+def test_requests_without_credentials_are_not_counted_as_failures(remote_server, monkeypatch):
+    """Le navigateur envoie toujours une premiere requete sans identifiants
+    avant d'afficher la fenetre de mot de passe : ce n'est pas un echec."""
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    for _ in range(control_server.LOGIN_MAX_FAILURES + 2):
+        assert _get_status(remote_server, "/api/list-configs")[0] == 401
+    assert _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))[0] == 200
+
+
+def test_malformed_authorization_header_counts_as_a_failure(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    for _ in range(control_server.LOGIN_MAX_FAILURES):
+        assert _get_status(remote_server, "/api/list-configs", {"Authorization": "Bearer x"})[0] == 401
+    assert _get_status(remote_server, "/api/list-configs", _basic("trader", "secret"))[0] == 429
+
+
+def test_blocked_address_is_refused_on_post_too(remote_server, monkeypatch):
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    for _ in range(control_server.LOGIN_MAX_FAILURES):
+        _get_status(remote_server, "/api/list-configs", _basic("trader", "faux"))
+    request = urllib.request.Request(
+        remote_server + "/api/manual-deposit", data=b'{"amount": 1}',
+        headers={"Content-Type": "application/json", **_basic("trader", "secret")}, method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=10)
+    assert exc.value.code == 429
+
+
+def test_local_client_is_never_blocked(live_server, monkeypatch):
+    """Un blocage ne doit jamais empecher de reprendre la main depuis la
+    machine elle-meme (ni le script de demarrage automatique)."""
+    monkeypatch.setenv(control_server.PASSWORD_ENV, "secret")
+    for _ in range(control_server.LOGIN_MAX_FAILURES + 1):
+        control_server._login_throttle.record_failure("127.0.0.1")
+    base, _ = live_server
+    assert _get_status(base, "/api/list-configs")[0] == 200
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_throttle_lifts_the_block_after_the_lockout():
+    clock = _FakeClock()
+    throttle = control_server.LoginThrottle(max_failures=3, window_s=60, lockout_s=300, clock=clock)
+    for _ in range(3):
+        throttle.record_failure("10.0.0.5")
+    assert throttle.retry_after("10.0.0.5") == 300
+    assert throttle.retry_after("10.0.0.6") == 0, "le blocage est propre a une adresse"
+    clock.now += 299.5
+    assert throttle.retry_after("10.0.0.5") == 1
+    clock.now += 1
+    assert throttle.retry_after("10.0.0.5") == 0
+
+
+def test_throttle_forgets_failures_older_than_the_window():
+    clock = _FakeClock()
+    throttle = control_server.LoginThrottle(max_failures=3, window_s=60, lockout_s=300, clock=clock)
+    throttle.record_failure("10.0.0.5")
+    throttle.record_failure("10.0.0.5")
+    clock.now += 61
+    throttle.record_failure("10.0.0.5")
+    assert throttle.retry_after("10.0.0.5") == 0, "des fautes de frappe espacees ne doivent pas bloquer"
+
+
+def test_throttle_success_resets_the_failure_count():
+    throttle = control_server.LoginThrottle(max_failures=3, clock=_FakeClock())
+    throttle.record_failure("10.0.0.5")
+    throttle.record_failure("10.0.0.5")
+    throttle.record_success("10.0.0.5")
+    throttle.record_failure("10.0.0.5")
+    assert throttle.retry_after("10.0.0.5") == 0
+
+
+def test_throttle_memory_is_bounded():
+    throttle = control_server.LoginThrottle(max_failures=2, max_tracked=5, clock=_FakeClock())
+    for i in range(50):
+        throttle.record_failure(f"10.0.0.{i}")
+        throttle.record_failure(f"10.0.1.{i}")
+        throttle.record_failure(f"10.0.1.{i}")
+    assert len(throttle._failures) <= 5
+    assert len(throttle._blocked_until) <= 5
 
 
 # --- EF-85 : le journal d'un bot survit a sa relance ------------------------
