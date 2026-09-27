@@ -53,7 +53,21 @@ TLS_KEY_ENV = "DASHBOARD_TLS_KEY"
 # Delai maximal pour qu'un client termine la poignee de main TLS : au-dela,
 # la connexion est abandonnee plutot que d'immobiliser un thread.
 TLS_HANDSHAKE_TIMEOUT_S = 10
-ROOT = Path(__file__).resolve().parents[2]
+
+# EF-94 : limitation des tentatives de mot de passe. Sans elle, un appareil
+# du reseau peut essayer des milliers de mots de passe par minute. Apres
+# LOGIN_MAX_FAILURES identifiants FAUX en LOGIN_FAILURE_WINDOW_S depuis une
+# meme adresse, cette adresse recoit un 429 pendant LOGIN_LOCKOUT_S - meme
+# avec le bon mot de passe, sinon le blocage ne ralentirait rien. Une requete
+# SANS identifiants (le premier affichage de la page, avant que le navigateur
+# ne demande le mot de passe) n'est pas un echec. Les connexions locales ne
+# passent jamais par ici.
+LOGIN_MAX_FAILURES = 10
+LOGIN_FAILURE_WINDOW_S = 15 * 60
+LOGIN_LOCKOUT_S = 15 * 60
+# Borne memoire : au-dela, les adresses les plus anciennes sont oubliees.
+LOGIN_MAX_TRACKED_ADDRESSES = 1000
+ROOT =Path(__file__).resolve().parents[2]
 CONTROL_SERVER_LOCK_PATH = ROOT / "control_server.lock"
 CONFIG_DIR = ROOT / "config"
 LOG_DIR = ROOT / "logs"
@@ -988,6 +1002,63 @@ def handle_tradingview_alert(body: bytes, url_token: str | None, source_ip: str 
     return 200, {"status": "recue", "id": alert_id, "order": "en cours", "detail": why}
 
 
+class LoginThrottle:
+    """Compte les identifiants faux par adresse et bloque temporairement
+    celles qui en accumulent trop (EF-94). Partage entre les threads du
+    serveur, d'ou le verrou. `clock` est injectable pour les tests."""
+
+    def __init__(self, max_failures: int = LOGIN_MAX_FAILURES,
+                 window_s: float = LOGIN_FAILURE_WINDOW_S,
+                 lockout_s: float = LOGIN_LOCKOUT_S,
+                 max_tracked: int = LOGIN_MAX_TRACKED_ADDRESSES,
+                 clock=time.monotonic) -> None:
+        self.max_failures = max_failures
+        self.window_s = window_s
+        self.lockout_s = lockout_s
+        self.max_tracked = max_tracked
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._failures: dict[str, list[float]] = {}
+        self._blocked_until: dict[str, float] = {}
+
+    def retry_after(self, address: str) -> int:
+        """Secondes de blocage restantes pour cette adresse (0 = libre)."""
+        with self._lock:
+            until = self._blocked_until.get(address)
+            if until is None:
+                return 0
+            remaining = until - self.clock()
+            if remaining <= 0:
+                del self._blocked_until[address]
+                return 0
+            return max(1, int(remaining + 0.999))
+
+    def record_failure(self, address: str) -> None:
+        with self._lock:
+            now = self.clock()
+            recent = [t for t in self._failures.pop(address, []) if now - t < self.window_s]
+            recent.append(now)
+            if len(recent) >= self.max_failures:
+                self._blocked_until[address] = now + self.lockout_s
+            else:
+                self._failures[address] = recent  # reinsere en fin = plus recent
+            for table in (self._failures, self._blocked_until):
+                while len(table) > self.max_tracked:
+                    del table[next(iter(table))]
+
+    def record_success(self, address: str) -> None:
+        with self._lock:
+            self._failures.pop(address, None)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._failures.clear()
+            self._blocked_until.clear()
+
+
+_login_throttle = LoginThrottle()
+
+
 class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # Acces reseau (EF-82)
@@ -1012,15 +1083,31 @@ class Handler(BaseHTTPRequestHandler):
                 f"{PASSWORD_ENV}=... dans le fichier .env du serveur, puis relance-le.".encode("utf-8")
             )
             return False
+        address = self.client_address[0] if self.client_address else ""
+        retry_after = _login_throttle.retry_after(address)
+        if retry_after:
+            self.send_response(429)
+            self.send_header("Retry-After", str(retry_after))
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                "Trop de mots de passe faux depuis cet appareil : acces bloque "
+                f"pendant encore {(retry_after + 59) // 60} min.".encode("utf-8")
+            )
+            return False
         user = os.environ.get(USER_ENV, DEFAULT_USER)
         header = self.headers.get("Authorization", "")
-        if header.startswith("Basic "):
-            try:
-                given = base64.b64decode(header[6:].strip()).decode("utf-8")
-            except Exception:
-                given = ""
+        if header:
+            given = ""
+            if header.startswith("Basic "):
+                try:
+                    given = base64.b64decode(header[6:].strip()).decode("utf-8")
+                except Exception:
+                    pass
             if hmac.compare_digest(given.encode(), f"{user}:{password}".encode()):
+                _login_throttle.record_success(address)
                 return True
+            _login_throttle.record_failure(address)
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="Trading Bot"')
         self.send_header("Content-Type", "text/plain; charset=utf-8")
