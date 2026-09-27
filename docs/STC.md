@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.85 |
+| **Version** | 0.86 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -99,6 +99,7 @@
 | 0.83 | EF-88 (§3.74) : **ordres d'achat declenches poses au clic sur le graphique d'un bot**, stockes par le serveur et executes par le bot par le MEME chemin qu'un signal de la strategie (aucun garde-fou contourne), declenchement unique, annulation prioritaire ; **zones activables** (stop-loss/objectifs/trailing/verrou, seuils de la strategie via `chart_levels()`, ordres en attente). Verifie en reel : ordre releve en 22 s et refuse par le gestionnaire de risque, sans achat |
 | 0.84 | EF-89 (§3.75) : **page Espace Trading** (`/trading.html`, statique, jamais reecrite par les bots, sans rafraichissement global) : graphique Lightweight Charts avec unites de temps 1m-1d (`/api/candles`), **ordres de vente a la souris** (au-dessus = prise de profit, en dessous = stop ; registre etendu avec migration en place), **panneau de reglages** avec apercu sur le graphique et application par reecriture ciblee du bloc `risk:` (commentaires conserves), bot relance. Verifie en reel : reglage applique puis retire, config revenue a l'identique |
 | 0.85 | EF-90 (§3.76) : **Espace Trading independant des bots** (malentendu d'EF-89 corrige) : la page pilote le panier Manuel par paire ; ordres conditionnels et protections (stop-loss, objectif, trailing) executes par un **surveillant integre au serveur** (releve 20 s, meme chemin d'ordre que l'onglet Manuel, survit a ses propres erreurs). Verifie en reel sans toucher au panier. Constat rapporte : le premier lancement d'`ETH_youenn` a liquide sur le compte partage la position manuelle ET celle d'`ETH_TREND_REGIME` |
+| 0.86 | EF-91 (§3.77) : **verrou perime apres redemarrage** - PID reattribue a un svchost, serveur refusant de demarrer, relance automatique en echec ; `lock_owner` ecarte tout verrou anterieur au demarrage de la machine, et l'arret d'un bot ne tue plus jamais le PID d'un verrou perime |
 
 ---
 
@@ -1757,6 +1758,22 @@ Details qui evitent des erreurs reelles :
 **Constat collateral grave, rapporte a l'utilisateur, non corrige (decision en attente)** : les echanges d'environ 0,19 ETH des 24-26/09 que l'assistant n'avait pas su attribuer etaient les ordres MANUELS de l'utilisateur. Le premier lancement du bot `ETH_youenn` (liquidation des soldes preexistants, `flatten_on_start`) a donc revendu sur le compte testnet PARTAGE a la fois la position manuelle (0,1898 ETH) et celle du bot `ETH_TREND_REGIME` (0,0731 ETH). Les deux registres croient detenir de l'ETH que le compte n'a plus. Correctif structurel propose : au premier lancement, ne liquider que la part du solde qu'aucun registre (bots et panier manuel) ne declare.
 
 **Validation** : `tests/test_manual_watch.py`, 21 tests (achat sous un prix declenche une seule fois, vente au-dessus, vente sans position refusee avec son motif, annulation, invalidites, paire sans cours isolee, priorite et niveaux des protections, stop-loss vendant la position avec motif conserve, trailing suivant le plus haut, plus haut remis a zero apres cloture, reglage desactivable individuellement, surveillant survivant a un passage en erreur, routes HTTP reelles). Suite complete : **901 tests**.
+
+---
+
+### 3.77 EF-91 : verrou perime apres redemarrage - la relance automatique ne relancait plus rien
+
+**Incident (2026-09-27)** : question de l'utilisateur, "pourquoi les bots ne se relancent pas automatiquement au demarrage ?". La tache planifiee `TradingBot_AutoStart` s'etait bien declenchee a l'ouverture de session (10:20:58) mais avait abandonne apres 60 tentatives ("serveur de controle indisponible"), code retour 1 : serveur arrete, aucun bot, surveillant du panier manuel arrete.
+
+**Cause** : `control_server.lock` datait de la veille et contenait le PID 14860. Apres le redemarrage, Windows avait reattribue ce numero a un `svchost`. `acquire_lock` jugeait un verrou valide des qu'un process portant ce PID existait : le serveur se croyait deja lance et refusait de demarrer. Son message d'erreur partait dans une fenetre cachee ; seul "indisponible apres 60s" restait au journal.
+
+**Danger decouvert au passage** : `kill_by_name` (bouton Arreter du dashboard) lance `taskkill /F` sur le PID lu dans `bot_{nom}.lock`. Avec un verrou perime, il aurait tue de force un service Windows. `is_bot_running` avait le meme defaut (bot affiche actif, relance refusee "tourne deja").
+
+**Correction** : `process_lock.lock_owner(lock_path)` renvoie le PID qui detient REELLEMENT le verrou, ou None. Un verrou ecrit avant le dernier demarrage de la machine (`GetTickCount64` sous Windows, `/proc/uptime` sous Linux, marge de 5 s) est perime quel que soit son PID. `acquire_lock`, `is_bot_running` et `kill_by_name` passent tous par elle : plus aucun `taskkill` sur un PID de verrou perime. Sans dependance nouvelle (pas de `psutil`). Limite : un process tue sans redemarrage de la machine, dont le PID serait reattribue avant la relance, reste indetectable - cas beaucoup plus rare, deja present avant.
+
+**Diagnostic** : `autostart_bots.ps1` conserve desormais les sorties du serveur (`logs/control_server_autostart.out.log` / `.err.log`) et recopie les dernieres lignes d'erreur dans `logs/autostart.log` en cas d'abandon.
+
+**Validation** : 4 tests (`tests/test_process_lock.py`) - heure de demarrage dans le passe ; verrou d'avant le demarrage pointant sur un process VIVANT (le process de test) juge perime et remplace ; verrou recent d'un process vivant respecte ; `kill_by_name` ne lance jamais `taskkill` sur un verrou perime. En reel : tache planifiee lancee avec le verrou perime de la nuit toujours en place -> serveur pret en 1 s, 4 bots relances avec reprise de leur session, surveillant du panier manuel actif, code retour 0. Suite complete : **906 tests**.
 
 ---
 

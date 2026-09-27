@@ -115,3 +115,57 @@ def test_posix_never_calls_tasklist(monkeypatch):
     _posix(monkeypatch, lambda pid, sig: None)
     process_lock._is_process_running(4242)
     assert called == []
+
+
+def _write_lock_before_boot(lock_path, pid):
+    """Verrou date d'AVANT le dernier demarrage de la machine."""
+    from tradingbot.process_lock import _boot_time
+
+    lock_path.write_text(str(pid))
+    boot = _boot_time()
+    assert boot is not None
+    os.utime(lock_path, (boot - 3600, boot - 3600))
+
+
+def test_boot_time_is_in_the_past():
+    import time
+
+    from tradingbot.process_lock import _boot_time
+
+    assert _boot_time() < time.time()
+
+
+def test_lock_from_before_reboot_with_reused_pid_is_stale(tmp_path):
+    """Bug reel du 2026-09-27 : apres un redemarrage, le PID du verrou de la
+    veille designait un svchost bien vivant. Ici le PID est celui du process
+    de test, donc 'vivant' : seul l'age du verrou permet de le juger perime."""
+    from tradingbot.process_lock import lock_owner
+
+    lock_path = tmp_path / "control_server.lock"
+    _write_lock_before_boot(lock_path, os.getpid())
+    assert lock_owner(lock_path) is None
+    acquire_lock(lock_path)  # ne doit pas lever : le serveur doit pouvoir redemarrer
+    assert lock_path.read_text().strip() == str(os.getpid())
+    release_lock(lock_path)
+
+
+def test_fresh_lock_of_live_process_is_honoured(tmp_path):
+    from tradingbot.process_lock import lock_owner
+
+    lock_path = tmp_path / "bot.lock"
+    lock_path.write_text(str(os.getpid()))
+    assert lock_owner(lock_path) == os.getpid()
+
+
+def test_server_never_kills_the_pid_of_a_stale_bot_lock(tmp_path, monkeypatch):
+    """'Arreter' sur un bot au verrou perime ne doit jamais lancer taskkill :
+    le PID peut designer un service Windows."""
+    from tradingbot import control_server
+
+    monkeypatch.setattr(control_server, "ROOT", tmp_path)
+    _write_lock_before_boot(tmp_path / "bot_X.lock", os.getpid())
+    calls = []
+    monkeypatch.setattr(control_server.subprocess, "run", lambda *a, **k: calls.append(a))
+    assert control_server.is_bot_running("X") is False
+    control_server.kill_by_name("X")
+    assert calls == []

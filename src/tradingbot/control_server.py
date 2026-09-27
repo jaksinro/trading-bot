@@ -27,7 +27,7 @@ import ccxt
 import yaml
 from dotenv import load_dotenv
 
-from tradingbot.process_lock import _is_process_running, acquire_lock
+from tradingbot.process_lock import acquire_lock, lock_owner
 
 PORT = 8765
 
@@ -173,14 +173,9 @@ def list_proposals() -> list[dict]:
 
 
 def is_bot_running(name: str) -> bool:
-    lock_path = ROOT / f"bot_{name}.lock"
-    if not lock_path.exists():
-        return False
-    try:
-        pid = int(lock_path.read_text().strip())
-    except ValueError:
-        return False
-    return _is_process_running(pid)
+    # `lock_owner` ecarte aussi un verrou d'avant le dernier redemarrage, dont
+    # le PID a pu etre reattribue a un autre programme (constate le 2026-09-27).
+    return lock_owner(ROOT / f"bot_{name}.lock") is not None
 
 
 LOG_MAX_BYTES = 2_000_000  # au-dela, le journal d'un bot tourne vers {name}.log.1
@@ -1919,10 +1914,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def kill_by_name(name: str) -> None:
-    lock_path = ROOT / f"bot_{name}.lock"
-    try:
-        pid = int(lock_path.read_text().strip())
-    except (ValueError, FileNotFoundError):
+    # Jamais de `taskkill /F` sur un PID de verrou perime : apres un redemarrage
+    # il peut designer un service Windows (constate le 2026-09-27 : un svchost).
+    pid = lock_owner(ROOT / f"bot_{name}.lock")
+    if pid is None:
         return
     if sys.platform == "win32":
         subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)

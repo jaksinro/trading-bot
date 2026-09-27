@@ -21,7 +21,12 @@ Write-Log "Autostart declenche."
 
 # Demarre le serveur de controle - verrou anti-doublon cote Python
 # (control_server.lock), donc sans risque meme s'il tourne deja.
-Start-Process -FilePath $python -ArgumentList "-m tradingbot.control_server" -WorkingDirectory $root -WindowStyle Hidden
+# Sorties du serveur conservees : le 2026-09-27 il a refuse de demarrer (verrou
+# perime, PID reattribue apres redemarrage) et le message s'est perdu dans une
+# fenetre cachee - seul "indisponible apres 60s" restait dans ce journal.
+Start-Process -FilePath $python -ArgumentList "-u -m tradingbot.control_server" -WorkingDirectory $root -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $root "logs\control_server_autostart.out.log") `
+    -RedirectStandardError (Join-Path $root "logs\control_server_autostart.err.log")
 
 # Attend que le serveur reponde (jusqu'a 60s) plutot qu'un delai fixe -
 # Windows peut encore initialiser le reseau juste apres l'ouverture de session.
@@ -51,7 +56,8 @@ for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Seconds 1
 }
 if (-not $ready) {
-    Write-Log "Serveur de controle indisponible apres 60s - abandon."
+    $err = Get-Content (Join-Path $root "logs\control_server_autostart.err.log") -Tail 3 -ErrorAction SilentlyContinue
+    Write-Log "Serveur de controle indisponible apres 60s - abandon. Sortie d'erreur du serveur : $($err -join ' | ')"
     exit 1
 }
 Write-Log "Serveur de controle pret."
