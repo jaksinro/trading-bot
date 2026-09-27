@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.83 |
+| **Version** | 0.84 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -97,6 +97,7 @@
 | 0.81 | EF-89 : page Espace Trading - graphique et unite de temps, ordres de vente a la souris, reglages de risque avec apercu |
 | 0.82 | EF-90 : Espace Trading independant des bots - panier Manuel par paire, ordres conditionnels et protections executes par un surveillant du serveur |
 | 0.83 | EF-91 : relance automatique apres redemarrage fiabilisee (verrous perimes a PID reattribue) |
+| 0.84 | EF-92 : plus haut du trailing stop conserve au redemarrage ; mesure des regles de sortie |
 ---
 
 ## 1. Introduction
@@ -267,6 +268,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-89 | Une page de trading dediee : graphique avec unite de temps au choix, ordres de vente poses a la souris, reglages de risque (stop-loss, trailing stop...) dans un panneau a cote - demande de l'utilisateur | Devrait - **realise**. Page `/trading.html` (lien depuis l'onglet Bot). Ventes au-dessus (prise de profit) ou en dessous (stop) du cours, executees par le bot avec ses garde-fous ; reglages appliques avec apercu prealable sur le graphique, commentaires de la config conserves, bot relance sans perdre sa position. Voir STC §3.75 |
 | EF-90 | La fenetre de trading doit etre independante des bots - precision de l'utilisateur apres EF-89 ("on ne s'est pas compris") | Devrait - **realise**. L'Espace Trading pilote le panier Manuel, paire par paire. Ordres conditionnels (achat sous un prix, vente au-dessus ou en dessous) et protections de position (stop-loss, objectif, trailing) executes par un surveillant integre au serveur de controle, releve toutes les 20 s, sans aucun bot. Limite : serveur arrete = rien n'est surveille jusqu'a sa relance. Voir STC §3.76 |
 | EF-91 | Les bots et le serveur doivent repartir seuls apres un redemarrage de la machine, meme quand les verrous de la session precedente sont restes en place - incident du 2026-09-27 | Doit - **realise**. Un verrou ecrit avant le dernier demarrage est perime quel que soit son PID ; arreter un bot ne tue jamais le PID d'un verrou perime. Voir STC §3.77 |
+| EF-92 | Le trailing stop doit reprendre au redemarrage du bot avec le plus haut reellement observe ; et l'utilisateur doit pouvoir juger ses regles de sortie sur des chiffres - question du 2026-09-27 | Doit - **realise** (plus haut enregistre a chaque verification 5 min) ; mesure fournie (`scripts/bench_exit_rules.py`), reglage laisse a l'utilisateur. Voir STC §3.78 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

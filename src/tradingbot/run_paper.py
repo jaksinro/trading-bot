@@ -180,6 +180,28 @@ def poll_new_closed_candle(exchange, symbol: str, timeframe: str, last_seen_ts: 
     return _row_to_candle(closed_row)
 
 
+def fine_exit_check(engine, executor, logger: TradeLogger, current_price: float, now: float) -> list[str]:
+    """Verification des sorties entre deux bougies (surveillance fine, 5m).
+
+    Les positions sont enregistrees a CHAQUE passage, pas seulement quand une
+    vente a lieu : ce passage met a jour le plus haut (`peak_price`) qui sert
+    au trailing stop. Enregistre seulement a la bougie horaire, il etait perdu
+    a chaque redemarrage du bot - qui repartait d'un plus haut plus ancien,
+    donc d'un trailing plus bas (constate le 2026-09-27 sur ETH_youenn : plus
+    haut en base 2691.53, soit le prix d'achat, contre 2709.68 vu en memoire)."""
+    fine_candle = Candle(
+        timestamp=int(now * 1000), open=current_price, high=current_price,
+        low=current_price, close=current_price, volume=0.0,
+    )
+    messages = engine.process_price_update(fine_candle)
+    logger.save_open_positions(executor.portfolio.positions)
+    if messages:
+        logger.log_equity(fine_candle.timestamp, executor.portfolio.equity(current_price))
+        for message in messages:
+            print(f"[{fine_candle.timestamp}] (surveillance fine) {message}")
+    return messages
+
+
 def strategy_chart_levels(strategy) -> list[dict]:
     """Niveaux de prix propres a la strategie, a tracer sur le graphique
     (EF-88) : `[{"price", "label", "kind"}]`. Liste vide pour une strategie
@@ -760,16 +782,7 @@ def main(config_path: str) -> None:
                 now = time.time()
                 if now - last_exit_check_ts >= exit_check_interval_seconds:
                     last_exit_check_ts = now
-                    fine_candle = Candle(
-                        timestamp=int(now * 1000), open=current_price, high=current_price,
-                        low=current_price, close=current_price, volume=0.0,
-                    )
-                    messages = engine.process_price_update(fine_candle)
-                    if messages:
-                        logger.save_open_positions(executor.portfolio.positions)
-                        logger.log_equity(fine_candle.timestamp, executor.portfolio.equity(current_price))
-                        for message in messages:
-                            print(f"[{fine_candle.timestamp}] (surveillance fine) {message}")
+                    fine_exit_check(engine, executor, logger, current_price, now)
 
             # EF-88 : ordres poses a la main - verifies a chaque passage (toutes les
             # minutes) sur le cours du moment, executes par le MEME chemin qu'un

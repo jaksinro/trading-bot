@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.86 |
+| **Version** | 0.87 |
 | **Date** | 2026-09-26 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -100,6 +100,7 @@
 | 0.84 | EF-89 (§3.75) : **page Espace Trading** (`/trading.html`, statique, jamais reecrite par les bots, sans rafraichissement global) : graphique Lightweight Charts avec unites de temps 1m-1d (`/api/candles`), **ordres de vente a la souris** (au-dessus = prise de profit, en dessous = stop ; registre etendu avec migration en place), **panneau de reglages** avec apercu sur le graphique et application par reecriture ciblee du bloc `risk:` (commentaires conserves), bot relance. Verifie en reel : reglage applique puis retire, config revenue a l'identique |
 | 0.85 | EF-90 (§3.76) : **Espace Trading independant des bots** (malentendu d'EF-89 corrige) : la page pilote le panier Manuel par paire ; ordres conditionnels et protections (stop-loss, objectif, trailing) executes par un **surveillant integre au serveur** (releve 20 s, meme chemin d'ordre que l'onglet Manuel, survit a ses propres erreurs). Verifie en reel sans toucher au panier. Constat rapporte : le premier lancement d'`ETH_youenn` a liquide sur le compte partage la position manuelle ET celle d'`ETH_TREND_REGIME` |
 | 0.86 | EF-91 (§3.77) : **verrou perime apres redemarrage** - PID reattribue a un svchost, serveur refusant de demarrer, relance automatique en echec ; `lock_owner` ecarte tout verrou anterieur au demarrage de la machine, et l'arret d'un bot ne tue plus jamais le PID d'un verrou perime |
+| 0.87 | EF-92 (§3.78) : plus haut du trailing stop enregistre a chaque verification 5 min (perdu au redemarrage sinon) ; mesure sur 4 ans des regles de sortie d'ETH_youenn - le trailing 1 % provoque 300 a 600 allers-retours par an (rachat a l'heure suivante) et perd sur les 4 annees ; decision laissee a l'utilisateur |
 
 ---
 
@@ -1774,6 +1775,30 @@ Details qui evitent des erreurs reelles :
 **Diagnostic** : `autostart_bots.ps1` conserve desormais les sorties du serveur (`logs/control_server_autostart.out.log` / `.err.log`) et recopie les dernieres lignes d'erreur dans `logs/autostart.log` en cas d'abandon.
 
 **Validation** : 4 tests (`tests/test_process_lock.py`) - heure de demarrage dans le passe ; verrou d'avant le demarrage pointant sur un process VIVANT (le process de test) juge perime et remplace ; verrou recent d'un process vivant respecte ; `kill_by_name` ne lance jamais `taskkill` sur un verrou perime. En reel : tache planifiee lancee avec le verrou perime de la nuit toujours en place -> serveur pret en 1 s, 4 bots relances avec reprise de leur session, surveillant du panier manuel actif, code retour 0. Suite complete : **906 tests**.
+
+---
+
+### 3.78 EF-92 : plus haut du trailing stop perdu au redemarrage, et mesure des regles de sortie d'ETH_youenn
+
+**Question de l'utilisateur** (capture du graphique d'ETH_youenn) : "c'est genant d'avoir le trailing stop sous le prix d'achat non ?". Trailing 1 % sous le plus haut vu (2709,68 -> 2682,58), prix d'achat 2691,53 : un declenchement vendrait a environ -0,5 % frais compris. Mecanique normale d'un trailing stop tant que le plus haut n'a pas depasse achat / (1 - 1 %) = 2718,72.
+
+**Bug trouve en repondant** : le plus haut (`peak_price`) etait mis a jour toutes les 5 minutes par la surveillance fine, mais enregistre seulement a la bougie horaire (ou lors d'une vente). Un redemarrage le ramenait a sa derniere valeur enregistree - ici 2691,53, le prix d'achat - donc un trailing plus bas. Correction : `run_paper.fine_exit_check` (extrait de la boucle pour etre teste) enregistre les positions a chaque passage. 2 tests (`tests/test_fine_exit_peak.py`) : le plus haut vu entre deux bougies survit a un "redemarrage" (relecture de la base) ; aucun point d'equite ajoute sans vente. Effet au prochain redemarrage de chaque bot.
+
+**Mesure** (`scripts/bench_exit_rules.py`, commis pour reproductibilite) : strategie du bot (trend_regime EMA 500 1h, entree +3 %) rejouee avec le moteur reel, sorties verifiees sur bougies 5 min comme en paper, frais 0,1 %, strategie rechauffee avant chaque fenetre ; une fenetre par annee 2023, 2024, 2025, 2026 (partielle, jusqu'au 15/09). Taille de position 99 % (10 % en config) : le classement n'en depend pas, les montants si.
+
+| Regle de sortie | 2023 | 2024 | 2025 | 2026* | trades/an |
+|---|---|---|---|---|---|
+| config actuelle : SL 2 %, trailing 1 % | -82,8 % | -29,8 % | -63,1 % | -58,3 % | 300-600 |
+| SL 2 %, sans trailing | +39,7 % | +77,7 % | +39,1 % | +13,1 % | 17-23 |
+| SL 2 %, trailing 3 % | -0,4 % | +35,2 % | +22,5 % | +1,4 % | 64-119 |
+| SL 2 %, trailing 1 % + verrou 1 %/0,2 % | -82,0 % | -29,9 % | -63,7 % | -59,1 % | 300-600 |
+| SL 2 %, verrou 2 %/0,5 % seul | +24,8 % | +78,5 % | +45,3 % | +8,5 % | 29-37 |
+| strategie seule (aucune sortie de risque) | +41,1 % | +72,2 % | +30,1 % | +9,8 % | 13-18 |
+| buy & hold ETH | +90,8 % | +46,3 % | -11,0 % | -8,8 % | - |
+
+**Constat** : le probleme n'est pas que le trailing soit sous le prix d'achat, c'est sa largeur combinee a la strategie. `trend_regime` renvoie un signal d'ACHAT a chaque bougie tant que le cours reste 3 % au-dessus de sa moyenne : apres chaque sortie par trailing, le bot rachete l'heure suivante. Avec 1 %, un simple repli ordinaire de l'ETH declenche la sortie : 300 a 600 allers-retours par an, frais de 60 a 118 % du capital par an, perte sur les 4 annees. Ajouter le verrou de gain par-dessus ne change rien (le trailing se declenche avant). Les regles larges ou absentes gagnent sur les 4 annees par rapport a la config actuelle ; aucune ne bat le buy & hold en 2023-2024 (annees de forte hausse), toutes reduisent la baisse maximale en 2025-2026. Limites : passe != futur, glissement de prix non simule, cloture 5 min et non tick.
+
+**Decision laissee a l'utilisateur** : `config/ETH_youenn.yml` est sa configuration, non modifiee. Les chiffres lui sont rapportes. Idee proposee, non implementee : un delai de reentree apres une sortie de risque, pour casser l'aller-retour vente/rachat quel que soit le reglage.
 
 ---
 
