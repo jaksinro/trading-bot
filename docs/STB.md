@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.85 |
-| **Date** | 2026-09-26 |
+| **Version** | 0.86 |
+| **Date** | 2026-09-27 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
 | **Étape du cycle en V** | Expression du besoin |
@@ -99,6 +99,7 @@
 | 0.83 | EF-91 : relance automatique apres redemarrage fiabilisee (verrous perimes a PID reattribue) |
 | 0.84 | EF-92 : plus haut du trailing stop conserve au redemarrage ; mesure des regles de sortie |
 | 0.85 | EF-93 : trailing stop en part du gain rendue, avec seuil d'armement |
+| 0.86 | EF-94 : limitation des tentatives de mot de passe du dashboard (blocage temporaire par adresse) |
 ---
 
 ## 1. Introduction
@@ -271,6 +272,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-91 | Les bots et le serveur doivent repartir seuls apres un redemarrage de la machine, meme quand les verrous de la session precedente sont restes en place - incident du 2026-09-27 | Doit - **realise**. Un verrou ecrit avant le dernier demarrage est perime quel que soit son PID ; arreter un bot ne tue jamais le PID d'un verrou perime. Voir STC §3.77 |
 | EF-92 | Le trailing stop doit reprendre au redemarrage du bot avec le plus haut reellement observe ; et l'utilisateur doit pouvoir juger ses regles de sortie sur des chiffres - question du 2026-09-27 | Doit - **realise** (plus haut enregistre a chaque verification 5 min) ; mesure fournie (`scripts/bench_exit_rules.py`), reglage laisse a l'utilisateur. Voir STC §3.78 |
 | EF-93 | Le trailing stop doit pouvoir se regler en part du gain rendue (achat 2000, plus haut 2100, 50 % -> vente a 2050) - definition de l'utilisateur du 2026-09-27 | Doit - **realise**. Mode "gain" a cote du mode historique "distance" (par defaut), avec seuil d'armement ; reglable dans le formulaire du dashboard. Voir STC §3.79 |
+| EF-94 | L'acces reseau au dashboard doit resister aux essais de mot de passe en serie - point reste ouvert apres EF-86 (revue du 2026-09-20) | Devrait - **realise**. 10 identifiants faux en 15 min depuis une adresse = cette adresse bloquee 15 min (reponse 429, meme avec le bon mot de passe) ; une requete sans identifiants ne compte pas ; la machine du serveur n'est jamais bloquee. Voir STC §3.80 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

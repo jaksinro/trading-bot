@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.88 |
-| **Date** | 2026-09-26 |
+| **Version** | 0.89 |
+| **Date** | 2026-09-27 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -102,6 +102,7 @@
 | 0.86 | EF-91 (§3.77) : **verrou perime apres redemarrage** - PID reattribue a un svchost, serveur refusant de demarrer, relance automatique en echec ; `lock_owner` ecarte tout verrou anterieur au demarrage de la machine, et l'arret d'un bot ne tue plus jamais le PID d'un verrou perime |
 | 0.87 | EF-92 (§3.78) : plus haut du trailing stop enregistre a chaque verification 5 min (perdu au redemarrage sinon) ; mesure sur 4 ans des regles de sortie d'ETH_youenn - le trailing 1 % provoque 300 a 600 allers-retours par an (rachat a l'heure suivante) et perd sur les 4 annees ; decision laissee a l'utilisateur |
 | 0.88 | EF-93 (§3.79) : **trailing stop en part du gain** (definition de l'utilisateur : achat 2000, plus haut 2100, 50 % -> vente 2050), avec seuil d'armement ; meme seuil pour la vente et le graphique ; formulaire du dashboard qui ne perd plus le mode ; mesure 2025-2026 : efficace arme a 2 % ou plus, perdant arme a 0,2 % |
+| 0.89 | EF-94 (§3.80) : **limitation des tentatives de mot de passe** du dashboard - `LoginThrottle` par adresse (10 echecs / 15 min -> 429 + `Retry-After` pendant 15 min, meme avec le bon mot de passe) ; requete sans identifiants non comptee ; loopback jamais bloque ; memoire bornee |
 
 ---
 
@@ -1661,7 +1662,7 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 - Scripts de demarrage (`autostart_bots.sh`/`.ps1`) : detectent `DASHBOARD_TLS_CERT` dans `.env` et appellent alors `https://127.0.0.1:8765` avec `curl -k` (boucle locale vers notre propre certificat, personne a authentifier). `install_pi.sh` affiche l'adresse avec le bon schema et conseille HTTPS s'il est absent.
 - La page n'a rien a changer : depuis EF-82 elle derive l'adresse du serveur de `window.location.origin`, schema compris.
 
-**Limites** : certificat auto-signe -> avertissement du navigateur a la premiere visite sur chaque appareil (a accepter) ; si l'IP du Pi change, regenerer le certificat. HTTPS ne rend pas le dashboard apte a une exposition Internet (pas de limitation des tentatives de mot de passe) - le conseil "pas de redirection de port" demeure.
+**Limites** : certificat auto-signe -> avertissement du navigateur a la premiere visite sur chaque appareil (a accepter) ; si l'IP du Pi change, regenerer le certificat. HTTPS ne rend pas le dashboard apte a une exposition Internet (pas de limitation des tentatives de mot de passe) - le conseil "pas de redirection de port" demeure. *(Limitation des tentatives ajoutee par EF-94, §3.80 ; le conseil demeure.)*
 
 **Validation** : 8 tests dans `tests/test_control_server.py` sur un vrai serveur TLS avec certificat genere a la volee (`cryptography`, deja tiree par ccxt) : absence de variables = HTTP ; configuration a moitie remplie refusee (x2) ; fichier absent = erreur claire ; mot de passe toujours exige en HTTPS (401 puis 200) ; un client HTTP en clair ne casse pas le serveur ; un client muet n'en bloque pas d'autres. Verifie en plus de bout en bout avec un certificat produit par le script (openssl) : 200 en `https://localhost`. Scripts shell verifies par `bash -n`, script PowerShell par son analyseur syntaxique.
 
@@ -1841,6 +1842,24 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 **Constat** : arme trop tot (0,2 %), le mode "gain" reproduit l'aller-retour vente/rachat du trailing 1 % (la strategie rachete a l'heure suivante) : des centaines de trades, pertes. Arme a 2 % ou plus, il rejoint le groupe des regles qui gagnent sur 3 semestres sur 4 ; "50 %, arme 2 %" a la plus faible perte du S1 2026 (-11,2 %) et les baisses maximales les plus basses, mais les ecarts entre regles armees restent de quelques points sur quelques dizaines de trades : non significatifs. Reglage laisse a l'utilisateur ; `config/ETH_youenn.yml` non modifie.
 
 **Validation** : `tests/test_trailing_gain_mode.py`, 9 tests (exemple de l'utilisateur : vente a 2050 et pas a 2051 ; seuil qui suit le plus haut ; pas arme juste apres l'achat ; armement par defaut = frais ; armement explicite ; mode "distance" inchange et par defaut ; mode inconnu refuse ; ligne du graphique = seuil de vente ; formulaire du dashboard conservant le mode). Suite complete : **917 tests**.
+
+---
+
+### 3.80 EF-94 : limitation des tentatives de mot de passe du dashboard
+
+**Origine** : limite restee ouverte apres EF-86 (§3.72) - aucune limite au nombre d'essais de mot de passe HTTP Basic. Un appareil du reseau pouvait en essayer des milliers par minute ; depuis EF-87 le serveur recoit aussi des webhooks venus d'Internet, ce qui rend plausible une exposition du port.
+
+**Conception** (`control_server.LoginThrottle`, instance unique `_login_throttle`, verrou car partage par les threads du serveur) :
+- Compteur d'echecs **par adresse IP**, fenetre glissante `LOGIN_FAILURE_WINDOW_S` (15 min). Au `LOGIN_MAX_FAILURES`-ieme echec (10), l'adresse est bloquee `LOGIN_LOCKOUT_S` (15 min) : reponse **429** + `Retry-After`, message en clair ("acces bloque pendant encore N min").
+- Pendant le blocage, **meme le bon mot de passe est refuse** - sinon le blocage ne ralentirait pas un essai systematique (il suffirait de continuer a essayer).
+- **Seul un en-tete `Authorization` present et faux compte comme echec** (y compris un en-tete malforme ou non Basic). Une requete sans identifiants - la premiere requete de tout navigateur, avant qu'il n'affiche la fenetre de mot de passe - n'est pas comptee. Un succes remet le compteur de l'adresse a zero.
+- Les connexions locales (loopback) sont exemptees en amont (§3.65) : on peut toujours reprendre la main depuis la machine du serveur, et le script de demarrage automatique n'est jamais bloque.
+- Memoire bornee (`LOGIN_MAX_TRACKED_ADDRESSES` = 1000 adresses par table, les plus anciennes oubliees). Etat en memoire seulement : relancer le serveur leve les blocages (voulu - c'est le moyen de se debloquer depuis un autre appareil).
+- Le webhook TradingView (`/api/tv-webhook`, §3.73) passe avant `_authorized` et n'est **pas** concerne : il porte son propre secret.
+
+**Limites** : une adresse bloquee peut etre celle d'un appareil legitime partage (NAT) - sans importance sur un reseau domestique. Ne remplace pas le conseil "pas de redirection de port".
+
+**Validation** : 9 tests dans `tests/test_control_server.py` - 5 sur un vrai serveur HTTP (blocage apres 10 faux, 429 meme avec le bon mot de passe, `Retry-After` ; requetes sans identifiants non comptees ; en-tete malforme compte ; POST bloque aussi ; client local jamais bloque) et 4 sur `LoginThrottle` avec horloge simulee (levee du blocage a l'echeance, blocage propre a une adresse ; echecs hors fenetre oublies ; succes remet a zero ; memoire bornee). Suite complete : **926 tests**.
 
 ---
 

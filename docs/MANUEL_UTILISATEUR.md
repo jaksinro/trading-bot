@@ -642,6 +642,14 @@ navigateur demande l'identifiant — `trader` par défaut — une seule fois.
 
 Sur la machine du serveur elle-même, rien ne change : pas de mot de passe.
 
+**Trop de mots de passe faux = blocage de 15 minutes.** Après 10 essais
+ratés en un quart d'heure depuis un même appareil, cet appareil reçoit
+« Trop de mots de passe faux… accès bloqué pendant encore N min », même
+s'il donne ensuite le bon mot de passe. C'est ce qui empêche un appareil
+malveillant d'essayer des milliers de mots de passe. Pour te débloquer tout
+de suite : attends le délai, ou relance le serveur. La machine du serveur
+elle-même n'est jamais bloquée.
+
 **Chiffrer la connexion (HTTPS, recommandé).** Sans cela, le mot de passe et
 tes ordres voyagent en clair sur le Wi-Fi de la maison : un appareil
 indiscret sur le même réseau pourrait les lire. Pour chiffrer, lance une
@@ -804,3 +812,4 @@ même paire.
 | 2026-09-26 | **L'Espace Trading devient indépendant des bots**, à la demande de l'utilisateur. Il pilote désormais ton panier Manuel, paire par paire : ordre immédiat, ordres posés à la souris, stop-loss, objectif et trailing stop surveillés par le serveur toutes les 20 secondes. Le lien passe de l'onglet Bot à l'onglet Manuel. Voir §12 |
 | 2026-09-26 | **Espace Trading : le graphique se recentre quand tu changes de paire** (passer du Bitcoin à l'Ethereum gardait l'échelle du Bitcoin si tu l'avais déplacée à la souris). Le nombre de décimales s'adapte aussi au prix (DOGE à 5 décimales) |
 | 2026-09-27 | **Trailing stop « % du gain rendu »** : dans le formulaire d'un bot, deux nouveaux champs. « Sens du trailing stop » permet de choisir entre l'ancien fonctionnement (X % sous le plus haut) et la part du gain rendue (achat 2000, plus haut 2100, 50 % : vente à 2050). « Armement » fixe le gain à atteindre avant que ce trailing s'active. Enregistrer un bot depuis le formulaire conserve désormais ce réglage. Voir §5.2 |
+| 2026-09-27 | **Protection contre les essais de mot de passe en série** pour l'accès au dashboard depuis un autre appareil : après 10 mots de passe faux en 15 minutes, l'appareil est bloqué 15 minutes. Ouvrir la page sans avoir encore tapé le mot de passe ne compte pas comme un échec, et la machine du serveur n'est jamais bloquée. Voir §9 |
