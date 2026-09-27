@@ -1798,6 +1798,20 @@ Details qui evitent des erreurs reelles :
 
 **Constat** : le probleme n'est pas que le trailing soit sous le prix d'achat, c'est sa largeur combinee a la strategie. `trend_regime` renvoie un signal d'ACHAT a chaque bougie tant que le cours reste 3 % au-dessus de sa moyenne : apres chaque sortie par trailing, le bot rachete l'heure suivante. Avec 1 %, un simple repli ordinaire de l'ETH declenche la sortie : 300 a 600 allers-retours par an, frais de 60 a 118 % du capital par an, perte sur les 4 annees. Ajouter le verrou de gain par-dessus ne change rien (le trailing se declenche avant). Les regles larges ou absentes gagnent sur les 4 annees par rapport a la config actuelle ; aucune ne bat le buy & hold en 2023-2024 (annees de forte hausse), toutes reduisent la baisse maximale en 2025-2026. Limites : passe != futur, glissement de prix non simule, cloture 5 min et non tick.
 
+**Mesure refaite sur 2025-2026 seulement** (demande de l'utilisateur : ne pas utiliser 2023-2024 ; banc passe en fenetres semestrielles, trailings 5/10/15 % ajoutes) :
+
+| Regle de sortie | S1 2025 | S2 2025 | S1 2026 | S2 2026* | trades/semestre |
+|---|---|---|---|---|---|
+| config actuelle : SL 2 %, trailing 1 % | -17,1 % | -49,6 % | -37,7 % | -23,4 % | 137-320 |
+| SL 2 %, sans trailing | +16,5 % | +25,7 % | -21,9 % | +35,6 % | 3-14 |
+| SL 2 %, trailing 5 % | +13,3 % | +27,6 % | -19,6 % | +25,5 % | 15-30 |
+| SL 2 %, trailing 10 % | +14,7 % | +27,4 % | -19,6 % | +35,6 % | 3-17 |
+| SL 2 %, verrou 2 %/0,5 % seul | +19,0 % | +29,4 % | -16,6 % | +31,3 % | 5-20 |
+| strategie seule | +5,7 % | +29,1 % | -24,5 % | +34,9 % | 3-10 |
+| buy & hold ETH | -25,5 % | +19,6 % | -47,1 % | +72,5 % | - |
+
+Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles larges ou absentes font mieux que lui sur les 4. Entre ces dernieres, les ecarts (quelques points) reposent sur une quarantaine de trades en 20 mois : non significatifs, aucune ne se detache. Toutes perdent au S1 2026 (moins que le buy & hold). Un trailing de 15 % ne se declenche jamais (identique a "sans trailing").
+
 **Decision laissee a l'utilisateur** : `config/ETH_youenn.yml` est sa configuration, non modifiee. Les chiffres lui sont rapportes. Idee proposee, non implementee : un delai de reentree apres une sortie de risque, pour casser l'aller-retour vente/rachat quel que soit le reglage.
 
 ---

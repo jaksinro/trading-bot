@@ -13,8 +13,9 @@ Reproduit ce que fait le bot en paper :
 
 Mise en garde : taille de position a 99 % du capital (au lieu de 10 % en
 config) pour que les rendements se lisent comme ceux d'une position ; le
-CLASSEMENT des regles n'en depend pas, les montants si. Une fenetre par annee :
-une regle qui ne gagne que sur une annee n'est pas une regle robuste.
+CLASSEMENT des regles n'en depend pas, les montants si. Une fenetre par semestre de 2025-2026
+(2023-2024 exclus a la demande de l'utilisateur, 2026-09-27) : une regle qui ne
+gagne que sur une fenetre n'est pas une regle robuste.
 
 Usage : python scripts/bench_exit_rules.py
 """
@@ -36,11 +37,13 @@ from tradingbot.strategies.trend_regime import TrendRegimeStrategy  # noqa: E402
 
 CAPITAL = 1000.0
 WARMUP = 600  # bougies 1h fournies a la strategie avant chaque fenetre (EMA 500)
+# 2023-2024 exclus a la demande de l'utilisateur (2026-09-27) : 2025-2026 seulement,
+# decoupes en semestres pour garder plusieurs fenetres.
 WINDOWS = [
-    ("2023", "2023-01-01", "2024-01-01"),
-    ("2024", "2024-01-01", "2025-01-01"),
-    ("2025", "2025-01-01", "2026-01-01"),
-    ("2026*", "2026-01-01", "2027-01-01"),
+    ("S1 2025", "2025-01-01", "2025-07-01"),
+    ("S2 2025", "2025-07-01", "2026-01-01"),
+    ("S1 2026", "2026-01-01", "2026-07-01"),
+    ("S2 2026*", "2026-07-01", "2027-01-01"),
 ]
 
 # (libelle, stop_loss, trailing, verrou arme, verrou declenche)
@@ -49,6 +52,9 @@ VARIANTS = [
     ("SL 2 %, sans trailing", 0.02, None, None, None),
     ("SL 2 %, trailing 2 %", 0.02, 0.02, None, None),
     ("SL 2 %, trailing 3 %", 0.02, 0.03, None, None),
+    ("SL 2 %, trailing 5 %", 0.02, 0.05, None, None),
+    ("SL 2 %, trailing 10 %", 0.02, 0.10, None, None),
+    ("SL 2 %, trailing 15 %", 0.02, 0.15, None, None),
     ("SL 2 %, trailing 1 % + verrou 1 %/0,2 %", 0.02, 0.01, 0.01, 0.002),
     ("SL 2 %, trailing 2 % + verrou 1 %/0,2 %", 0.02, 0.02, 0.01, 0.002),
     ("SL 2 %, verrou 1 %/0,2 % seul", 0.02, None, 0.01, 0.002),
@@ -103,19 +109,19 @@ def pct(x: float) -> str:
 
 
 def main() -> None:
-    h1 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="1h", since_iso="2022-11-01T00:00:00Z")
-    m5 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="5m", since_iso="2023-01-01T00:00:00Z")
+    h1 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="1h", since_iso="2024-11-01T00:00:00Z")
+    m5 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="5m", since_iso="2025-01-01T00:00:00Z")
     end_5m = datetime.fromtimestamp(m5[-1].timestamp / 1000, timezone.utc).date()
     print(f"ETH/USDT - 1h : {len(h1)} bougies, 5m : {len(m5)} bougies (jusqu'au {end_5m})")
-    print("* 2026 : fenetre partielle, jusqu'a la fin de l'historique 5m\n")
+    print("* S2 2026 : fenetre partielle, jusqu'a la fin de l'historique 5m\n")
 
     results = {}
     for label, sl, trail, arm, trig in VARIANTS:
         results[label] = [run(h1, m5, ms(a), ms(b), sl, trail, arm, trig) for _, a, b in WINDOWS]
 
     bh = [r["bh"] for r in results[VARIANTS[0][0]]]
-    head = f"{'regle de sortie':<44}" + "".join(f"{w:>9}" for w, _, _ in WINDOWS) + f"{'annees gagnees*':>17}"
-    print("=== Rendement par annee (buy & hold ETH en derniere ligne) ===")
+    head = f"{'regle de sortie':<44}" + "".join(f"{w:>9}" for w, _, _ in WINDOWS) + f"{'fenetres gagnees*':>17}"
+    print("=== Rendement par semestre (buy & hold ETH en derniere ligne) ===")
     print(head)
     print("-" * len(head))
     reference = results[VARIANTS[0][0]]
@@ -125,7 +131,7 @@ def main() -> None:
         tail = "reference" if label == VARIANTS[0][0] else f"{better}/{len(rows)}"
         print(f"{label:<44}" + "".join(f"{pct(r['ret']):>9}" for r in rows) + f"{tail:>17}")
     print(f"{'buy & hold ETH':<44}" + "".join(f"{pct(x):>9}" for x in bh))
-    print("* annees ou la regle fait mieux que la config actuelle\n")
+    print("* fenetres ou la regle fait mieux que la config actuelle\n")
 
     print("=== Detail : trades / % gagnants / frais payes (en % du capital) / baisse max ===")
     for label, *_ in VARIANTS:
