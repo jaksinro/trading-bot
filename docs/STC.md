@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.89 |
+| **Version** | 0.90 |
 | **Date** | 2026-09-27 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -103,6 +103,7 @@
 | 0.87 | EF-92 (§3.78) : plus haut du trailing stop enregistre a chaque verification 5 min (perdu au redemarrage sinon) ; mesure sur 4 ans des regles de sortie d'ETH_youenn - le trailing 1 % provoque 300 a 600 allers-retours par an (rachat a l'heure suivante) et perd sur les 4 annees ; decision laissee a l'utilisateur |
 | 0.88 | EF-93 (§3.79) : **trailing stop en part du gain** (definition de l'utilisateur : achat 2000, plus haut 2100, 50 % -> vente 2050), avec seuil d'armement ; meme seuil pour la vente et le graphique ; formulaire du dashboard qui ne perd plus le mode ; mesure 2025-2026 : efficace arme a 2 % ou plus, perdant arme a 0,2 % |
 | 0.89 | EF-94 (§3.80) : **limitation des tentatives de mot de passe** du dashboard - `LoginThrottle` par adresse (10 echecs / 15 min -> 429 + `Retry-After` pendant 15 min, meme avec le bon mot de passe) ; requete sans identifiants non comptee ; loopback jamais bloque ; memoire bornee |
+| 0.90 | §3.81 : mesure des indicateurs TradingView ADX (filtre d'entree) et Chandelier Exit (trailing) sur ETH_youenn, 2025-2026 : aucun n'ameliore la config actuelle de facon robuste, non retenus |
 
 ---
 
@@ -1860,6 +1861,24 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 **Limites** : une adresse bloquee peut etre celle d'un appareil legitime partage (NAT) - sans importance sur un reseau domestique. Ne remplace pas le conseil "pas de redirection de port".
 
 **Validation** : 9 tests dans `tests/test_control_server.py` - 5 sur un vrai serveur HTTP (blocage apres 10 faux, 429 meme avec le bon mot de passe, `Retry-After` ; requetes sans identifiants non comptees ; en-tete malforme compte ; POST bloque aussi ; client local jamais bloque) et 4 sur `LoginThrottle` avec horloge simulee (levee du blocage a l'echeance, blocage propre a une adresse ; echecs hors fenetre oublies ; succes remet a zero ; memoire bornee). Suite complete : **926 tests**.
+
+---
+
+### 3.81 Mesure : indicateurs TradingView ADX et Chandelier Exit sur ETH_youenn (non retenus)
+
+**Question de l'utilisateur** : "y a t'il des indicateurs interessants qu'on peut reprendre de TradingView ?". Deux candidats retenus pour les points faibles mesures du bot (EF-92/93) : **ADX** (force de tendance, Wilder 14) en filtre d'entree contre les faux departs, **Chandelier Exit** (plus haut - k x ATR 22) en remplacement du trailing. `scripts/bench_indicators.py` : moteur reel, sorties en 5 min, frais 0,1 %, 2025-2026 par semestre (consigne de l'utilisateur) ; indicateurs definis dans le banc seulement, aucun code de production modifie. Controle prealable : ADX median 24,9 (6 a 83), ATR 1h median 0,81 % du cours.
+
+| Regle (reference : SL 2 %, trailing 50 % du gain arme a 2 %) | S1 2025 | S2 2025 | S1 2026 | S2 2026* |
+|---|---|---|---|---|
+| config actuelle | +14,7 % | +26,3 % | -11,2 % | +25,6 % |
+| + ADX > 20 | +14,2 % | +21,7 % | -16,6 % | +20,5 % |
+| + ADX > 25 | +22,9 % | +27,2 % | -12,6 % | +25,7 % |
+| + ADX > 30 | +27,2 % | +25,7 % | -8,5 % | +25,3 % |
+| Chandelier 3 x ATR | +12,2 % | +23,6 % | -16,0 % | +21,5 % |
+| Chandelier 6 x ATR | +16,6 % | +32,6 % | -21,8 % | +24,7 % |
+| Chandelier 10 x ATR | +17,3 % | +27,4 % | -23,3 % | +30,1 % |
+
+**Constat** : aucun des deux n'ameliore la config actuelle de facon robuste. ADX : > 20 degrade les 4 semestres, > 25 et > 30 gagnent surtout au S1 2025 et sont a +/- 3 points ailleurs ; un effet non monotone du seuil (20 pire, 25 mieux, 30 mitige) sur 20 a 40 trades par semestre est la signature du bruit, pas d'un avantage. Il reduit bien le nombre de stop-loss (14 -> 8 au S1 2025 a 25), sans gain net stable. Chandelier : serre (2-4 x ATR) il fait pire partout ; large (6-10 x ATR) il gagne certains semestres mais aggrave le S1 2026 (-22/-23 % contre -11 %). Non retenus. Piste pour conclure sur l'ADX : le mesurer sur BTC et DOGE pour multiplier les fenetres.
 
 ---
 
