@@ -1878,7 +1878,9 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 | Chandelier 6 x ATR | +16,6 % | +32,6 % | -21,8 % | +24,7 % |
 | Chandelier 10 x ATR | +17,3 % | +27,4 % | -23,3 % | +30,1 % |
 
-**Constat** : aucun des deux n'ameliore la config actuelle de facon robuste. ADX : > 20 degrade les 4 semestres, > 25 et > 30 gagnent surtout au S1 2025 et sont a +/- 3 points ailleurs ; un effet non monotone du seuil (20 pire, 25 mieux, 30 mitige) sur 20 a 40 trades par semestre est la signature du bruit, pas d'un avantage. Il reduit bien le nombre de stop-loss (14 -> 8 au S1 2025 a 25), sans gain net stable. Chandelier : serre (2-4 x ATR) il fait pire partout ; large (6-10 x ATR) il gagne certains semestres mais aggrave le S1 2026 (-22/-23 % contre -11 %). Non retenus. Piste pour conclure sur l'ADX : le mesurer sur BTC et DOGE pour multiplier les fenetres.
+**Constat** : aucun des deux n'ameliore la config actuelle de facon robuste. ADX : > 20 degrade les 4 semestres, > 25 et > 30 gagnent surtout au S1 2025 et sont a +/- 3 points ailleurs ; un effet non monotone du seuil (20 pire, 25 mieux, 30 mitige) sur 20 a 40 trades par semestre est la signature du bruit, pas d'un avantage. Il reduit bien le nombre de stop-loss (14 -> 8 au S1 2025 a 25), sans gain net stable. Chandelier : serre (2-4 x ATR) il fait pire partout ; large (6-10 x ATR) il gagne certains semestres mais aggrave le S1 2026 (-22/-23 % contre -11 %). Non retenus.
+
+**ADX elargi aux autres bots** (`python scripts/bench_indicators.py --autres`, demande de l'utilisateur) : BTC_TREND_REGIME (EMA 1000), DOGE_TREND_REGIME (EMA 2000) et ETH_TREND_REGIME (EMA 500) tels que deployes (sans stop-loss ni trailing), 2025-2026 par semestre. Fenetres ou le filtre fait mieux que sans filtre : ADX > 20 : 2/12, > 25 : 5/12, > 30 : 5/12. Avec les 4 semestres d'ETH_youenn : **> 20 : 2/16, > 25 : 8/16, > 30 : 7/16** - une piece de monnaie. Sur BTC et DOGE (1 a 10 trades par semestre), le filtre ne change souvent rien ; quand il change, c'est dans un sens ou dans l'autre. **Conclusion : pas d'avantage de l'ADX sur ces bots, filtre non retenu.**
 
 ---
 

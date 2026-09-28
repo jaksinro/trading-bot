@@ -16,7 +16,10 @@ l'utilisateur). Reference = la config actuelle d'ETH_youenn (stop-loss 2 %,
 trailing "50 % du gain rendu, arme a 2 %"). Rien ici ne modifie les bots :
 les indicateurs n'existent que dans ce banc tant qu'ils ne sont pas retenus.
 
-Usage : python scripts/bench_indicators.py
+Usage : python scripts/bench_indicators.py            (ETH_youenn, ADX et Chandelier)
+        python scripts/bench_indicators.py --autres   (filtre ADX sur BTC, DOGE et
+        ETH_TREND_REGIME tels que deployes : sans stop-loss ni trailing, seule la
+        strategie vend - 12 fenetres de plus pour juger l'ADX)
 """
 from __future__ import annotations
 
@@ -169,6 +172,61 @@ def run(h1, m5, start, end, adx_min, chandelier_k):
     }
 
 
+# Bots trend_regime deployes sans sortie de risque (config/*_TREND_REGIME.yml).
+OTHER_BOTS = [("BTC_TREND_REGIME", "BTC/USDT", 1000), ("DOGE_TREND_REGIME", "DOGE/USDT", 2000),
+              ("ETH_TREND_REGIME", "ETH/USDT", 500)]
+ADX_LEVELS = [None, 20, 25, 30]
+
+
+def run_strategy_only(h1, start, end, ema, adx_min):
+    """Comme le bot deploye : pas de stop-loss ni de trailing, seule la strategie
+    vend ; donc pas besoin des bougies 5 min. Rechauffe = `ema` + 100 bougies."""
+    warm = [c for c in h1 if c.timestamp < start][-(ema + 100):]
+    entry = [c for c in h1 if start <= c.timestamp < end]
+    ind = Indicators()
+    strategy = FilteredStrategy(TrendRegimeStrategy(ema_period=ema, entry_buffer_pct=0.03, exit_buffer_pct=0.0), ind, adx_min)
+    for c in warm:
+        strategy.on_candle(c)
+    config = RiskConfig(max_position_size_pct=0.99, stop_loss_pct=None, take_profit_pct=None,
+                        max_daily_loss_pct=1.0, max_concurrent_positions=1, fee_pct=0.001)
+    portfolio = Portfolio(starting_capital=1000.0, fee_pct=0.001)
+    engine = Engine(strategy, RiskManager(config), BacktestExecutor(portfolio), portfolio)
+    equity_peak, max_dd = 1000.0, 0.0
+    for c in entry:
+        engine.process_candle(c)
+        equity = portfolio.equity(c.close)
+        equity_peak = max(equity_peak, equity)
+        max_dd = max(max_dd, 1 - equity / equity_peak)
+    trades = portfolio.trade_history
+    return {"ret": portfolio.equity(entry[-1].close) / 1000.0 - 1, "bh": entry[-1].close / entry[0].open - 1,
+            "trades": len(trades), "win": sum(x["pnl"] > 0 for x in trades) / len(trades) if trades else 0.0,
+            "dd": max_dd}
+
+
+def main_others() -> None:
+    wins = {level: 0 for level in ADX_LEVELS[1:]}
+    total = 0
+    for name, symbol, ema in OTHER_BOTS:
+        # Donnees d'avant 2025 : seulement pour rechauffer l'EMA (jusqu'a 2100 bougies).
+        h1 = fetch_historical_candles(exchange_id="binance", symbol=symbol, timeframe="1h", since_iso="2024-08-01T00:00:00Z")
+        res = {lvl: [run_strategy_only(h1, ms(a), ms(b), ema, lvl) for _, a, b in WINDOWS] for lvl in ADX_LEVELS}
+        print(f"=== {name} (EMA {ema}, sans stop-loss ni trailing) ===")
+        print(f"{'regle':<28}" + "".join(f"{w:>10}" for w, _, _ in WINDOWS) + "   trades/semestre")
+        for lvl in ADX_LEVELS:
+            label = "tel que deploye" if lvl is None else f"+ filtre ADX > {lvl}"
+            rows = res[lvl]
+            print(f"{label:<28}" + "".join(f"{pct(r['ret']):>10}" for r in rows)
+                  + "   " + " ".join(f"{r['trades']:>3}" for r in rows))
+            if lvl is not None:
+                wins[lvl] += sum(r["ret"] > b["ret"] + 1e-9 for r, b in zip(rows, res[None]))
+        print(f"{'buy & hold':<28}" + "".join(f"{pct(r['bh']):>10}" for r in res[None]))
+        print()
+        total += len(WINDOWS)
+    print("=== Bilan : fenetres ou le filtre ADX fait mieux que sans filtre ===")
+    for lvl, n in wins.items():
+        print(f"ADX > {lvl} : {n}/{total}")
+
+
 def main() -> None:
     h1 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="1h", since_iso="2024-11-01T00:00:00Z")
     m5 = fetch_historical_candles(exchange_id="binance", symbol="ETH/USDT", timeframe="5m", since_iso="2025-01-01T00:00:00Z")
@@ -191,4 +249,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main_others() if "--autres" in sys.argv else main()
