@@ -67,6 +67,17 @@ LOGIN_FAILURE_WINDOW_S = 15 * 60
 LOGIN_LOCKOUT_S = 15 * 60
 # Borne memoire : au-dela, les adresses les plus anciennes sont oubliees.
 LOGIN_MAX_TRACKED_ADDRESSES = 1000
+
+# EF-95 : le webhook TradingView (EF-87) a son propre secret, qui pouvait
+# etre essaye a l'infini. Memes seuils que le mot de passe du dashboard, mais
+# un compteur SEPARE : un secret de webhook faux ne bloque pas le dashboard,
+# et inversement. Derriere un tunnel (Cloudflare, ngrok - l'exposition
+# conseillee), toutes les requetes arrivent de 127.0.0.1 : l'adresse reelle
+# est alors lue dans X-Forwarded-For, en DERNIERE position - celle que le
+# tunnel ajoute ; les precedentes viennent de l'appelant, qui pourrait en
+# changer a chaque essai pour echapper au blocage. Cet en-tete n'est cru QUE
+# s'il arrive par la boucle locale (donc par le tunnel).
+TV_FORWARDED_IP_HEADER = "X-Forwarded-For"
 ROOT =Path(__file__).resolve().parents[2]
 CONTROL_SERVER_LOCK_PATH = ROOT / "control_server.lock"
 CONFIG_DIR = ROOT / "config"
@@ -1057,6 +1068,7 @@ class LoginThrottle:
 
 
 _login_throttle = LoginThrottle()
+_webhook_throttle = LoginThrottle()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1115,9 +1127,60 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write("Identifiants requis.".encode("utf-8"))
         return False
 
-    def _send_json(self, status: int, data: dict) -> None:
+    # ------------------------------------------------------------------
+    # Webhook TradingView (EF-87, protege par EF-95)
+    # ------------------------------------------------------------------
+
+    def _webhook_client_address(self) -> str | None:
+        """Adresse a qui imputer l'appel : celle de la connexion, ou, si elle
+        arrive par la boucle locale (tunnel), celle transmise par le tunnel.
+        None = appel local sans tunnel (test, script), jamais limite."""
+        if not self._client_is_loopback():
+            return self.client_address[0] if self.client_address else None
+        forwarded = (self.headers.get(TV_FORWARDED_IP_HEADER) or "").split(",")[-1].strip()
+        return forwarded or None
+
+    def _handle_tv_webhook(self) -> None:
+        from tradingbot.tv_alerts import MAX_BODY_BYTES
+
+        address = self._webhook_client_address()
+        if address:
+            retry_after = _webhook_throttle.retry_after(address)
+            if retry_after:
+                self.close_connection = True  # corps non lu : ne pas reutiliser la connexion
+                self._send_json(429, {"error": "trop de secrets invalides depuis cette adresse, reessayer plus tard"},
+                                {"Retry-After": str(retry_after)})
+                return
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            length = -1
+        if length < 0:
+            self.close_connection = True
+            self._send_json(400, {"error": "longueur de message invalide"})
+            return
+        if length > MAX_BODY_BYTES:
+            # Refuse AVANT de lire : un corps enorme ne doit pas occuper le serveur.
+            self.close_connection = True
+            self._send_json(413, {"error": f"message trop long (> {MAX_BODY_BYTES} octets)"})
+            return
+        token = (parse_qs(urlsplit(self.path).query).get("token") or [None])[0]
+        status, body = handle_tradingview_alert(
+            self.rfile.read(length), token,
+            address or (self.client_address[0] if self.client_address else None),
+        )
+        if address:
+            if status == 401:
+                _webhook_throttle.record_failure(address)
+            elif status == 200:
+                _webhook_throttle.record_success(address)
+        self._send_json(status, body)
+
+    def _send_json(self, status: int, data: dict, headers: dict | None = None) -> None:
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Length", str(len(body)))
@@ -1137,12 +1200,7 @@ class Handler(BaseHTTPRequestHandler):
         # `_authorized`, et elle porte sa propre authentification (secret
         # dans le corps ou dans l'adresse, voir tv_alerts.parse_alert).
         if urlsplit(self.path).path == "/api/tv-webhook":
-            length = min(int(self.headers.get("Content-Length", 0) or 0), 100_000)
-            token = (parse_qs(urlsplit(self.path).query).get("token") or [None])[0]
-            status, body = handle_tradingview_alert(
-                self.rfile.read(length), token, self.client_address[0] if self.client_address else None,
-            )
-            self._send_json(status, body)
+            self._handle_tv_webhook()
             return
         if not self._authorized():
             return
