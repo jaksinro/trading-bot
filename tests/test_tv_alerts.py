@@ -251,3 +251,131 @@ def test_the_webhook_exemption_does_not_open_the_other_routes(remote_server):
     assert status == 401
     status, _ = _post(remote_server + "/api/tv-webhook/../manual-order", body(symbol="ETH/USDT", side="buy"))
     assert status in (401, 404)
+
+
+# --- EF-95 : limitation des secrets faux sur le webhook ------------------------
+
+
+@pytest.fixture(autouse=True)
+def fresh_webhook_throttle():
+    """Le compteur de secrets faux est global au serveur : chaque test repart
+    d'un compteur vide (celui du dashboard aussi, pour l'isolation)."""
+    control_server._webhook_throttle.reset()
+    control_server._login_throttle.reset()
+    yield
+    control_server._webhook_throttle.reset()
+    control_server._login_throttle.reset()
+
+
+@pytest.fixture
+def tunnel_server(tmp_path, monkeypatch):
+    """Serveur vu comme derriere un tunnel : la connexion vient de 127.0.0.1."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(control_server.TV_SECRET_ENV, SECRET)
+    monkeypatch.setenv(control_server.TV_AUTO_ORDERS_ENV, "0")
+    monkeypatch.delenv(control_server.TV_ALLOWED_IPS_ENV, raising=False)
+    monkeypatch.setattr(control_server, "load_dotenv", lambda *a, **k: None)
+    server = ThreadingHTTPServer(("localhost", 0), control_server.Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://localhost:{server.server_address[1]}"
+    server.shutdown()
+
+
+def _post_full(url, data: bytes, headers: dict | None = None):
+    # 127.0.0.1 plutot que localhost : sous Windows, localhost essaie d'abord
+    # ::1 et perd ~2 s par connexion - ces tests en ouvrent une vingtaine.
+    request = urllib.request.Request(
+        url.replace("//localhost:", "//127.0.0.1:"), data=data, headers={"Content-Type": "application/json", **(headers or {})}, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as r:
+            return r.status, dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers)
+
+
+def _fail_webhook(url, times, headers=None):
+    for _ in range(times):
+        assert _post_full(url + "/api/tv-webhook", body(secret="faux"), headers)[0] == 401
+
+
+def test_repeated_wrong_secrets_block_the_address_even_with_the_right_one(remote_server):
+    _fail_webhook(remote_server, control_server.LOGIN_MAX_FAILURES)
+    status, headers = _post_full(remote_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"))
+    assert status == 429, "sinon le blocage ne ralentit pas un essai systematique"
+    assert int(headers["Retry-After"]) > 0
+
+
+def test_right_secret_before_the_threshold_passes_and_resets_the_count(remote_server):
+    _fail_webhook(remote_server, control_server.LOGIN_MAX_FAILURES - 1)
+    assert _post_full(remote_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"))[0] == 200
+    _fail_webhook(remote_server, control_server.LOGIN_MAX_FAILURES - 1)
+    assert _post_full(remote_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"))[0] == 200
+
+
+def test_webhook_and_dashboard_counters_are_separate(remote_server):
+    """Un secret de webhook mal recopie dans TradingView ne doit pas priver
+    l'utilisateur de son dashboard (et inversement)."""
+    _fail_webhook(remote_server, control_server.LOGIN_MAX_FAILURES)
+    assert control_server._webhook_throttle.retry_after("127.0.0.1") > 0
+    assert control_server._login_throttle.retry_after("127.0.0.1") == 0
+
+
+def test_local_call_without_tunnel_is_never_blocked(tunnel_server):
+    _fail_webhook(tunnel_server, control_server.LOGIN_MAX_FAILURES + 2)
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"))[0] == 200
+
+
+def test_behind_a_tunnel_the_forwarded_address_is_blocked(tunnel_server):
+    """Derriere un tunnel, tout arrive de 127.0.0.1 : sans l'adresse transmise
+    par le tunnel, la limitation ne s'appliquerait jamais."""
+    attacker = {"X-Forwarded-For": "203.0.113.7"}
+    _fail_webhook(tunnel_server, control_server.LOGIN_MAX_FAILURES, attacker)
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET), attacker)[0] == 429
+    other = {"X-Forwarded-For": "52.89.214.238"}
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"), other)[0] == 200
+
+
+def test_forged_forwarded_entries_do_not_escape_the_block(tunnel_server):
+    """L'appelant peut ecrire ce qu'il veut en tete de X-Forwarded-For ; seule
+    la derniere adresse, ajoutee par le tunnel, compte."""
+    for i in range(control_server.LOGIN_MAX_FAILURES):
+        headers = {"X-Forwarded-For": f"10.9.9.{i}, 203.0.113.7"}
+        assert _post_full(tunnel_server + "/api/tv-webhook", body(secret="faux"), headers)[0] == 401
+    headers = {"X-Forwarded-For": "10.9.9.99, 203.0.113.7"}
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET), headers)[0] == 429
+
+
+def test_ip_filter_uses_the_forwarded_address_behind_a_tunnel(tunnel_server, monkeypatch):
+    monkeypatch.setenv(control_server.TV_ALLOWED_IPS_ENV, "52.89.214.238")
+    ok = {"X-Forwarded-For": "52.89.214.238"}
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"), ok)[0] == 200
+    ko = {"X-Forwarded-For": "203.0.113.7"}
+    assert _post_full(tunnel_server + "/api/tv-webhook", body(secret=SECRET, ticker="ETHUSDT"), ko)[0] == 403
+
+
+def test_forwarded_header_is_ignored_from_a_remote_connection(remote_server):
+    """Hors tunnel, l'en-tete est fourni par l'appelant : on ne le croit pas."""
+    for i in range(control_server.LOGIN_MAX_FAILURES):
+        headers = {"X-Forwarded-For": f"10.9.9.{i}"}
+        assert _post_full(remote_server + "/api/tv-webhook", body(secret="faux"), headers)[0] == 401
+    assert _post_full(remote_server + "/api/tv-webhook", body(secret=SECRET))[0] == 429
+
+
+def test_oversized_body_is_refused_before_being_read(remote_server):
+    from tradingbot.tv_alerts import MAX_BODY_BYTES
+    big = body(secret=SECRET, ticker="ETHUSDT", message="x" * (MAX_BODY_BYTES + 1))
+    assert _post_full(remote_server + "/api/tv-webhook", big)[0] == 413
+    assert control_server._webhook_throttle.retry_after("127.0.0.1") == 0
+
+
+def test_invalid_content_length_is_refused(remote_server):
+    import http.client
+    from urllib.parse import urlsplit
+    parts = urlsplit(remote_server)
+    conn = http.client.HTTPConnection("127.0.0.1", parts.port, timeout=10)
+    conn.putrequest("POST", "/api/tv-webhook")
+    conn.putheader("Content-Length", "abc")
+    conn.endheaders()
+    assert conn.getresponse().status == 400
+    conn.close()
