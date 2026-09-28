@@ -685,6 +685,15 @@ ton app**. Les alertes reçues s'affichent dans cet onglet.
 **Le secret** est dans le fichier `.env` (`TRADINGVIEW_WEBHOOK_SECRET`). Sans
 lui, toute alerte est refusée. Il n'est jamais enregistré avec les alertes.
 
+**Protection contre les essais de secret** : si quelqu'un envoie 10 alertes
+avec un secret faux en 15 minutes, son adresse est bloquée 15 minutes pour
+les alertes (ton dashboard, lui, reste accessible). Cela marche aussi
+derrière un tunnel. Conséquence à connaître : si tu as mal recopié le
+secret dans TradingView, ses alertes sont refusées, puis bloquées un
+quart d'heure — corrige le secret et attends 15 minutes, ou relance le
+serveur pour lever le blocage tout de suite. Le bouton « Envoyer une alerte
+de test » n'est jamais bloqué.
+
 **Par défaut, une alerte ne passe aucun ordre** : elle est seulement notée.
 Si tu veux qu'une alerte « buy » ou « sell » passe un ordre, mets
 `TRADINGVIEW_AUTO_ORDERS=1` dans `.env`. L'ordre est alors passé **en argent
@@ -813,3 +822,4 @@ même paire.
 | 2026-09-26 | **Espace Trading : le graphique se recentre quand tu changes de paire** (passer du Bitcoin à l'Ethereum gardait l'échelle du Bitcoin si tu l'avais déplacée à la souris). Le nombre de décimales s'adapte aussi au prix (DOGE à 5 décimales) |
 | 2026-09-27 | **Trailing stop « % du gain rendu »** : dans le formulaire d'un bot, deux nouveaux champs. « Sens du trailing stop » permet de choisir entre l'ancien fonctionnement (X % sous le plus haut) et la part du gain rendue (achat 2000, plus haut 2100, 50 % : vente à 2050). « Armement » fixe le gain à atteindre avant que ce trailing s'active. Enregistrer un bot depuis le formulaire conserve désormais ce réglage. Voir §5.2 |
 | 2026-09-27 | **Protection contre les essais de mot de passe en série** pour l'accès au dashboard depuis un autre appareil : après 10 mots de passe faux en 15 minutes, l'appareil est bloqué 15 minutes. Ouvrir la page sans avoir encore tapé le mot de passe ne compte pas comme un échec, et la machine du serveur n'est jamais bloquée. Voir §9 |
+| 2026-09-28 | **Protection contre les essais de secret sur les alertes TradingView** : après 10 alertes au secret faux en 15 minutes, l'adresse d'où elles viennent est bloquée 15 minutes (pour les alertes seulement, pas pour le dashboard). Aucun changement visible dans le dashboard. Voir §11 |

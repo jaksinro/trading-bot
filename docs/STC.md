@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.90 |
-| **Date** | 2026-09-27 |
+| **Version** | 0.91 |
+| **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -104,6 +104,7 @@
 | 0.88 | EF-93 (§3.79) : **trailing stop en part du gain** (definition de l'utilisateur : achat 2000, plus haut 2100, 50 % -> vente 2050), avec seuil d'armement ; meme seuil pour la vente et le graphique ; formulaire du dashboard qui ne perd plus le mode ; mesure 2025-2026 : efficace arme a 2 % ou plus, perdant arme a 0,2 % |
 | 0.89 | EF-94 (§3.80) : **limitation des tentatives de mot de passe** du dashboard - `LoginThrottle` par adresse (10 echecs / 15 min -> 429 + `Retry-After` pendant 15 min, meme avec le bon mot de passe) ; requete sans identifiants non comptee ; loopback jamais bloque ; memoire bornee |
 | 0.90 | §3.81 : mesure des indicateurs TradingView ADX (filtre d'entree) et Chandelier Exit (trailing) sur ETH_youenn, 2025-2026 : aucun n'ameliore la config actuelle de facon robuste, non retenus |
+| 0.91 | EF-95 (§3.82) : **limitation des secrets faux sur le webhook TradingView** - second `LoginThrottle`, compteur separe du dashboard ; derriere un tunnel, adresse = derniere entree de `X-Forwarded-For` (crue seulement depuis la boucle locale), aussi utilisee par le filtre IP ; corps > 10 Ko refuse avant lecture |
 
 ---
 
@@ -1681,7 +1682,7 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 - **ferme par defaut** : sans `TRADINGVIEW_WEBHOOK_SECRET`, tout appel est refuse (403) ;
 - le secret voyage dans le CORPS JSON (champ `secret`) ou dans l'adresse (`?token=`, seule option pour un message en texte brut) - TradingView ne permettant aucun en-tete. Compare en temps constant, **jamais stocke**. TradingView deconseille de mettre des identifiants dans le corps ; il s'agit ici d'un secret dedie qui ne donne acces qu'a cette route ;
 - c'est la **seule route qui passe avant l'authentification HTTP Basic** du dashboard (TradingView ne peut pas l'envoyer) ; un test verifie que cette exception n'ouvre aucune autre route ;
-- corps limite a 10 Ko, filtre optionnel par adresse d'origine (`TRADINGVIEW_ALLOWED_IPS`, liste des IP TradingView ; inutile derriere un tunnel, qui masque l'origine) ;
+- corps limite a 10 Ko, filtre optionnel par adresse d'origine (`TRADINGVIEW_ALLOWED_IPS`, liste des IP TradingView ; derriere un tunnel, adresse lue dans `X-Forwarded-For` depuis EF-95, §3.82) ;
 - **ordres automatiques desactives par defaut** (`TRADINGVIEW_AUTO_ORDERS`). Actives, un `buy`/`sell` devient un ordre PAPER dans le panier manuel uniquement - jamais les bots ni le panier commun - plafonne par alerte (`TRADINGVIEW_MAX_ORDER_USDT`, 100 par defaut), et seulement pour un ticker reconnu (`BINANCE:ETHUSDT`, `ETHUSDT`, perpetuels ramenes au spot) : un ticker non reconnu n'est jamais "devine" ;
 - **l'ordre part en arriere-plan** apres la reponse : TradingView abandonne au-dela de 3 s et un ordre testnet (cours, solde, ordre) peut les depasser. La decision et son motif sont consignes AVANT l'execution, puis le resultat (execute / refuse / erreur) est rattache a l'alerte - une exception de thread n'est jamais perdue ;
 - l'onglet Manuel et les alertes passent par une meme fonction `execute_manual_order` (extraite du handler) : memes garde-fous (cash du panier, solde testnet reel, vente plafonnee).
@@ -1856,7 +1857,7 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 - **Seul un en-tete `Authorization` present et faux compte comme echec** (y compris un en-tete malforme ou non Basic). Une requete sans identifiants - la premiere requete de tout navigateur, avant qu'il n'affiche la fenetre de mot de passe - n'est pas comptee. Un succes remet le compteur de l'adresse a zero.
 - Les connexions locales (loopback) sont exemptees en amont (§3.65) : on peut toujours reprendre la main depuis la machine du serveur, et le script de demarrage automatique n'est jamais bloque.
 - Memoire bornee (`LOGIN_MAX_TRACKED_ADDRESSES` = 1000 adresses par table, les plus anciennes oubliees). Etat en memoire seulement : relancer le serveur leve les blocages (voulu - c'est le moyen de se debloquer depuis un autre appareil).
-- Le webhook TradingView (`/api/tv-webhook`, §3.73) passe avant `_authorized` et n'est **pas** concerne : il porte son propre secret.
+- Le webhook TradingView (`/api/tv-webhook`, §3.73) passe avant `_authorized` et n'est **pas** concerne : il porte son propre secret. *(Limite a son tour par EF-95, compteur separe, §3.82.)*
 
 **Limites** : une adresse bloquee peut etre celle d'un appareil legitime partage (NAT) - sans importance sur un reseau domestique. Ne remplace pas le conseil "pas de redirection de port".
 
@@ -1881,6 +1882,23 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 **Constat** : aucun des deux n'ameliore la config actuelle de facon robuste. ADX : > 20 degrade les 4 semestres, > 25 et > 30 gagnent surtout au S1 2025 et sont a +/- 3 points ailleurs ; un effet non monotone du seuil (20 pire, 25 mieux, 30 mitige) sur 20 a 40 trades par semestre est la signature du bruit, pas d'un avantage. Il reduit bien le nombre de stop-loss (14 -> 8 au S1 2025 a 25), sans gain net stable. Chandelier : serre (2-4 x ATR) il fait pire partout ; large (6-10 x ATR) il gagne certains semestres mais aggrave le S1 2026 (-22/-23 % contre -11 %). Non retenus.
 
 **ADX elargi aux autres bots** (`python scripts/bench_indicators.py --autres`, demande de l'utilisateur) : BTC_TREND_REGIME (EMA 1000), DOGE_TREND_REGIME (EMA 2000) et ETH_TREND_REGIME (EMA 500) tels que deployes (sans stop-loss ni trailing), 2025-2026 par semestre. Fenetres ou le filtre fait mieux que sans filtre : ADX > 20 : 2/12, > 25 : 5/12, > 30 : 5/12. Avec les 4 semestres d'ETH_youenn : **> 20 : 2/16, > 25 : 8/16, > 30 : 7/16** - une piece de monnaie. Sur BTC et DOGE (1 a 10 trades par semestre), le filtre ne change souvent rien ; quand il change, c'est dans un sens ou dans l'autre. **Conclusion : pas d'avantage de l'ADX sur ces bots, filtre non retenu.**
+
+---
+
+### 3.82 EF-95 : limitation des secrets faux sur le webhook TradingView
+
+**Origine** : limite relevee en livrant EF-94 (§3.80) et reprise par la revue du 2026-09-28. Le webhook `/api/tv-webhook` (§3.73) passe avant `_authorized` : son secret pouvait etre essaye a l'infini, depuis Internet des que le serveur est expose.
+
+**Conception** (`control_server.Handler._handle_tv_webhook`) :
+- **Second `LoginThrottle`** (`_webhook_throttle`), memes seuils qu'EF-94 (10 secrets faux en 15 min -> adresse bloquee 15 min, reponse **429** JSON + `Retry-After`, meme avec le bon secret). Compteur **separe** de celui du dashboard : un secret mal recopie dans TradingView ne prive pas l'utilisateur de son dashboard, et inversement. Seul un refus **401** (secret absent ou faux) compte ; un 200 remet le compteur a zero ; 403 (reception fermee, IP non autorisee) et 413 ne comptent pas.
+- **Adresse derriere un tunnel** : le tunnel conseille (Cloudflare, ngrok) tourne sur la machine du serveur, donc TOUTES les requetes arrivent de 127.0.0.1 - avec l'exemption loopback d'EF-94, la limitation ne se serait jamais appliquee. Quand la connexion vient de la boucle locale, l'adresse retenue est la **derniere** entree de `X-Forwarded-For`, celle ajoutee par le tunnel : les precedentes sont fournies par l'appelant, qui pourrait en changer a chaque essai. L'en-tete n'est **jamais** cru d'une connexion distante (falsifiable). Appel local sans cet en-tete (script, bouton "Envoyer une alerte de test") : jamais limite.
+- La meme adresse est transmise a `handle_tradingview_alert` : le filtre `TRADINGVIEW_ALLOWED_IPS` et l'adresse consignee avec l'alerte fonctionnent desormais aussi derriere un tunnel (ils voyaient 127.0.0.1).
+- **Taille du corps** : `Content-Length` > `MAX_BODY_BYTES` (10 Ko) -> **413 sans lire le corps** (le serveur lisait jusqu'a 100 Ko avant de refuser) ; `Content-Length` non numerique ou negatif -> 400 (levait une exception). Dans ces cas et en 429, la connexion est fermee apres la reponse (corps non lu).
+- Comparaison du secret deja en temps constant (`hmac.compare_digest`, §3.73) : inchange.
+
+**Limites** : un attaquant disposant de nombreuses adresses (botnet) n'est ralenti que par adresse - pas de plafond global. Un tunnel qui n'ajoute pas `X-Forwarded-For` ramene au comportement precedent (pas de limitation). Si le secret configure dans TradingView est faux, les adresses de TradingView sont bloquees 15 min apres 10 alertes - elles etaient refusees de toute facon.
+
+**Validation** : 10 tests dans `tests/test_tv_alerts.py` sur un vrai serveur HTTP : blocage apres 10 secrets faux, 429 meme avec le bon secret, `Retry-After` ; bon secret avant le seuil accepte et remise a zero ; compteurs webhook et dashboard separes ; appel local sans tunnel jamais bloque ; derriere un tunnel, blocage par adresse transmise (une autre adresse passe) ; entrees forgees en tete de `X-Forwarded-For` sans effet ; filtre IP applique a l'adresse transmise ; en-tete ignore d'une connexion distante ; corps trop gros -> 413 non compte ; `Content-Length` invalide -> 400. Suite complete : **936 tests**.
 
 ---
 
