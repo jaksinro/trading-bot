@@ -1,43 +1,35 @@
-"""Strategie Fixed Range Volume Profile (EF-96)."""
+"""Strategie Volume Profile (EF-96, refaite en EF-97 d'apres le document de
+l'utilisateur) et niveaux de sortie propres a chaque trade."""
+import sqlite3
+
 import pytest
 
 from tradingbot.strategies.volume_profile import WEEK_OFFSET_MS, VolumeProfileStrategy, volume_profile
-from tradingbot.types import Candle, Side
+from tradingbot.types import Candle, Position, Side, Signal
 
 H = 3_600_000
 DAY0 = 1_789_948_800_000  # lundi 2026-09-21 00:00 UTC
+DAY1 = DAY0 + 24 * H
 
 
-def c(t, low, high, close=None, volume=100.0):
+def c(t, low, high, close=None, open_=None, volume=100.0):
     close = (low + high) / 2 if close is None else close
-    return Candle(timestamp=t, open=close, high=high, low=low, close=close, volume=volume)
+    open_ = close if open_ is None else open_
+    return Candle(timestamp=t, open=open_, high=high, low=low, close=close, volume=volume)
 
 
 # ---------------------------------------------------------------- profil
 def test_poc_is_where_most_volume_traded():
-    candles = [c(0, 100, 101, volume=10), c(1, 105, 106, volume=500), c(2, 109, 110, volume=10)]
-    poc, vah, val = volume_profile(candles, rows=10)
+    poc, vah, val = volume_profile([c(0, 100, 101, volume=10), c(1, 105, 106, volume=500), c(2, 109, 110, volume=10)], rows=10)
     assert 105 <= poc <= 106
 
 
-def test_value_area_holds_about_70_percent_and_contains_the_poc():
+def test_value_area_computed_by_hand():
+    # Total 232, cible 162,4. POC = rang 4 (80). Voisins 40/40 -> haut (120) ; 20 au-dessus
+    # contre 40 en dessous -> bas (160) ; 20/20 -> haut (180). Zone = 103 -> 107.
     candles = [c(i, 100 + i, 101 + i, volume=v) for i, v in enumerate([5, 10, 20, 40, 80, 40, 20, 10, 5, 2])]
-    poc, vah, val = volume_profile(candles, rows=10, value_area_pct=0.70)
-    assert val <= poc <= vah
-    inside = sum(x.volume for x in candles if x.low >= val - 1e-9 and x.high <= vah + 1e-9)
-    assert inside / sum(x.volume for x in candles) >= 0.70
-    # A la main : total 232, cible 162,4. POC = rang 4 (80). Voisins 40/40 -> haut (120) ;
-    # 20 au-dessus contre 40 en dessous -> bas (160) ; 20/20 -> haut (180 >= 162,4).
-    # Zone = rangs 3 a 6, soit 103 -> 107 (77,6 % du volume).
+    poc, vah, val = volume_profile(candles, rows=10)
     assert (val, vah) == pytest.approx((103, 107))
-
-
-def test_volume_is_spread_over_the_candle_range():
-    # Une seule bougie 100-110 : 10 par rang. Egalite partout : le POC est le rang le plus bas,
-    # la zone s'etend vers le haut (egalite -> haut) jusqu'a 70 : rangs 0 a 6.
-    poc, vah, val = volume_profile([c(0, 100, 110, volume=100)], rows=10)
-    assert poc == pytest.approx(100.5)
-    assert (val, vah) == pytest.approx((100, 107))
 
 
 def test_empty_or_flat_profile():
@@ -45,177 +37,246 @@ def test_empty_or_flat_profile():
     assert volume_profile([c(0, 5, 5, volume=1)]) == (5, 5, 5)
 
 
-# ---------------------------------------------------------------- periodes
-def test_weekly_range_starts_on_monday_utc():
+def test_weeks_start_on_monday_utc():
     assert (DAY0 - WEEK_OFFSET_MS) % (168 * H) == 0
 
 
-def _week_profile_then(strategy, closes_next_week, low=100, high=110):
-    """Une semaine de reference (cours entre low et high, volume concentre au
-    milieu), puis les clotures donnees en debut de semaine suivante."""
-    signals = []
-    for i in range(168):
-        mid = (low + high) / 2
-        vol = 1000 if abs(i % 10 - 5) <= 1 else 10
-        strategy.on_candle(c(DAY0 + i * H, mid - 1 if vol == 1000 else low, mid + 1 if vol == 1000 else high, volume=vol))
-    # Le profil d'une semaine n'existe qu'une fois terminee : a la 1re bougie de la
-    # suivante (lundi 00:00, neutre, au milieu de la plage). Les clotures suivent.
-    strategy.on_candle(c(DAY0 + 168 * H, (low + high) / 2 - 0.1, (low + high) / 2 + 0.1))
-    for j, close in enumerate(closes_next_week):
-        signals.append(strategy.on_candle(c(DAY0 + (169 + j) * H, close - 0.1, close + 0.1, close=close)))
-    return signals
+# ---------------------------------------------------------------- outils
+def yesterday(strategy, last_close):
+    """Seance de la veille : cours 100-110, volume concentre vers 104-106, derniere
+    cloture `last_close`. Puis la 1re bougie du jour, neutre, qui rend le profil
+    de la veille disponible (il n'existe qu'une fois la seance terminee)."""
+    for i in range(23):
+        heavy = i % 4 == 0
+        strategy.on_candle(c(DAY0 + i * H, 104 if heavy else 100, 106 if heavy else 110, volume=1000 if heavy else 50))
+    strategy.on_candle(c(DAY0 + 23 * H, last_close - 0.2, last_close + 0.2, close=last_close, volume=10))
+    strategy.on_candle(c(DAY1, 105, 105.5, close=105.2, volume=10))
+    return strategy.profile
 
 
-def test_profile_of_the_previous_week_is_the_reference():
-    s = VolumeProfileStrategy(range_hours=168)
-    _week_profile_then(s, [105])
-    poc, vah, val = s.profile
-    assert 100 <= val < poc < vah <= 110
+def feed(strategy, candles):
+    return [strategy.on_candle(x) for x in candles]
 
 
-# ---------------------------------------------------------------- retour dans la zone (80 %)
-def test_reversion_buys_after_reentry_confirmed_and_sells_at_vah():
-    s = VolumeProfileStrategy(mode="reversion", confirm_candles=2, target="vah", stop_buffer_pct=0.01)
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    sig = [s.on_candle(c(DAY0 + (169 + j) * H, x - 0.1, x + 0.1, close=x))
-           for j, x in enumerate([val - 2, val + 0.5, val + 0.6, vah + 0.5])]
-    assert sig[0] is None and sig[1] is None           # sous le VAL, puis 1re cloture dedans
-    assert sig[2].side == Side.BUY                     # 2e cloture dedans : confirme
-    assert sig[3].side == Side.SELL and sig[3].reason == "volume_profile_target"
+def at(n):
+    return DAY1 + n * H
 
 
-def test_reversion_needs_price_to_have_been_below_val_first():
-    s = VolumeProfileStrategy(mode="reversion", confirm_candles=1)
-    signals = _week_profile_then(s, [105, 105, 104])
-    assert all(x is None for x in signals)
+def test_profile_and_previous_close_come_from_yesterday():
+    s = VolumeProfileStrategy()
+    poc, vah, val = yesterday(s, last_close=109.5)
+    assert 100 <= val < poc < vah <= 110 and 104 <= poc <= 106
+    assert s.previous_close == 109.5
 
 
-def test_reversion_invalidation_below_val():
-    s = VolumeProfileStrategy(mode="reversion", confirm_candles=1, stop_buffer_pct=0.01)
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    t = DAY0 + 169 * H
-    s.on_candle(c(t, 0, 0, close=val - 1))
-    assert s.on_candle(c(t + H, 0, 0, close=val + 0.1)).side == Side.BUY
-    assert s.on_candle(c(t + 2 * H, 0, 0, close=val * 0.995)) is None          # dans la marge de 1 %
-    sell = s.on_candle(c(t + 3 * H, 0, 0, close=val * 0.98))
-    assert sell.side == Side.SELL and sell.reason == "volume_profile_invalidation"
+# ---------------------------------------------------------------- 1. rebond sur le POC
+def test_poc_rebound_wick_then_confirmation_buys_with_stop_under_wick_and_2r_target():
+    s = VolumeProfileStrategy(setups=["poc_rebound"], stop_buffer_pct=0.0)
+    poc, vah, val = yesterday(s, last_close=109.5)
+    assert s.previous_close > vah
+    out = feed(s, [
+        c(at(1), poc - 1.0, poc + 1.2, close=poc + 1.0, open_=poc + 0.9),    # meche sous le POC, cloture dessus
+        c(at(2), poc + 0.8, poc + 2.0, close=poc + 1.8, open_=poc + 1.0),    # verte qui confirme
+    ])
+    assert out[0] is None
+    sig = out[1]
+    assert sig.side == Side.BUY and sig.reason == "volume_profile_poc_rebound_wick"
+    entry = poc + 1.8
+    assert sig.stop_price == pytest.approx(poc - 1.0)
+    assert sig.target_price == pytest.approx(entry + 2 * (entry - (poc - 1.0)))
 
 
-def test_exit_levels_are_frozen_at_entry():
-    s = VolumeProfileStrategy(mode="reversion", confirm_candles=1, target="poc")
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    t = DAY0 + 169 * H
-    s.on_candle(c(t, 0, 0, close=val - 1))
-    s.on_candle(c(t + H, 0, 0, close=val + 0.1))
-    s.profile = (poc + 50, vah + 50, val + 50)        # nouveau profil en cours de position
-    assert s.on_candle(c(t + 2 * H, 0, 0, close=poc + 0.01)).reason == "volume_profile_target"
+def test_poc_rebound_requires_previous_day_closed_above_vah():
+    s = VolumeProfileStrategy(setups=["poc_rebound"])
+    poc, vah, val = yesterday(s, last_close=105)                            # veille finie DANS la zone
+    out = feed(s, [c(at(1), poc - 1, poc + 1.2, close=poc + 1, open_=poc + 0.9),
+                   c(at(2), poc + 0.8, poc + 2, close=poc + 1.8, open_=poc + 1)])
+    assert out == [None, None]
 
 
-# ---------------------------------------------------------------- cassure
-def test_breakout_buys_after_confirmed_closes_above_vah_and_exits_back_inside():
-    s = VolumeProfileStrategy(mode="breakout", confirm_candles=2, stop_buffer_pct=0.0)
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    t = DAY0 + 169 * H
-    assert s.on_candle(c(t, 0, 0, close=vah + 1)) is None
-    assert s.on_candle(c(t + H, 0, 0, close=vah + 2)).side == Side.BUY
-    assert s.on_candle(c(t + 2 * H, 0, 0, close=vah + 5)) is None              # pas d'objectif fixe
-    assert s.on_candle(c(t + 3 * H, 0, 0, close=vah - 0.5)).side == Side.SELL
+def test_poc_rebound_confirmation_too_late_is_ignored():
+    """'Signal trop vieux' : plus de 3 bougies apres la meche, on ne court pas apres."""
+    s = VolumeProfileStrategy(setups=["poc_rebound"], max_signal_age=3)
+    poc, vah, val = yesterday(s, last_close=109.5)
+    reds = [c(at(i), poc + 0.6, poc + 0.9, close=poc + 0.7, open_=poc + 0.8) for i in range(2, 6)]
+    out = feed(s, [c(at(1), poc - 1, poc + 1.2, close=poc + 1, open_=poc + 0.9)] + reds
+               + [c(at(6), poc + 0.7, poc + 2.5, close=poc + 2.2, open_=poc + 0.8)])
+    assert all(x is None for x in out)
 
 
-# ---------------------------------------------------------------- divers
-def test_chart_levels():
+def test_poc_rebound_bullish_engulfing_on_the_poc():
+    s = VolumeProfileStrategy(setups=["poc_rebound"], stop_buffer_pct=0.0)
+    poc, vah, val = yesterday(s, last_close=109.5)
+    out = feed(s, [c(at(1), poc - 0.4, poc + 0.6, close=poc - 0.2, open_=poc + 0.5),     # rouge sur le POC
+                   c(at(2), poc - 0.5, poc + 1.4, close=poc + 1.2, open_=poc - 0.3)])    # verte qui l'avale
+    assert out[1].reason == "volume_profile_poc_rebound_engulfing"
+    assert out[1].stop_price == pytest.approx(poc - 0.5)
+
+
+# ---------------------------------------------------------------- 2. retour dans la zone
+def test_value_area_reentry_buys_on_green_close_back_inside():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], stop_buffer_pct=0.0)
+    poc, vah, val = yesterday(s, last_close=105)                            # veille finie dans la zone
+    out = feed(s, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),    # cloture sous le VAL
+                   c(at(2), val - 2.0, val - 0.8, close=val - 1.2, open_=val - 1.0),    # plus bas : val - 2
+                   c(at(3), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])   # verte qui rentre
+    assert out[:2] == [None, None]
+    assert out[2].reason == "volume_profile_value_area_reentry"
+    assert out[2].stop_price == pytest.approx(val - 2.0)
+
+
+def test_wick_into_the_zone_with_close_outside_is_not_an_entry():
+    """'Simple meche dans la zone' : la meche entre, la cloture reste dehors."""
+    s = VolumeProfileStrategy(setups=["value_area_reentry"])
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                   c(at(2), val - 1.2, val + 0.8, close=val - 0.3, open_=val - 1.0)])   # verte, mais dehors
+    assert out == [None, None]
+
+
+def test_value_area_reentry_needs_previous_day_inside():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"])
+    poc, vah, val = yesterday(s, last_close=109.5)                          # veille finie au-dessus
+    out = feed(s, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                   c(at(2), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])
+    assert out == [None, None]
+
+
+# ---------------------------------------------------------------- 3. cassure
+def _breakout_until_pullback(s, vah):
+    return feed(s, [c(at(1), vah - 0.5, vah + 1.0, close=vah + 0.8, open_=vah - 0.3),   # sortie nette
+                    c(at(2), vah + 0.7, vah + 2.0, close=vah + 1.9, open_=vah + 0.8),   # impulsion
+                    c(at(3), vah + 1.0, vah + 1.8, close=vah + 1.2, open_=vah + 1.7)])  # repli
+
+
+def test_breakout_enters_on_close_above_the_old_high_with_stop_under_it():
+    s = VolumeProfileStrategy(setups=["breakout"], stop_buffer_pct=0.0)
+    poc, vah, val = yesterday(s, last_close=105)
+    assert _breakout_until_pullback(s, vah) == [None, None, None]
+    sig = s.on_candle(c(at(4), vah + 1.1, vah + 2.4, close=vah + 2.3, open_=vah + 1.2))
+    assert sig.reason == "volume_profile_breakout"
+    assert sig.stop_price == pytest.approx(vah + 2.0)                     # l'ancien plus haut
+    assert sig.target_price == pytest.approx(vah + 2.3 + 2 * 0.3)
+
+
+def test_breakout_cancelled_when_pullback_closes_deep_in_the_zone():
+    s = VolumeProfileStrategy(setups=["breakout"], pullback_max_depth=0.25)
+    poc, vah, val = yesterday(s, last_close=105)
+    _breakout_until_pullback(s, vah)
+    deep = vah - 0.5 * (vah - val)
+    assert s.on_candle(c(at(4), deep - 0.2, vah + 1.0, close=deep, open_=vah + 1.0)) is None
+    assert s.on_candle(c(at(5), deep, vah + 2.5, close=vah + 2.3, open_=deep)) is None    # setup annule
+
+
+def test_min_risk_widens_a_too_tight_stop():
+    s = VolumeProfileStrategy(setups=["breakout"], stop_buffer_pct=0.0, min_risk_pct=0.01)
+    poc, vah, val = yesterday(s, last_close=105)
+    _breakout_until_pullback(s, vah)
+    sig = s.on_candle(c(at(4), vah + 1.1, vah + 2.4, close=vah + 2.3, open_=vah + 1.2))
+    assert sig.stop_price == pytest.approx((vah + 2.3) * 0.99)
+
+
+# ---------------------------------------------------------------- etat et divers
+def test_no_new_entry_while_in_position():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"])
+    poc, vah, val = yesterday(s, last_close=105)
+    s.sync_position(100.0)
+    out = feed(s, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                   c(at(2), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])
+    assert out == [None, None]
+
+
+def test_chart_levels_show_yesterdays_profile():
     s = VolumeProfileStrategy()
     assert s.chart_levels() == []
-    _week_profile_then(s, [])
-    labels = [lv["label"] for lv in s.chart_levels()]
-    assert labels[0].startswith("POC") and labels[1].startswith("VAH") and labels[2].startswith("VAL")
+    yesterday(s, last_close=105)
+    assert [lv["label"].split()[0] for lv in s.chart_levels()] == ["POC", "VAH", "VAL"]
 
 
-@pytest.mark.parametrize("kwargs", [{"mode": "short"}, {"anchor": "x"}, {"target": "x"}, {"rows": 2},
-                                    {"value_area_pct": 1.5}, {"confirm_candles": 0}])
+@pytest.mark.parametrize("kwargs", [{"setups": ["short"]}, {"setups": []}, {"rows": 2}, {"value_area_pct": 1.5},
+                                    {"reward_risk": 0}, {"max_signal_age": 0}])
 def test_invalid_parameters_are_refused(kwargs):
     with pytest.raises(ValueError):
         VolumeProfileStrategy(**kwargs)
 
 
-def test_rolling_anchor_judges_the_current_candle_against_previous_hours():
-    s = VolumeProfileStrategy(anchor="rolling", range_hours=24)
-    for i in range(30):
-        s.on_candle(c(DAY0 + i * H, 100, 110, volume=100))
-    assert s.profile is not None
-    s.on_candle(c(DAY0 + 30 * H, 500, 510, volume=10_000))   # bougie extreme : absente de son propre profil
-    assert s.profile[1] <= 110
-
-
 def test_strategy_is_registered_for_bots():
     from tradingbot.run_backtest import build_strategy
 
-    s = build_strategy({"strategy": {"type": "volume_profile", "mode": "breakout", "range_hours": 24}})
-    assert isinstance(s, VolumeProfileStrategy) and s.mode == "breakout"
+    s = build_strategy({"strategy": {"type": "volume_profile", "setups": ["breakout"], "session_hours": 24}})
+    assert isinstance(s, VolumeProfileStrategy) and s.setups == ("breakout",)
 
 
-def test_breakout_exit_ratchets_up_with_each_new_range():
-    """Sans cela, la seule sortie de la cassure etait sous le prix d'achat :
-    tout trade clos etait perdant (0 % de gagnants au premier banc)."""
-    s = VolumeProfileStrategy(mode="breakout", range_hours=24, confirm_candles=1, stop_buffer_pct=0.0)
-    for i in range(24):                                   # jour 1 : 100-110
-        s.on_candle(c(DAY0 + i * H, 100, 110, volume=100))
-    s.on_candle(c(DAY0 + 24 * H, 104, 106))               # jour 2 : profil du jour 1 dispo
-    vah1 = s.profile[1]
-    assert s.on_candle(c(DAY0 + 25 * H, vah1 + 1, vah1 + 3, close=vah1 + 2)).side == Side.BUY
-    for i in range(26, 48):                               # le reste du jour 2 : 130-140
-        assert s.on_candle(c(DAY0 + i * H, 130, 140, volume=100)) is None
-    s.on_candle(c(DAY0 + 48 * H, 134, 136))               # jour 3 : nouveau profil, seuil remonte
-    assert s._exit_stop > vah1 + 2                        # au-dessus du prix d'achat
-    sell = s.on_candle(c(DAY0 + 49 * H, 120, 121, close=120))
-    assert sell.side == Side.SELL and 120 > vah1 + 2      # sortie en gain
-
-
-def test_sync_forgets_a_position_the_bot_does_not_have():
-    """Achat refuse (cash) ou vente par le stop-loss du moteur : la strategie
-    ne doit pas rester bloquee 'en position' sans jamais racheter."""
-    s = VolumeProfileStrategy(mode="reversion", confirm_candles=1)
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    t = DAY0 + 169 * H
-    s.on_candle(c(t, 0, 0, close=val - 1))
-    assert s.on_candle(c(t + H, 0, 0, close=val + 0.1)).side == Side.BUY
-    s.sync_position(None)                                  # le moteur n'a pas de position
-    s.on_candle(c(t + 2 * H, 0, 0, close=val - 1))
-    assert s.on_candle(c(t + 3 * H, 0, 0, close=val + 0.1)).side == Side.BUY   # peut racheter
-
-
-def test_sync_adopts_a_position_restored_after_restart():
-    """Reprise de session avec une position ouverte : sans cela, ni objectif ni
-    invalidation ne pourraient jamais la vendre."""
-    s = VolumeProfileStrategy(mode="reversion", target="poc", stop_buffer_pct=0.01)
-    _week_profile_then(s, [])
-    poc, vah, val = s.profile
-    s.sync_position(val + 0.5)
-    sell = s.on_candle(c(DAY0 + 170 * H, 0, 0, close=val * 0.98))
-    assert sell.side == Side.SELL and sell.reason == "volume_profile_invalidation"
-
-
-def test_engine_tells_the_strategy_its_real_position():
+# ---------------------------------------------------------------- niveaux propres au trade (moteur)
+def _engine():
     from tradingbot.engine import Engine
     from tradingbot.execution.backtest_executor import BacktestExecutor
     from tradingbot.portfolio import Portfolio
     from tradingbot.risk.risk_manager import RiskConfig, RiskManager
 
-    seen = []
-
-    class Spy:
-        def sync_position(self, entry):
-            seen.append(entry)
+    class OneShot:
+        def __init__(self):
+            self.next = None
 
         def on_candle(self, candle):
-            return None
+            sig, self.next = self.next, None
+            return sig
 
+    strategy = OneShot()
     portfolio = Portfolio(starting_capital=1000.0, fee_pct=0.001)
-    engine = Engine(Spy(), RiskManager(RiskConfig(stop_loss_pct=None)), BacktestExecutor(portfolio), portfolio)
-    engine.process_candle(c(DAY0, 99, 101))
-    assert seen == [None]
+    engine = Engine(strategy, RiskManager(RiskConfig(stop_loss_pct=None)), BacktestExecutor(portfolio), portfolio)
+    return engine, strategy, portfolio
+
+
+@pytest.mark.parametrize("price,reason", [(97.9, "stop_trade"), (104.1, "objectif_trade")])
+def test_engine_sells_at_the_trade_stop_or_target(price, reason):
+    engine, strategy, portfolio = _engine()
+    strategy.next = Signal(side=Side.BUY, reason="test", stop_price=98.0, target_price=104.0)
+    engine.process_candle(c(DAY0, 99, 101, close=100))
+    lot = portfolio.positions[0]
+    assert (lot.stop_price, lot.target_price) == (98.0, 104.0)
+    engine.process_price_update(c(DAY0 + H, 99, 101, close=100.5))
+    assert portfolio.positions                                           # entre les deux : on garde
+    engine.process_price_update(c(DAY0 + 2 * H, price, price, close=price))
+    assert not portfolio.positions and portfolio.trade_history[-1]["reason"] == reason
+
+
+def test_trade_levels_survive_a_restart(tmp_path, monkeypatch):
+    from tradingbot.reporting import logger as logger_module
+    from tradingbot.reporting.logger import TradeLogger
+
+    monkeypatch.setattr(logger_module, "DATA_DIR", tmp_path)
+    log = TradeLogger("VP")
+    log.save_open_positions([Position(quantity=1, avg_entry_price=100, entry_timestamp=0, lot_id=1,
+                                      stop_price=98.0, target_price=104.0)])
+    log.close()
+    restored = TradeLogger("VP").load_open_positions()[0]
+    assert (restored.stop_price, restored.target_price) == (98.0, 104.0)
+
+
+def test_existing_bot_database_gets_the_new_columns(tmp_path, monkeypatch):
+    """Les bots deja en service ont une table open_positions sans ces colonnes."""
+    from tradingbot.reporting import logger as logger_module
+    from tradingbot.reporting.logger import TradeLogger
+
+    monkeypatch.setattr(logger_module, "DATA_DIR", tmp_path)
+    old = sqlite3.connect(tmp_path / "OLD.db")
+    old.execute("""CREATE TABLE open_positions (lot_id INTEGER PRIMARY KEY, quantity REAL NOT NULL,
+                   avg_entry_price REAL NOT NULL, entry_timestamp INTEGER NOT NULL,
+                   entry_fee REAL NOT NULL DEFAULT 0, peak_price REAL NOT NULL DEFAULT 0)""")
+    old.execute("INSERT INTO open_positions VALUES (1, 0.5, 2000, 0, 1, 2010)")
+    old.commit()
+    old.close()
+    restored = TradeLogger("OLD").load_open_positions()[0]
+    assert restored.peak_price == 2010 and restored.stop_price is None
+
+
+def test_chart_shows_the_trade_levels():
+    from types import SimpleNamespace
+
+    from tradingbot.reporting.stats import build_orders_table
+    from tradingbot.risk.risk_manager import RiskConfig
+
+    lot = Position(quantity=1, avg_entry_price=100, entry_timestamp=0, lot_id=1, stop_price=98.0, target_price=104.0)
+    rows = build_orders_table(SimpleNamespace(trade_history=[], positions=[lot]), RiskConfig(stop_loss_pct=0.02))
+    assert (rows[0]["target_stop_loss"], rows[0]["target_take_profit"]) == (98.0, 104.0)

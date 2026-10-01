@@ -1,14 +1,16 @@
-# Bot "Fixed Range Volume Profile" (EF-96, demande de l'utilisateur du 2026-10-01).
-# Reglage "retour vers le POC, plage = semaine precedente" : le moins mauvais de la
-# grille mesuree (scripts/bench_volume_profile.py, 2025-2026, 4 marches) - et
-# pourtant mediane NEGATIVE (-1,8 %), 6 fenetres gagnantes sur 16. Aucun avantage
-# demontre : bot d'observation en paper, pas une strategie validee.
+# Bot "Volume Profile" (EF-97) - refait d'apres le document de l'utilisateur
+# "Volume Profile : quand entrer, en images" (2026-10-01) : profil de la veille,
+# 3 setups (rebond sur le POC, retour dans la zone de valeur, cassure), entree a
+# la cloture de la bougie qui valide, stop propre au trade, objectif 2R.
+# Mesure (scripts/bench_volume_profile.py, ETH/BTC/DOGE, 2025-2026, 15 min, frais
+# 0,1 %) : les 3 ensemble gagnent 1 fenetre sur 12, mediane -32,6 %. Meme sans
+# frais, mediane -3,8 %. Aucun avantage demontre : bot d'observation en paper.
 name: ETH_VOLUME_PROFILE
 exchange: binance
 symbol: ETH/USDT
-timeframe: 1h
-# Au moins une semaine complete d'historique pour le premier profil de reference.
-warmup_candles: 400
+timeframe: 15m            # comme les exemples du document
+# La seance de la veille complete (96 bougies de 15 min) + marge.
+warmup_candles: 200
 # OBLIGATOIRE a false : le compte testnet est partage avec ETH_youenn et
 # ETH_TREND_REGIME. A true, le premier lancement vendrait leur ETH (incident du
 # 2026-09-26 : 0,2629 ETH liquides au demarrage d'ETH_youenn).
@@ -16,18 +18,19 @@ flatten_on_start: false
 capital_allocated: 200.0
 strategy:
   type: volume_profile
-  mode: reversion          # achat au retour dans la zone de valeur apres un passage sous le VAL
-  anchor: period           # plage fixe = periode precedente terminee
-  range_hours: 168         # la semaine precedente (lundi 00:00 -> dimanche 23:59 UTC)
+  setups: [poc_rebound, value_area_reentry, breakout]
+  session_hours: 24        # profil = la journee UTC precedente
   rows: 50
   value_area_pct: 0.7
-  confirm_candles: 1       # 1 cloture horaire dans la zone suffit
-  target: poc              # vend au POC de la semaine precedente
-  stop_buffer_pct: 0.01    # ... ou si une cloture repasse 1 % sous le VAL
+  reward_risk: 2.0         # objectif a 2 fois le risque
+  max_signal_age: 3        # rebond : confirmation dans les 3 bougies, sinon trop tard
+  pullback_max_depth: 0.25 # cassure annulee si le repli clot a plus de 25 % dans la zone
+  stop_buffer_pct: 0.0005  # stop "juste derriere" la meche / le niveau casse
+  min_risk_pct: 0.0
 risk:
   max_position_size_pct: 1.0
-  stop_loss_pct: null      # la sortie de perte est l'invalidation de la strategie
-  take_profit_pct: null
+  stop_loss_pct: null      # le stop est propre a chaque trade (sous la meche, sous le niveau)
+  take_profit_pct: null    # l'objectif aussi (2R)
   max_daily_loss_pct: 0.05
   max_concurrent_positions: 1
   trailing_stop_pct: null
@@ -36,6 +39,9 @@ risk:
   partial_exit_fraction: 0.5
   profit_lock_arm_pct: null
   profit_lock_trigger_pct: null
+# Stop et objectif du trade verifies toutes les 5 minutes, pas seulement a la
+# cloture des bougies de 15 min.
+exit_check_timeframe: 5m
 backtest:
   starting_capital: 1000
   since: '2025-01-01T00:00:00Z'

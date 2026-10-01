@@ -89,6 +89,10 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
 
     for position in portfolio.positions:
         take_profit, stop_loss = _target_prices(position.avg_entry_price, risk_config)
+        # EF-97 : un trade qui porte ses propres niveaux (stop sous la meche, objectif 2R)
+        # affiche ceux-la : ce sont eux qui le feront vendre.
+        stop_loss = position.stop_price if getattr(position, "stop_price", None) is not None else stop_loss
+        take_profit = position.target_price if getattr(position, "target_price", None) is not None else take_profit
         rows.append({
             "status": "ouvert",
             "buy_price": position.avg_entry_price,

@@ -1,61 +1,47 @@
-"""Strategie "Fixed Range Volume Profile" (EF-96), demande de l'utilisateur du
-2026-10-01 : reprendre l'indicateur de TradingView et en faire un bot.
+"""Strategie Volume Profile (EF-96, refaite en EF-97 d'apres le document de
+l'utilisateur "Volume Profile : quand entrer, en images", 2026-10-01).
 
-L'indicateur : sur une plage de temps choisie, l'histogramme du volume echange
-a chaque niveau de prix. Trois niveaux en sortent (definitions de TradingView) :
-- POC (Point of Control) : le niveau ou il s'est echange le plus de volume ;
-- zone de valeur (Value Area) : les niveaux autour du POC qui totalisent 70 %
-  du volume, bornes par VAH (haut) et VAL (bas). Construction : on part du
-  POC et on ajoute a chaque pas le voisin (au-dessus ou en dessous) le plus
-  charge, jusqu'a atteindre 70 % du volume.
+L'indicateur (definitions TradingView) : sur une plage de temps, le volume
+echange a chaque niveau de prix. POC = niveau le plus charge ; zone de valeur
+= les niveaux autour du POC qui totalisent 70 % du volume, bornes VAH (haut)
+et VAL (bas). Ici la plage est la SEANCE PRECEDENTE (jour UTC par defaut,
+`session_hours`) : son profil sert de reference toute la seance suivante,
+comme dans les exemples du document (BTC en 15 minutes, profil de la veille).
+Approximation assumee : le volume d'une bougie est reparti uniformement entre
+son plus bas et son plus haut (TradingView utilise des bougies plus fines).
 
-Un bot ne peut pas tracer la plage a la souris : la "plage fixe" est ici la
-PERIODE PRECEDENTE TERMINEE (jour ou semaine UTC, `range_hours` = 24 ou 168),
-dont le profil sert de reference pendant toute la periode suivante - l'usage
-le plus courant de l'indicateur (profil de la veille / de la semaine
-precedente). Variante `anchor="rolling"` : les `range_hours` dernieres heures,
-recalcule a chaque bougie.
+Regle generale du document : on n'entre qu'a la CLOTURE de la bougie qui
+valide la derniere condition, jamais avant ; stop et objectif a 2 fois le
+risque (2R) sont propres au trade (`Signal.stop_price/target_price`, surveilles
+par le moteur). Achat seulement : le bot trade au comptant, sans vente a
+decouvert - les schemas "vente" du document ne sont pas transposables.
 
-Approximation assumee : le volume de chaque bougie est reparti uniformement
-entre son plus bas et son plus haut (TradingView s'appuie sur des bougies plus
-fines). Une bougie 1h d'ETH couvre ~0,8 % de prix : sur une semaine, l'erreur
-reste petite devant la largeur de la zone de valeur.
-
-Deux usages classiques, achat seulement (marche au comptant, pas de vente a
-decouvert) :
-- `mode="reversion"` ("regle des 80 %") : le cours passe SOUS le VAL, puis
-  revient dans la zone de valeur et y clot `confirm_candles` bougies de suite
-  -> achat ; objectif le VAH (`target="vah"`) ou le POC ; invalidation si une
-  cloture repasse sous VAL x (1 - `stop_buffer_pct`).
-- `mode="breakout"` : `confirm_candles` clotures de suite au-dessus du VAH ->
-  achat (le marche "accepte" des prix plus hauts) ; sortie si une cloture
-  revient sous VAH x (1 - `stop_buffer_pct`), c'est-a-dire dans l'ancienne zone.
-  A chaque nouvelle plage, ce seuil REMONTE au VAL du nouveau profil s'il est
-  plus haut (jamais ne redescend) : sans cela, la seule sortie etait sous le
-  prix d'achat et tout trade clos etait perdant par construction (constate au
-  premier banc, 0 % de trades gagnants).
-En mode retour, l'objectif et l'invalidation sont FIGES a l'achat : un
-nouveau profil en cours de position ne les deplace pas.
-
-La strategie suit son etat "en position" a partir des signaux qu'elle emet,
-et le moteur le resynchronise avant chaque bougie (`sync_position`) : apres le
-rechauffage, une reprise de session avec position ouverte, un achat refuse
-(cash) ou une vente par le stop-loss du moteur.
+Trois setups (`setups`), evalues a chaque cloture :
+1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
+   et le rejette : meche sous le POC avec cloture au-dessus, puis bougie verte
+   qui confirme (cloture au-dessus de celle de la meche) dans les
+   `max_signal_age` bougies ; ou avalement haussier forme SUR le POC. Stop
+   juste sous la meche (plus bas du pattern).
+2. `value_area_reentry` - la veille a fini DANS la zone de valeur. Une bougie
+   clot sous le VAL, puis une bougie verte CLOT de nouveau dans la zone :
+   entree. Stop sous le plus bas atteint dehors. Peut se reproduire dans la
+   seance. Une simple meche dans la zone (cloture dehors) ne compte pas.
+3. `breakout` - n'importe quel jour. Cloture au-dessus du VAH (sortie nette),
+   impulsion jusqu'a un plus haut, repli qui tient, puis cloture au-dessus de
+   cet ancien plus haut : entree. Stop juste sous le niveau casse. Setup
+   annule si le repli clot "loin dans la zone" (plus de `pullback_max_depth`
+   de sa largeur sous le VAH).
 """
 from __future__ import annotations
-
-from collections import deque
 
 from tradingbot.strategies.base import Strategy
 from tradingbot.types import Candle, Side, Signal
 
 HOUR_MS = 3_600_000
-# L'epoque Unix tombe un jeudi : sans ce decalage, une "semaine" irait du jeudi
-# au mercredi. Decalage de 4 jours -> semaines du lundi 00:00 UTC au dimanche.
+# L'epoque Unix tombe un jeudi : decalage de 4 jours pour des semaines du lundi
+# (seances de 168 h). Sans effet pour des seances d'un jour.
 WEEK_OFFSET_MS = 4 * 24 * HOUR_MS
-MODES = ("reversion", "breakout")
-ANCHORS = ("period", "rolling")
-TARGETS = ("vah", "poc")
+SETUPS = ("poc_rebound", "value_area_reentry", "breakout")
 
 
 def volume_profile(candles, rows: int = 50, value_area_pct: float = 0.70) -> tuple[float, float, float] | None:
@@ -98,135 +84,147 @@ def volume_profile(candles, rows: int = 50, value_area_pct: float = 0.70) -> tup
 
 
 class VolumeProfileStrategy(Strategy):
-    def __init__(self, mode: str = "reversion", anchor: str = "period", range_hours: int = 168,
-                 rows: int = 50, value_area_pct: float = 0.70, confirm_candles: int = 2,
-                 target: str = "vah", stop_buffer_pct: float = 0.01):
-        if mode not in MODES:
-            raise ValueError(f"mode inconnu : {mode!r} (attendu : {', '.join(MODES)})")
-        if anchor not in ANCHORS:
-            raise ValueError(f"ancrage inconnu : {anchor!r} (attendu : {', '.join(ANCHORS)})")
-        if target not in TARGETS:
-            raise ValueError(f"objectif inconnu : {target!r} (attendu : {', '.join(TARGETS)})")
-        if range_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or confirm_candles < 1 or stop_buffer_pct < 0:
-            raise ValueError("parametres hors bornes (range_hours >= 1, rows >= 5, 0 < value_area_pct < 1, "
-                             "confirm_candles >= 1, stop_buffer_pct >= 0)")
-        self.mode, self.anchor, self.range_hours = mode, anchor, range_hours
-        self.rows, self.value_area_pct = rows, value_area_pct
-        self.confirm_candles, self.target, self.stop_buffer_pct = confirm_candles, target, stop_buffer_pct
-        self._period_ms = range_hours * HOUR_MS
-        self._offset_ms = WEEK_OFFSET_MS if range_hours % 168 == 0 else 0
-        self._current: list[Candle] = []
-        self._current_period: int | None = None
-        self._window: deque[Candle] = deque()
-        self.profile: tuple[float, float, float] | None = None   # (POC, VAH, VAL) de reference
-        self._was_below = False
-        self._streak = 0
+    def __init__(self, setups=SETUPS, session_hours: int = 24, rows: int = 50, value_area_pct: float = 0.70,
+                 reward_risk: float = 2.0, max_signal_age: int = 3, pullback_max_depth: float = 0.25,
+                 stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0):
+        setups = tuple(setups)
+        unknown = [s for s in setups if s not in SETUPS]
+        if not setups or unknown:
+            raise ValueError(f"setups inconnus ou vides : {unknown} (attendus : {', '.join(SETUPS)})")
+        if (session_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or reward_risk <= 0
+                or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0):
+            raise ValueError("parametres hors bornes")
+        self.setups, self.session_hours, self.rows, self.value_area_pct = setups, session_hours, rows, value_area_pct
+        self.reward_risk, self.max_signal_age = reward_risk, max_signal_age
+        self.pullback_max_depth, self.stop_buffer_pct, self.min_risk_pct = pullback_max_depth, stop_buffer_pct, min_risk_pct
+        self._period_ms = session_hours * HOUR_MS
+        self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
+        self._session: list[Candle] = []
+        self._session_id: int | None = None
+        self.profile: tuple[float, float, float] | None = None   # (POC, VAH, VAL) de la seance precedente
+        self.previous_close: float | None = None                 # cloture de la seance precedente
+        self._prev: Candle | None = None
         self._in_position = False
-        self._exit_target: float | None = None
-        self._exit_stop: float | None = None
+        self._reset_session_state()
 
-    # ------------------------------------------------------------------ profil
-    def _update_profile(self, candle: Candle) -> bool:
-        """Met a jour le profil de reference ; True s'il vient de changer de plage."""
-        if self.anchor == "rolling":
-            self._window.append(candle)
-            while self._window and self._window[0].timestamp <= candle.timestamp - self._period_ms:
-                self._window.popleft()
-            # Profil des heures PRECEDENTES : la bougie courante est jugee contre lui.
-            self.profile = volume_profile(list(self._window)[:-1], self.rows, self.value_area_pct)
-            return False
-        period = (candle.timestamp - self._offset_ms) // self._period_ms
-        changed = False
-        if self._current_period is not None and period != self._current_period:
-            self.profile = volume_profile(self._current, self.rows, self.value_area_pct)
-            self._current = []
-            changed = True
-        self._current_period = period
-        self._current.append(candle)
-        return changed
+    def _reset_session_state(self) -> None:
+        self._wick: dict | None = None        # setup 1 : meche de rejet en attente de confirmation
+        self._outside_low: float | None = None  # setup 2 : plus bas depuis la cloture sous le VAL
+        self._bo_phase = 0                    # setup 3 : 0 attente, 1 impulsion, 2 repli
+        self._bo_high = 0.0
+
+    # ------------------------------------------------------------------ seances
+    def _roll_session(self, candle: Candle) -> None:
+        session = (candle.timestamp - self._offset_ms) // self._period_ms
+        if self._session_id is not None and session != self._session_id and self._session:
+            self.profile = volume_profile(self._session, self.rows, self.value_area_pct)
+            self.previous_close = self._session[-1].close
+            self._session = []
+            self._reset_session_state()
+        self._session_id = session
+        self._session.append(candle)
+
+    def sync_position(self, entry_price: float | None) -> None:
+        """Etat reel transmis par le moteur : pas de nouvelle entree en position.
+        Les sorties sont le stop et l'objectif du trade, surveilles par le moteur."""
+        self._in_position = entry_price is not None
 
     # ------------------------------------------------------------------ signaux
     def on_candle(self, candle: Candle) -> Signal | None:
-        if self._update_profile(candle):
-            self._was_below, self._streak = False, 0   # nouvelle reference : nouveau scenario
-            if self._in_position and self.mode == "breakout" and self.profile is not None:
-                self._exit_stop = max(self._exit_stop, self.profile[2] * (1 - self.stop_buffer_pct))
-        if self.profile is None:
-            return None
-        poc, vah, val = self.profile
-        close = candle.close
+        self._roll_session(candle)
+        signal = None
+        if self.profile is not None:
+            poc, vah, val = self.profile
+            # Chaque setup met a jour son etat a chaque bougie ; le premier valide l'emporte.
+            found = [self._poc_rebound(candle, poc, vah) if "poc_rebound" in self.setups else None,
+                     self._reentry(candle, vah, val) if "value_area_reentry" in self.setups else None,
+                     self._breakout(candle, vah, val) if "breakout" in self.setups else None]
+            found = [f for f in found if f is not None]
+            if found and not self._in_position:
+                signal = self._signal(candle, *found[0])
+        self._prev = candle
+        return signal
 
-        if self._in_position:
-            if self._exit_target is not None and close >= self._exit_target:
-                return self._sell("volume_profile_target")
-            if close < self._exit_stop:
-                return self._sell("volume_profile_invalidation")
+    def _poc_rebound(self, c: Candle, poc: float, vah: float):
+        if self.previous_close is None or self.previous_close <= vah:
+            self._wick = None
             return None
-
-        if self.mode == "reversion":
-            if close < val:
-                self._was_below, self._streak = True, 0
-            elif self._was_below and close <= vah:
-                self._streak += 1
-                if self._streak >= self.confirm_candles:
-                    self._exit_target = vah if self.target == "vah" else poc
-                    self._exit_stop = val * (1 - self.stop_buffer_pct)
-                    return self._buy("volume_profile_value_area_reentry")
-            else:
-                self._was_below, self._streak = False, 0
-            return None
-
-        # breakout
-        self._streak = self._streak + 1 if close > vah else 0
-        if self._streak >= self.confirm_candles:
-            self._exit_target = None   # pas d'objectif : la sortie est le retour dans la zone
-            self._exit_stop = vah * (1 - self.stop_buffer_pct)
-            return self._buy("volume_profile_breakout")
+        prev = self._prev
+        # Avalement haussier forme SUR le POC : corps vert qui recouvre tout le corps rouge d'avant.
+        if (prev is not None and prev.close < prev.open and c.close > c.open
+                and c.open <= prev.close and c.close >= prev.open
+                and min(prev.low, c.low) <= poc <= max(prev.high, c.high) and c.close > poc):
+            self._wick = None
+            return ("poc_rebound_engulfing", min(prev.low, c.low))
+        if self._wick is not None:
+            self._wick["age"] += 1
+            if c.close < poc or self._wick["age"] > self.max_signal_age:
+                self._wick = None            # rejet rate, ou signal trop vieux : on ne court pas apres
+            elif c.close > c.open and c.close > self._wick["close"]:
+                low = min(self._wick["low"], c.low)
+                self._wick = None
+                return ("poc_rebound_wick", low)
+        # Meche de rejet haussiere : meche sous le POC, cloture au-dessus.
+        if c.low < poc < c.close and min(c.open, c.close) > poc:
+            self._wick = {"low": c.low, "close": c.close, "age": 0}
         return None
 
-    def sync_position(self, entry_price: float | None) -> None:
-        """Etat reel transmis par le moteur avant chaque bougie. A plat alors
-        qu'on se croyait en position : on oublie la position. En position
-        alors qu'on se croyait a plat (reprise apres redemarrage, signal emis
-        pendant le rechauffage) : on adopte la position avec les niveaux du
-        profil COURANT - les niveaux figes a l'achat d'origine sont perdus."""
-        if entry_price is None:
-            if self._in_position:
-                self._in_position, self._exit_target, self._exit_stop = False, None, None
-            return
-        if self._in_position or self.profile is None:
-            return
-        poc, vah, val = self.profile
-        self._in_position = True
-        if self.mode == "reversion":
-            self._exit_target = vah if self.target == "vah" else poc
-            self._exit_stop = val * (1 - self.stop_buffer_pct)
-        else:
-            self._exit_target = None
-            self._exit_stop = min(vah, entry_price) * (1 - self.stop_buffer_pct)
+    def _reentry(self, c: Candle, vah: float, val: float):
+        if self.previous_close is None or not val <= self.previous_close <= vah:
+            self._outside_low = None
+            return None
+        if c.close < val:
+            self._outside_low = c.low if self._outside_low is None else min(self._outside_low, c.low)
+            return None
+        if self._outside_low is not None:
+            low = min(self._outside_low, c.low)
+            if c.close > c.open and c.close <= vah:
+                self._outside_low = None
+                return ("value_area_reentry", low)
+            self._outside_low = low
+        return None
 
-    def _buy(self, reason: str) -> Signal:
-        self._in_position, self._was_below, self._streak = True, False, 0
-        return Signal(side=Side.BUY, reason=reason)
+    def _breakout(self, c: Candle, vah: float, val: float):
+        floor = vah - self.pullback_max_depth * (vah - val)
+        if self._bo_phase == 0:
+            if c.close > vah:
+                self._bo_phase, self._bo_high = 1, c.high
+            return None
+        if c.close < floor:                      # repli trop profond : la cassure a echoue
+            self._bo_phase = 0
+            return None
+        if self._bo_phase == 1:
+            if c.high > self._bo_high:
+                self._bo_high = c.high           # l'impulsion continue
+            else:
+                self._bo_phase = 2               # premiere bougie sans nouveau plus haut : le repli
+            return None
+        if c.close > self._bo_high:              # cloture au-dessus de l'ancien plus haut
+            level = self._bo_high
+            self._bo_phase = 0
+            return ("breakout", level)
+        return None
 
-    def _sell(self, reason: str) -> Signal:
-        self._in_position, self._exit_target, self._exit_stop = False, None, None
-        return Signal(side=Side.SELL, reason=reason)
+    def _signal(self, c: Candle, reason: str, stop_level: float) -> Signal | None:
+        entry = c.close
+        stop = stop_level * (1 - self.stop_buffer_pct)
+        if self.min_risk_pct and (entry - stop) / entry < self.min_risk_pct:
+            stop = entry * (1 - self.min_risk_pct)
+        risk = entry - stop
+        if risk <= 0:
+            return None
+        return Signal(side=Side.BUY, reason=f"volume_profile_{reason}" if not reason.startswith("volume") else reason,
+                      stop_price=stop, target_price=entry + self.reward_risk * risk)
 
     # ------------------------------------------------------------------ graphique
     def chart_levels(self) -> list[dict]:
-        """POC / VAH / VAL de la plage de reference, et en position l'objectif
-        et l'invalidation figes a l'achat (graphique du bot, EF-88)."""
+        """POC / VAH / VAL de la seance precedente (graphique du bot, EF-88).
+        Le stop et l'objectif de chaque trade s'affichent avec la position."""
         if self.profile is None:
             return []
         poc, vah, val = self.profile
-        levels = [
-            {"price": poc, "label": "POC (volume max)", "kind": "trend"},
-            {"price": vah, "label": "VAH (haut zone de valeur)", "kind": "entry" if self.mode == "breakout" else "level"},
-            {"price": val, "label": "VAL (bas zone de valeur)", "kind": "level"},
+        return [
+            {"price": poc, "label": "POC veille (volume max)", "kind": "trend"},
+            {"price": vah, "label": "VAH veille (haut zone de valeur)", "kind": "level"},
+            {"price": val, "label": "VAL veille (bas zone de valeur)", "kind": "level"},
         ]
-        if self._in_position:
-            if self._exit_target is not None:
-                levels.append({"price": self._exit_target, "label": "objectif", "kind": "entry"})
-            levels.append({"price": self._exit_stop, "label": "invalidation", "kind": "exit"})
-        return levels

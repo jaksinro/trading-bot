@@ -139,7 +139,14 @@ class Engine:
         messages: list[str] = []
         for position in list(self.executor.get_positions()):
             position.peak_price = max(position.peak_price, position.avg_entry_price, candle.close)
-            if self.risk_manager.should_stop_loss(position, candle.close):
+            # EF-97 : niveaux propres au trade d'abord (stop sous la meche, objectif 2R).
+            if position.stop_price is not None and candle.close <= position.stop_price:
+                self._close_position(position, candle, reason="stop_trade")
+                messages.append(f"Vente (stop du trade a {position.stop_price:.4f}) lot #{position.lot_id}")
+            elif position.target_price is not None and candle.close >= position.target_price:
+                self._close_position(position, candle, reason="objectif_trade")
+                messages.append(f"Vente (objectif du trade a {position.target_price:.4f}) lot #{position.lot_id}")
+            elif self.risk_manager.should_stop_loss(position, candle.close):
                 self._close_position(position, candle, reason="stop_loss")
                 messages.append(f"Vente (stop-loss) lot #{position.lot_id}")
             elif self.risk_manager.should_take_profit(position, candle.close):
@@ -249,8 +256,19 @@ class Engine:
 
         if order.status == "rejected":
             return "Achat rejete par l'exchange (quantite/montant sous le minimum autorise)"
+        levels = ""
+        stop, target = getattr(signal, "stop_price", None), getattr(signal, "target_price", None)
+        if stop is not None or target is not None:
+            # EF-97 : le lot qui vient d'etre achete (plus grand lot_id) porte les
+            # niveaux de CE trade ; `check_lot_exits` les surveille comme le stop-loss.
+            positions = self.executor.get_positions()
+            if positions:
+                lot = max(positions, key=lambda p: p.lot_id)
+                lot.stop_price, lot.target_price = stop, target
+                levels = f" - stop {stop:.4f}" if stop is not None else ""
+                levels += f", objectif {target:.4f}" if target is not None else ""
         reason = f" ({signal.reason})" if signal.reason else ""
-        return f"Achat execute{reason}"
+        return f"Achat execute{reason}{levels}"
 
     def _buy_capital_reference(self) -> float:
         """Reference de capital passee a `RiskManager.size_for_signal` :

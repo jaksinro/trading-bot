@@ -23,6 +23,11 @@ class Candle:
 class Signal:
     side: Side
     reason: str = ""
+    # EF-97 : niveaux de sortie PROPRES a ce trade (ex. stop sous la meche de rejet,
+    # objectif a 2 fois le risque), attaches au lot achete et surveilles par le
+    # moteur comme le stop-loss. None = seuls les reglages de risque du bot.
+    stop_price: float | None = None
+    target_price: float | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,8 @@ class Position:
     entry_fee: float = 0.0  # frais payes a l'achat, deduits du P&L a la revente
     peak_price: float = 0.0  # plus haut prix observe depuis l'entree (trailing stop)
     partial_exit_done: bool = False  # sortie partielle (EF-32) deja declenchee sur ce lot, ne se redeclenche pas
+    stop_price: float | None = None    # EF-97 : stop propre au trade (Signal.stop_price)
+    target_price: float | None = None  # EF-97 : objectif propre au trade (Signal.target_price)
 
     @property
     def is_open(self) -> bool:

@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.88 |
+| **Version** | 0.89 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -102,6 +102,7 @@
 | 0.86 | EF-94 : limitation des tentatives de mot de passe du dashboard (blocage temporaire par adresse) |
 | 0.87 | EF-95 : limitation des secrets faux sur le webhook TradingView, y compris derriere un tunnel |
 | 0.88 | EF-96 : strategie Fixed Range Volume Profile (mesuree, sans avantage demontre) |
+| 0.89 | EF-97 : strategie Volume Profile refaite d'apres le document de l'utilisateur ; stop et objectif par trade |
 ---
 
 ## 1. Introduction
@@ -277,6 +278,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-94 | L'acces reseau au dashboard doit resister aux essais de mot de passe en serie - point reste ouvert apres EF-86 (revue du 2026-09-20) | Devrait - **realise**. 10 identifiants faux en 15 min depuis une adresse = cette adresse bloquee 15 min (reponse 429, meme avec le bon mot de passe) ; une requete sans identifiants ne compte pas ; la machine du serveur n'est jamais bloquee. Voir STC §3.80 |
 | EF-95 | La reception des alertes TradingView doit resister aux essais de secret en serie - limite relevee apres EF-94 (revue du 2026-09-28) | Devrait - **realise**. 10 secrets faux en 15 min depuis une adresse = cette adresse bloquee 15 min pour le webhook seulement (le dashboard reste accessible) ; fonctionne derriere un tunnel (adresse transmise par le tunnel) ; message de plus de 10 Ko refuse d'emblee. Voir STC §3.82 |
 | EF-96 | Strategie de trading fondee sur l'indicateur Fixed Range Volume Profile de TradingView - demande de l'utilisateur du 2026-10-01 | Pourrait - **realise, sans avantage demontre**. Strategie disponible pour les bots (config YAML), bot `ETH_VOLUME_PROFILE` cree pour observation en paper ; mesure 2025-2026 sur 4 marches : aucun reglage a mediane positive. Voir STC §3.83 |
+| EF-97 | Le bot Volume Profile doit suivre les regles du document de l'utilisateur ("Volume Profile : quand entrer, en images") : 3 setups, entree a la cloture qui valide, stop propre au trade, objectif 2R | Doit - **realise, sans avantage demontre**. Le moteur gere desormais un stop et un objectif propres a chaque trade (conserves au redemarrage). Mesure 2025-2026 : perte sur 11 fenetres sur 12. Voir STC §3.84 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

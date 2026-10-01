@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.92 |
+| **Version** | 0.93 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -106,6 +106,7 @@
 | 0.90 | §3.81 : mesure des indicateurs TradingView ADX (filtre d'entree) et Chandelier Exit (trailing) sur ETH_youenn, 2025-2026 : aucun n'ameliore la config actuelle de facon robuste, non retenus |
 | 0.91 | EF-95 (§3.82) : **limitation des secrets faux sur le webhook TradingView** - second `LoginThrottle`, compteur separe du dashboard ; derriere un tunnel, adresse = derniere entree de `X-Forwarded-For` (crue seulement depuis la boucle locale), aussi utilisee par le filtre IP ; corps > 10 Ko refuse avant lecture |
 | 0.92 | EF-96 (§3.83) : **strategie Fixed Range Volume Profile** (POC/VAH/VAL, retour dans la zone ou cassure), synchronisation de position moteur -> strategie ; mesure 2025-2026 sur 4 marches : aucun avantage demontre, bot cree pour observation ; **correction des bancs** (taille sur le cash, plus de compte a credit), conclusions precedentes inchangees |
+| 0.93 | EF-97 (§3.84) : **strategie Volume Profile refaite d'apres le document de l'utilisateur** (3 setups, entree a la cloture qui valide, stop sous la meche ou le niveau, objectif 2R) ; **stop et objectif propres a chaque trade** dans le moteur, persistes ; mesure 2025-2026 en 15 min : les 3 setups perdent (1/12 fenetres), meme sans frais pas d'avantage net |
 
 ---
 
@@ -1928,7 +1929,39 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 
 **Correction des bancs de mesure precedents** : sans panier commun, `Engine` dimensionne les achats sur le capital de DEPART et `BacktestExecutor` ne verifie pas le cash. Avec 99 % de taille, apres des pertes les bancs achetaient encore ~990 USDT, cash negatif : les rendements de §3.78, §3.79 et §3.81 et du test sur l'or etaient des sommes de trades a mise fixe, et les fortes pertes etaient exagerees (pertes au-dela de -100 % possibles, revelees par le premier banc de cette section). `scripts/bench_common.CashEngine` dimensionne sur le cash disponible ; bancs de sortie et d'indicateurs relances : **conclusions inchangees** (trailing 1 % : -18 / -41 / -32 / -22 % au lieu de -17 / -50 / -38 / -23 % ; "50 % du gain, arme 2 %" : +9,7 / +22,4 / -11,4 / +25,9 % ; filtre ADX : au mieux 8/16 fenetres). Le moteur des bots en paper n'est pas concerne (panier commun : achat borne par le cash du panier).
 
+*(Strategie remplacee par la version de §3.84, d'apres le document de l'utilisateur.)*
+
 **Validation** : `tests/test_volume_profile.py`, 24 tests (POC ; zone de valeur calculee a la main, 103-107 ; repartition du volume ; semaine du lundi ; profil de la semaine precedente ; achat apres retour confirme et vente au VAH ; pas d'achat sans passage sous le VAL ; invalidation ; niveaux figes ; cassure ; remontee du seuil de cassure jusqu'a une sortie en gain ; synchronisation : position oubliee, position adoptee apres redemarrage, moteur transmettant l'etat ; parametres invalides ; ancrage glissant ; enregistrement pour les bots). Suite complete : **960 tests**.
+
+---
+
+### 3.84 EF-97 : strategie Volume Profile refaite d'apres le document de l'utilisateur, niveaux de sortie propres a chaque trade
+
+**Demande** : "refait le bot en te basant sur ca" - document de l'utilisateur "Volume Profile : quand entrer, en images" (8 pages, schemas et captures de videos ; exemples sur BTC en 15 min, profil de la veille). Regle generale : on n'entre qu'a la CLOTURE de la bougie qui valide la derniere condition ; stop propre au trade ; objectif a 2 fois le risque (2R). Remplace la strategie de §3.83 (plus de modes "reversion/breakout" ni d'objectif au POC/VAH).
+
+**Les 3 setups, transcrits pour l'achat seulement** (bot au comptant, les schemas "vente" ne sont pas transposables) :
+1. *Rebond sur le POC* - veille finie au-dessus du VAH ; meche de rejet sous le POC (cloture au-dessus) puis bougie verte de confirmation dans les 3 bougies, ou avalement haussier forme sur le POC ; stop sous la meche.
+2. *Retour dans la zone de valeur* - veille finie dans la zone ; cloture sous le VAL puis bougie verte qui CLOT dans la zone ; stop sous le plus bas atteint dehors ; repetable dans la seance.
+3. *Cassure* - tout jour ; cloture au-dessus du VAH, impulsion, repli, cloture au-dessus de l'ancien plus haut ; stop juste sous le niveau casse ; annule si le repli clot a plus de 25 % de la largeur de la zone sous le VAH.
+Les 3 cas "ne pas entrer" du document sont codes : meche dans la zone avec cloture dehors, repli trop profond, signal de plus de 3 bougies. Profil = journee UTC precedente (`session_hours`).
+
+**Niveaux propres au trade (moteur)** : `Signal.stop_price/target_price` ; a l'achat, le lot recoit ces niveaux (`Position.stop_price/target_price`), surveilles par `Engine.check_lot_exits` avant les regles de risque du bot - donc aussi toutes les 5 min par la surveillance fine en paper. Persistes dans `open_positions` (colonnes ajoutees par `ALTER TABLE` aux bases des bots deja en service, teste) : une reprise apres redemarrage garde le stop et l'objectif. Le graphique affiche ces niveaux pour la position. Sans effet pour les strategies qui n'en fournissent pas. `sync_position` (§3.83) sert ici a ne pas proposer de nouvelle entree en position.
+
+**Mesure** (`scripts/bench_volume_profile.py`) : entrees en 15 min (construites depuis le 5 min), stop et objectif verifies en 5 min, ETH/BTC/DOGE x 4 semestres 2025-2026 = 12 fenetres, frais 0,1 %, taille 99 % du cash.
+
+| Reglage | fenetres gagnantes | mediane | pire | trades/semestre | % gagnants | frais/semestre |
+|---|---|---|---|---|---|---|
+| 1. rebond sur le POC | 2/12 | -2,3 % | -13,7 % | 20 | 40 % | 3,9 % |
+| 2. retour dans la zone | 3/12 | -15,8 % | -36,0 % | 54 | 32 % | 9,9 % |
+| 3. cassure | 0/12 | -26,9 % | -42,5 % | 161 | 31 % | 27,3 % |
+| les 3 ensemble (document) | 1/12 | -32,6 % | -59,9 % | 189 | 33 % | 30,8 % |
+| les 3, objectif 1,5R / 3R | 0/12 - 1/12 | -32,3 / -27,4 % | -65 / -63 % | 212 / 152 | 36 / 25 % | - |
+
+Sans frais : rebond 7/12 (mediane +0,8 %), retour 4/12 (-4,6 %), cassure 7/12 (+3,0 %), les 3 ensemble 4/12 (-3,8 %). A 0,075 % (frais Binance avec BNB) : tout perd.
+
+**Constat** : la frequence de trades fait le resultat. Les stops du document sont serres (sous une meche, sous un niveau) : en 15 min, le risque d'un trade est souvent de quelques dixiemes de pour cent, et 0,2 % de frais aller-retour en mangent une grande part ; la cassure en fait 161 par semestre (27 % du capital en frais). Avant frais, le taux de gain (31 a 40 %) tourne autour du seuil de rentabilite d'un objectif 2R (~34 %) : pas d'avantage net, au mieux un tres leger sur le rebond et la cassure seuls, pas significatif sur 12 fenetres. Les videos d'ou vient le document montrent des trades choisis, sans frais ni serie complete. Bot `ETH_VOLUME_PROFILE` mis a jour (15 min, 3 setups, surveillance 5 min, `flatten_on_start: false`), non lance.
+
+**Validation** : `tests/test_volume_profile.py`, 29 tests (profil et zone de valeur calculee a la main ; profil et cloture de la veille ; rebond : meche + confirmation avec stop et objectif 2R exacts, veille requise au-dessus du VAH, confirmation trop tardive ignoree, avalement ; retour : entree sur cloture verte dans la zone, meche seule refusee, veille requise dans la zone ; cassure : entree, repli trop profond annulant ; risque minimum ; pas d'entree en position ; graphique ; parametres ; registre ; moteur vendant au stop et a l'objectif du trade ; niveaux conserves au redemarrage ; migration d'une base existante ; ligne du graphique). Suite complete : **965 tests**.
 
 ---
 

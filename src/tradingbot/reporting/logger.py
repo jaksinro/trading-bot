@@ -73,6 +73,13 @@ class TradeLogger:
             );
             """
         )
+        # EF-97 : stop et objectif propres au trade. Ajout de colonnes sur les bases
+        # existantes (bots deja en service) : sans elles, une reprise apres
+        # redemarrage perdrait les niveaux et la position ne sortirait plus.
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(open_positions)")}
+        for column in ("stop_price", "target_price"):
+            if column not in columns:
+                self.conn.execute(f"ALTER TABLE open_positions ADD COLUMN {column} REAL")
         self.conn.commit()
 
     def log_order(self, order: OrderResult, mode: str) -> None:
@@ -140,10 +147,11 @@ class TradeLogger:
         self.conn.execute("DELETE FROM open_positions")
         self.conn.executemany(
             """INSERT INTO open_positions
-               (lot_id, quantity, avg_entry_price, entry_timestamp, entry_fee, peak_price)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (lot_id, quantity, avg_entry_price, entry_timestamp, entry_fee, peak_price, stop_price, target_price)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                (p.lot_id, p.quantity, p.avg_entry_price, p.entry_timestamp, p.entry_fee, p.peak_price)
+                (p.lot_id, p.quantity, p.avg_entry_price, p.entry_timestamp, p.entry_fee, p.peak_price,
+                 p.stop_price, p.target_price)
                 for p in positions
             ],
         )
@@ -154,13 +162,13 @@ class TradeLogger:
         reprendre exactement ou le bot s'etait arrete (EF-27) plutot que de
         tout liquider au redemarrage."""
         rows = self.conn.execute(
-            """SELECT lot_id, quantity, avg_entry_price, entry_timestamp, entry_fee, peak_price
+            """SELECT lot_id, quantity, avg_entry_price, entry_timestamp, entry_fee, peak_price, stop_price, target_price
                FROM open_positions ORDER BY lot_id"""
         ).fetchall()
         return [
             Position(
                 quantity=r[1], avg_entry_price=r[2], entry_timestamp=r[3],
-                lot_id=r[0], entry_fee=r[4], peak_price=r[5],
+                lot_id=r[0], entry_fee=r[4], peak_price=r[5], stop_price=r[6], target_price=r[7],
             )
             for r in rows
         ]
