@@ -168,6 +168,24 @@ def flatten_existing_position(executor, symbol: str, logger: TradeLogger) -> Non
     executor.portfolio.positions = []
 
 
+def ignore_existing_position(executor, logger: TradeLogger) -> None:
+    """Premier lancement SANS liquidation (`flatten_on_start: false`, EF-98) :
+    le solde trouve sur l'exchange n'appartient pas a ce bot - sur un compte
+    testnet PARTAGE, c'est celui des autres bots ou du panier manuel. On ne le
+    vend pas (c'etait l'incident du 2026-09-26) et on ne l'adopte pas non plus :
+    bug reel du 2026-10-01, ETH_MOMENTUM a son lancement s'est attribue les
+    0,0928 ETH d'ETH_youenn et d'ETH_TREND_REGIME (gain affiche +50 % sans aucun
+    ordre, aucun achat possible, et sa premiere vente aurait vendu leur ETH).
+    Meme regle qu'a la reprise de session (`restore_persisted_state`) : seul
+    l'historique propre du bot fait foi."""
+    for position in executor.portfolio.positions:
+        message = (f"Solde preexistant sur l'exchange ({position.quantity}) ignore au premier lancement : "
+                   "ni vendu ni attribue a ce bot (compte partage, flatten_on_start desactive).")
+        logger.log_event("info", message)
+        print(message)
+    executor.portfolio.positions = []
+
+
 def poll_new_closed_candle(exchange, symbol: str, timeframe: str, last_seen_ts: int | None) -> Candle | None:
     """Recupere la derniere bougie CLOSE (pas celle en cours de formation)."""
     ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=2)
@@ -623,6 +641,8 @@ def main(config_path: str) -> None:
 
     if is_first_ever_run and config.get("flatten_on_start", True):
         flatten_existing_position(executor, config["symbol"], logger)
+    elif is_first_ever_run:
+        ignore_existing_position(executor, logger)
     elif not is_first_ever_run:
         logger.log_event(
             "info",

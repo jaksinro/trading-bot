@@ -69,3 +69,22 @@ def test_registered_and_chart_levels():
     assert s.chart_levels() == []
     run(s, [10, 11, 12, 13])
     assert [lv["price"] for lv in s.chart_levels()] == [11, 10]
+
+
+def test_first_run_without_flatten_does_not_adopt_the_shared_balance(tmp_path, monkeypatch):
+    """Bug reel du 2026-10-01 : ETH_MOMENTUM s'etait attribue les 0,0928 ETH des
+    autres bots presents sur le compte testnet partage."""
+    from types import SimpleNamespace
+
+    from tradingbot.reporting import logger as logger_module
+    from tradingbot.reporting.logger import TradeLogger
+    from tradingbot.run_paper import ignore_existing_position
+    from tradingbot.types import Position
+
+    monkeypatch.setattr(logger_module, "DATA_DIR", tmp_path)
+    executor = SimpleNamespace(portfolio=SimpleNamespace(positions=[Position(quantity=0.0928, avg_entry_price=2701.3)]),
+                               exchange=SimpleNamespace(create_order=lambda *a, **k: pytest.fail("ne doit rien vendre")))
+    log = TradeLogger("X")
+    ignore_existing_position(executor, log)
+    assert executor.portfolio.positions == []
+    assert "ignore au premier lancement" in log.conn.execute("select message from events").fetchone()[0]

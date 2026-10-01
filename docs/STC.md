@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.94 |
+| **Version** | 0.95 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -108,6 +108,7 @@
 | 0.92 | EF-96 (§3.83) : **strategie Fixed Range Volume Profile** (POC/VAH/VAL, retour dans la zone ou cassure), synchronisation de position moteur -> strategie ; mesure 2025-2026 sur 4 marches : aucun avantage demontre, bot cree pour observation ; **correction des bancs** (taille sur le cash, plus de compte a credit), conclusions precedentes inchangees |
 | 0.93 | EF-97 (§3.84) : **strategie Volume Profile refaite d'apres le document de l'utilisateur** (3 setups, entree a la cloture qui valide, stop sous la meche ou le niveau, objectif 2R) ; **stop et objectif propres a chaque trade** dans le moteur, persistes ; mesure 2025-2026 en 15 min : les 3 setups perdent (1/12 fenetres), meme sans frais pas d'avantage net |
 | 0.94 | EF-98 (§3.85) : **recherche d'un algorithme ETH** - 372 regles sur 2025, choix fige puis test unique sur 2026 ; **vote de momentum** (7/14/30/60/90 j, majorite) : +16,8 % en 2026 apres frais, baisse max -25,9 % (ETH : -8,7 %, -55 %) ; bot `ETH_MOMENTUM` lance en paper |
+| 0.95 | §3.85 : **premier lancement sans liquidation** - le bot s'attribuait le solde du compte partage (ETH_MOMENTUM : 0,0928 ETH des autres bots, +50 % fictif) ; solde desormais ignore, ni vendu ni adopte |
 
 ---
 
@@ -1991,7 +1992,9 @@ Regle de decision satisfaite. Tous les candidats sont positifs sur 2026 : c'est 
 
 **Mise en place** : `strategies/momentum_vote.py` (`MomentumVoteStrategy`, enregistree pour les bots), meme decision que la regle de recherche (verifie par test) ; moteur reel sur bougies jour : 2026 -11,4 / +29,4 % (recherche : -10,5 / +30,5 %). Bot `ETH_MOMENTUM` (`config/ETH_MOMENTUM.yml` : 1 decision par jour a 00:00 UTC, 500 USDT, sans stop-loss - non mesure -, `flatten_on_start: false` car compte testnet partage) lance en paper le 2026-10-01. Vote au lancement (cloture du 30/09) : 5 horizons sur 5 haussiers.
 
-**Validation** : `tests/test_momentum_vote.py`, 9 tests (silence pendant le rechauffage, detention a la majorite, liquidites en minorite, egalite = pas de majorite, decision identique a la regle de recherche sur 109 jours, parametres invalides, enregistrement, niveaux du graphique). Suite complete : **974 tests**.
+**Incident au lancement, corrige (2026-10-01)** : quelques minutes apres son lancement, le dashboard affichait pour ETH_MOMENTUM 1 position et +250,91 USDT (+50 %) sans aucun ordre. `PaperExecutor` initialise le portefeuille a partir du solde reel de l'exchange ; a la reprise de session ce solde est ecarte (compte partage), mais au PREMIER lancement avec `flatten_on_start: false` rien ne l'ecartait : le bot s'etait attribue les 0,0928 ETH d'ETH_youenn (0,0185) et d'ETH_TREND_REGIME (0,0743). Effets : aucun achat possible (deja "en position"), et sa premiere vente aurait vendu l'ETH des autres bots. Bot arrete 4 minutes apres son lancement, aucun ordre passe, panier commun intact ; base mise de cote (`data/ETH_MOMENTUM.db.fantome-2026-10-01`). Correction : `run_paper.ignore_existing_position` - au premier lancement sans liquidation, le solde trouve n'est ni vendu ni adopte, comme a la reprise de session. Concernait aussi `ETH_VOLUME_PROFILE` (non lance). Relance verifiee : 0 position, valeur 500,00, message explicite au journal.
+
+**Validation** : `tests/test_momentum_vote.py`, 10 tests (silence pendant le rechauffage, detention a la majorite, liquidites en minorite, egalite = pas de majorite, decision identique a la regle de recherche sur 109 jours, parametres invalides, enregistrement, niveaux du graphique). Suite complete : **975 tests**.
 
 ---
 
