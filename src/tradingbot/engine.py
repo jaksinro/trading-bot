@@ -162,6 +162,14 @@ class Engine:
         messages: list[str] = list(self.check_lot_exits(candle))
 
         # 2. Signal de la strategie (achat = nouveau lot, vente = sortie complete).
+        # EF-96 : une strategie qui suit son propre etat "en position" (objectif et
+        # invalidation figes a l'achat) recoit l'etat REEL avant chaque bougie -
+        # sinon rechauffage, reprise apres redemarrage, achat refuse ou vente par
+        # le stop-loss du moteur la desynchronisent (position sans sortie possible).
+        sync = getattr(self.strategy, "sync_position", None)
+        if sync is not None:
+            positions = self.executor.get_positions()
+            sync(positions[0].avg_entry_price if positions else None)
         signal = self.strategy.on_candle(candle)
         if signal is not None:
             messages.extend(self._handle_signal(signal, candle))

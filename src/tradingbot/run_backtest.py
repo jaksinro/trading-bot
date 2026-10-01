@@ -26,6 +26,7 @@ from tradingbot.strategies.rsi_range import RsiRangeStrategy
 from tradingbot.strategies.scalp_dip import ScalpDipStrategy
 from tradingbot.strategies.slope_dip import SlopeDipStrategy
 from tradingbot.strategies.trend_regime import TrendRegimeStrategy
+from tradingbot.strategies.volume_profile import VolumeProfileStrategy
 from tradingbot.strategies.sma_cross import SmaCrossStrategy
 
 STRATEGY_REGISTRY = {
@@ -39,6 +40,7 @@ STRATEGY_REGISTRY = {
     "slope_dip": SlopeDipStrategy,
     "buy_and_hold": BuyAndHoldStrategy,
     "trend_regime": TrendRegimeStrategy,
+    "volume_profile": VolumeProfileStrategy,
 }
 
 

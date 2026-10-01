@@ -545,7 +545,7 @@ par semaine, et jamais s'il a une position ouverte.
 - [x] Outil de decouverte de cryptos tendance
 - [x] Filtre optionnel de probabilite de hausse (Monte Carlo, 3 ans d'historique)
 - [x] Outil de recherche des meilleurs parametres par backtest sur grille, avec validation out-of-sample (3 ans, 2 strategies, 3 paires)
-- [x] Tests unitaires + integration (917 tests)
+- [x] Tests unitaires + integration (960 tests)
 - [x] Bot d'investissement regulier (versements programmes + allocation cible, sans stop-loss), backtest, paper trading IBKR ET onglet dashboard dedie — simulation par defaut, versement idempotent, reconciliation avec le courtier. Constat honnete : les mecaniques d'allocation n'apportent rien de mesurable, les frais et le cash dormant pesent davantage
 - [x] Filtre de tendance optionnel (EMA) pour eviter les achats a contre-courant, integre a l'optimizer — voir docs/FEUILLE_DE_ROUTE_PERFORMANCE.md
 - [x] Sizing optionnel par volatilite (ATR) — resultat mitige, desormais inclus dans la grille de `optimize`/`reoptimizer`

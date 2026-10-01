@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.87 |
+| **Version** | 0.88 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -101,6 +101,7 @@
 | 0.85 | EF-93 : trailing stop en part du gain rendue, avec seuil d'armement |
 | 0.86 | EF-94 : limitation des tentatives de mot de passe du dashboard (blocage temporaire par adresse) |
 | 0.87 | EF-95 : limitation des secrets faux sur le webhook TradingView, y compris derriere un tunnel |
+| 0.88 | EF-96 : strategie Fixed Range Volume Profile (mesuree, sans avantage demontre) |
 ---
 
 ## 1. Introduction
@@ -275,6 +276,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-93 | Le trailing stop doit pouvoir se regler en part du gain rendue (achat 2000, plus haut 2100, 50 % -> vente a 2050) - definition de l'utilisateur du 2026-09-27 | Doit - **realise**. Mode "gain" a cote du mode historique "distance" (par defaut), avec seuil d'armement ; reglable dans le formulaire du dashboard. Voir STC §3.79 |
 | EF-94 | L'acces reseau au dashboard doit resister aux essais de mot de passe en serie - point reste ouvert apres EF-86 (revue du 2026-09-20) | Devrait - **realise**. 10 identifiants faux en 15 min depuis une adresse = cette adresse bloquee 15 min (reponse 429, meme avec le bon mot de passe) ; une requete sans identifiants ne compte pas ; la machine du serveur n'est jamais bloquee. Voir STC §3.80 |
 | EF-95 | La reception des alertes TradingView doit resister aux essais de secret en serie - limite relevee apres EF-94 (revue du 2026-09-28) | Devrait - **realise**. 10 secrets faux en 15 min depuis une adresse = cette adresse bloquee 15 min pour le webhook seulement (le dashboard reste accessible) ; fonctionne derriere un tunnel (adresse transmise par le tunnel) ; message de plus de 10 Ko refuse d'emblee. Voir STC §3.82 |
+| EF-96 | Strategie de trading fondee sur l'indicateur Fixed Range Volume Profile de TradingView - demande de l'utilisateur du 2026-10-01 | Pourrait - **realise, sans avantage demontre**. Strategie disponible pour les bots (config YAML), bot `ETH_VOLUME_PROFILE` cree pour observation en paper ; mesure 2025-2026 sur 4 marches : aucun reglage a mediane positive. Voir STC §3.83 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

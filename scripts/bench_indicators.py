@@ -33,7 +33,7 @@ from bench_exit_rules import WARMUP, WINDOWS, ms, pct  # noqa: E402
 
 from tradingbot.backtest_lab import merge_dual_timeframe  # noqa: E402
 from tradingbot.data_feed import fetch_historical_candles  # noqa: E402
-from tradingbot.engine import Engine  # noqa: E402
+from bench_common import CashEngine as Engine  # noqa: E402  (taille sur le cash, voir bench_common)
 from tradingbot.execution.backtest_executor import BacktestExecutor  # noqa: E402
 from tradingbot.portfolio import Portfolio  # noqa: E402
 from tradingbot.risk.risk_manager import RiskConfig, RiskManager  # noqa: E402

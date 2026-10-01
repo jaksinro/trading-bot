@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.91 |
+| **Version** | 0.92 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -105,6 +105,7 @@
 | 0.89 | EF-94 (§3.80) : **limitation des tentatives de mot de passe** du dashboard - `LoginThrottle` par adresse (10 echecs / 15 min -> 429 + `Retry-After` pendant 15 min, meme avec le bon mot de passe) ; requete sans identifiants non comptee ; loopback jamais bloque ; memoire bornee |
 | 0.90 | §3.81 : mesure des indicateurs TradingView ADX (filtre d'entree) et Chandelier Exit (trailing) sur ETH_youenn, 2025-2026 : aucun n'ameliore la config actuelle de facon robuste, non retenus |
 | 0.91 | EF-95 (§3.82) : **limitation des secrets faux sur le webhook TradingView** - second `LoginThrottle`, compteur separe du dashboard ; derriere un tunnel, adresse = derniere entree de `X-Forwarded-For` (crue seulement depuis la boucle locale), aussi utilisee par le filtre IP ; corps > 10 Ko refuse avant lecture |
+| 0.92 | EF-96 (§3.83) : **strategie Fixed Range Volume Profile** (POC/VAH/VAL, retour dans la zone ou cassure), synchronisation de position moteur -> strategie ; mesure 2025-2026 sur 4 marches : aucun avantage demontre, bot cree pour observation ; **correction des bancs** (taille sur le cash, plus de compte a credit), conclusions precedentes inchangees |
 
 ---
 
@@ -1899,6 +1900,35 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 **Limites** : un attaquant disposant de nombreuses adresses (botnet) n'est ralenti que par adresse - pas de plafond global. Un tunnel qui n'ajoute pas `X-Forwarded-For` ramene au comportement precedent (pas de limitation). Si le secret configure dans TradingView est faux, les adresses de TradingView sont bloquees 15 min apres 10 alertes - elles etaient refusees de toute facon.
 
 **Validation** : 10 tests dans `tests/test_tv_alerts.py` sur un vrai serveur HTTP : blocage apres 10 secrets faux, 429 meme avec le bon secret, `Retry-After` ; bon secret avant le seuil accepte et remise a zero ; compteurs webhook et dashboard separes ; appel local sans tunnel jamais bloque ; derriere un tunnel, blocage par adresse transmise (une autre adresse passe) ; entrees forgees en tete de `X-Forwarded-For` sans effet ; filtre IP applique a l'adresse transmise ; en-tete ignore d'une connexion distante ; corps trop gros -> 413 non compte ; `Content-Length` invalide -> 400. Suite complete : **936 tests**.
+
+---
+
+### 3.83 EF-96 : strategie "Fixed Range Volume Profile" - et correction des bancs de mesure
+
+**Demande** : "renseigne-toi sur l'indicateur fixed range volume profile, comprends comment l'utiliser et cree un bot sur cette strategie". Sources : definition de TradingView (support "Volume profile indicators: basic concepts") et guides de trading (regle des 80 %, retour au POC, cassure de la zone de valeur). Les probabilites citees par ces guides (80 %, 68 %...) ne sont etayees par aucune etude : traitees comme des hypotheses a mesurer.
+
+**Indicateur** (`strategies/volume_profile.py`, `volume_profile()`) : histogramme du volume par niveau de prix sur une plage ; POC = rang le plus charge ; zone de valeur = 70 % du volume, construite en partant du POC et en ajoutant a chaque pas le voisin le plus charge (algorithme de TradingView) ; VAH/VAL = ses bornes. Approximation : volume de chaque bougie reparti uniformement entre son plus bas et son plus haut (TradingView utilise des bougies plus fines). "Plage fixe" automatisee = la periode precedente terminee (jour ou semaine UTC, semaines du lundi ; l'epoque Unix tombant un jeudi, decalage de 4 jours, verifie par test), ou les N dernieres heures (`anchor="rolling"`).
+
+**Strategie** (`VolumeProfileStrategy`, achat seulement) : `reversion` (passage sous le VAL puis `confirm_candles` clotures dans la zone -> achat ; objectif VAH ou POC, invalidation 1 % sous le VAL, niveaux figes a l'achat) ; `breakout` (clotures au-dessus du VAH -> achat ; sortie au retour sous le VAH, seuil remonte au VAL de chaque nouvelle plage - sans cette remontee, decouverte au premier banc, tout trade clos etait perdant par construction). Niveaux POC/VAH/VAL publies sur le graphique du bot (`chart_levels`). Enregistree dans `STRATEGY_REGISTRY` : un bot paper l'utilise via sa config YAML. Non ajoutee au formulaire du dashboard (resultats ci-dessous).
+
+**Synchronisation de position** (`Engine._decide`) : une strategie qui suit son propre etat "en position" recoit avant chaque bougie l'etat reel (`sync_position(prix d'entree ou None)`). Sans cela, le rechauffage, une reprise apres redemarrage avec position ouverte, un achat refuse ou une vente par le stop-loss du moteur la desynchronisaient : position que plus rien ne pouvait vendre, ou strategie bloquee sans jamais racheter. Sans effet sur les strategies qui n'ont pas cette methode.
+
+**Mesure** (`scripts/bench_volume_profile.py`) : ETH, BTC, DOGE, PAXG (or) x 4 semestres de 2025-2026 = 16 fenetres par reglage, grille entiere (3 usages x jour/semaine x confirmation 1/2), frais 0,1 %, sorties par la strategie seule.
+
+| Reglage | fenetres gagnantes | bat "garder" | mediane | pire |
+|---|---|---|---|---|
+| retour -> VAH, plage jour | 3/16 | 5-6/16 | -12,0 / -7,6 % | -44 % |
+| retour -> VAH, plage semaine | 5-6/16 | 7/16 | -3,4 / -3,9 % | -26 % |
+| retour -> POC, plage jour | 1/16 | 7/16 | -14,8 / -9,5 % | -43 % |
+| retour -> POC, plage semaine | 6/16 | 7/16 | -1,8 / -2,4 % | -19 % |
+| cassure, plage jour | 6/16 | 7/16 | -7,8 / -7,6 % | -50 % |
+| cassure, plage semaine | 5-6/16 | 8/16 | -6,2 / -7,2 % | -33 % |
+
+**Constat** : aucun reglage n'a de mediane positive ni ne gagne plus d'une fenetre sur deux. Les plages d'un jour sont nettement pires (40 a 60 trades par semestre, frais). Le moins mauvais, "retour vers le POC, plage semaine", gagne 3 semestres sur 4 sur ETH mais perd sur BTC et l'or : le retenir pour ETH serait choisir apres coup. **Pas d'avantage demontre.** Bot cree a la demande de l'utilisateur pour observation en paper (`config/ETH_VOLUME_PROFILE.yml`, `flatten_on_start: false` car compte testnet partage), non lance par l'assistant.
+
+**Correction des bancs de mesure precedents** : sans panier commun, `Engine` dimensionne les achats sur le capital de DEPART et `BacktestExecutor` ne verifie pas le cash. Avec 99 % de taille, apres des pertes les bancs achetaient encore ~990 USDT, cash negatif : les rendements de §3.78, §3.79 et §3.81 et du test sur l'or etaient des sommes de trades a mise fixe, et les fortes pertes etaient exagerees (pertes au-dela de -100 % possibles, revelees par le premier banc de cette section). `scripts/bench_common.CashEngine` dimensionne sur le cash disponible ; bancs de sortie et d'indicateurs relances : **conclusions inchangees** (trailing 1 % : -18 / -41 / -32 / -22 % au lieu de -17 / -50 / -38 / -23 % ; "50 % du gain, arme 2 %" : +9,7 / +22,4 / -11,4 / +25,9 % ; filtre ADX : au mieux 8/16 fenetres). Le moteur des bots en paper n'est pas concerne (panier commun : achat borne par le cash du panier).
+
+**Validation** : `tests/test_volume_profile.py`, 24 tests (POC ; zone de valeur calculee a la main, 103-107 ; repartition du volume ; semaine du lundi ; profil de la semaine precedente ; achat apres retour confirme et vente au VAH ; pas d'achat sans passage sous le VAL ; invalidation ; niveaux figes ; cassure ; remontee du seuil de cassure jusqu'a une sortie en gain ; synchronisation : position oubliee, position adoptee apres redemarrage, moteur transmettant l'etat ; parametres invalides ; ancrage glissant ; enregistrement pour les bots). Suite complete : **960 tests**.
 
 ---
 
