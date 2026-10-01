@@ -22,6 +22,7 @@ from tradingbot.strategies.dip_bounce import DipBounceStrategy
 from tradingbot.strategies.market_making import MarketMakingStrategy
 from tradingbot.strategies.mean_dip import MeanDipStrategy
 from tradingbot.strategies.mean_reversion import MeanReversionStrategy
+from tradingbot.strategies.momentum_vote import MomentumVoteStrategy
 from tradingbot.strategies.rsi_range import RsiRangeStrategy
 from tradingbot.strategies.scalp_dip import ScalpDipStrategy
 from tradingbot.strategies.slope_dip import SlopeDipStrategy
@@ -41,6 +42,7 @@ STRATEGY_REGISTRY = {
     "buy_and_hold": BuyAndHoldStrategy,
     "trend_regime": TrendRegimeStrategy,
     "volume_profile": VolumeProfileStrategy,
+    "momentum_vote": MomentumVoteStrategy,
 }
 
 

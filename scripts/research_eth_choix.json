@@ -1,0 +1,88 @@
+{
+ "fige_le": "2026-10-01 13:34",
+ "pourquoi": "regle principale = vote de momentum 1d, 5 horizons (7,14,30,60,90 j), majorite : famille la plus robuste en 2025 (10 reglages sur 10 positifs, Sharpe median 1,20), reglage MEDIAN de la famille (Sharpe 1,18) et non le meilleur. ema_trend 4h EMA 250 ecarte comme principal : pic isole (voisins EMA 125/500 nettement moins bons). Regle de decision fixee avant le test : deploiement seulement si la regle principale gagne sur 2026 apres frais ET si sa baisse max est inferieure a celle de l'ETH garde sur 2026.",
+ "principale": [
+  "momentum_vote",
+  "1d",
+  [
+   [
+    7,
+    14,
+    30,
+    60,
+    90
+   ],
+   "majorite"
+  ],
+  null
+ ],
+ "rules": [
+  [
+   "momentum_vote",
+   "1d",
+   [
+    [
+     7,
+     14,
+     30,
+     60,
+     90
+    ],
+    "majorite"
+   ],
+   null
+  ],
+  [
+   "momentum_vote",
+   "1d",
+   [
+    [
+     14,
+     30,
+     60
+    ],
+    "majorite"
+   ],
+   null
+  ],
+  [
+   "ema_trend",
+   "4h",
+   [
+    250,
+    0.03
+   ],
+   null
+  ],
+  [
+   "ema_trend",
+   "4h",
+   [
+    250,
+    0.03
+   ],
+   0.6
+  ],
+  [
+   "ema_cross",
+   "4h",
+   [
+    100,
+    300
+   ],
+   null
+  ],
+  [
+   "ema_trend",
+   "1h",
+   [
+    500,
+    0.03
+   ],
+   null
+  ]
+ ],
+ "notes": {
+  "derniere ligne": "ema_trend 1h (500, 3 %) = strategie de base d'ETH_youenn sans ses sorties de risque, pour comparaison"
+ }
+}

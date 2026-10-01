@@ -1,0 +1,35 @@
+# Bot ETH "vote de momentum" (EF-98), demande de l'utilisateur du 2026-10-01 :
+# "met en place un algo rentable sur l'ETH et seulement lui".
+# Choisi par scripts/research_eth.py : 372 regles cherchees sur 2025 seulement,
+# choix fige (scripts/research_eth_choix.json) AVANT de regarder 2026, puis 2026
+# teste une seule fois : +16,8 % apres frais (S1 -10,5 %, S2 +30,5 %), baisse max
+# -25,9 %, contre -8,7 % et -55 % pour l'ETH garde. Une annee de test et ~14 trades :
+# c'est un indice, pas une garantie.
+name: ETH_MOMENTUM
+exchange: binance
+symbol: ETH/USDT
+timeframe: 1d              # une decision par jour, a la cloture de 00:00 UTC
+warmup_candles: 120        # l'horizon le plus long (90 jours) + marge
+# OBLIGATOIRE a false : compte testnet partage avec ETH_youenn et ETH_TREND_REGIME
+# (incident du 2026-09-26 : le premier lancement d'un bot avait vendu leur ETH).
+flatten_on_start: false
+capital_allocated: 500.0
+strategy:
+  type: momentum_vote
+  lookbacks: [7, 14, 30, 60, 90]   # l'ETH est-il plus haut qu'il y a 7, 14, 30, 60, 90 jours ?
+  threshold: 0.5                   # detenu si plus de la moitie des horizons sont en hausse
+risk:
+  max_position_size_pct: 1.0
+  stop_loss_pct: null      # la sortie est le vote : tel que mesure (un stop n'a pas ete teste)
+  take_profit_pct: null
+  max_daily_loss_pct: 0.05
+  max_concurrent_positions: 1
+  trailing_stop_pct: null
+  fee_pct: 0.001
+  partial_take_profit_pct: null
+  partial_exit_fraction: 0.5
+  profit_lock_arm_pct: null
+  profit_lock_trigger_pct: null
+backtest:
+  starting_capital: 1000
+  since: '2025-01-01T00:00:00Z'

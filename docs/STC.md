@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.93 |
+| **Version** | 0.94 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -107,6 +107,7 @@
 | 0.91 | EF-95 (§3.82) : **limitation des secrets faux sur le webhook TradingView** - second `LoginThrottle`, compteur separe du dashboard ; derriere un tunnel, adresse = derniere entree de `X-Forwarded-For` (crue seulement depuis la boucle locale), aussi utilisee par le filtre IP ; corps > 10 Ko refuse avant lecture |
 | 0.92 | EF-96 (§3.83) : **strategie Fixed Range Volume Profile** (POC/VAH/VAL, retour dans la zone ou cassure), synchronisation de position moteur -> strategie ; mesure 2025-2026 sur 4 marches : aucun avantage demontre, bot cree pour observation ; **correction des bancs** (taille sur le cash, plus de compte a credit), conclusions precedentes inchangees |
 | 0.93 | EF-97 (§3.84) : **strategie Volume Profile refaite d'apres le document de l'utilisateur** (3 setups, entree a la cloture qui valide, stop sous la meche ou le niveau, objectif 2R) ; **stop et objectif propres a chaque trade** dans le moteur, persistes ; mesure 2025-2026 en 15 min : les 3 setups perdent (1/12 fenetres), meme sans frais pas d'avantage net |
+| 0.94 | EF-98 (§3.85) : **recherche d'un algorithme ETH** - 372 regles sur 2025, choix fige puis test unique sur 2026 ; **vote de momentum** (7/14/30/60/90 j, majorite) : +16,8 % en 2026 apres frais, baisse max -25,9 % (ETH : -8,7 %, -55 %) ; bot `ETH_MOMENTUM` lance en paper |
 
 ---
 
@@ -1962,6 +1963,35 @@ Sans frais : rebond 7/12 (mediane +0,8 %), retour 4/12 (-4,6 %), cassure 7/12 (+
 **Constat** : la frequence de trades fait le resultat. Les stops du document sont serres (sous une meche, sous un niveau) : en 15 min, le risque d'un trade est souvent de quelques dixiemes de pour cent, et 0,2 % de frais aller-retour en mangent une grande part ; la cassure en fait 161 par semestre (27 % du capital en frais). Avant frais, le taux de gain (31 a 40 %) tourne autour du seuil de rentabilite d'un objectif 2R (~34 %) : pas d'avantage net, au mieux un tres leger sur le rebond et la cassure seuls, pas significatif sur 12 fenetres. Les videos d'ou vient le document montrent des trades choisis, sans frais ni serie complete. Bot `ETH_VOLUME_PROFILE` mis a jour (15 min, 3 setups, surveillance 5 min, `flatten_on_start: false`), non lance.
 
 **Validation** : `tests/test_volume_profile.py`, 29 tests (profil et zone de valeur calculee a la main ; profil et cloture de la veille ; rebond : meche + confirmation avec stop et objectif 2R exacts, veille requise au-dessus du VAH, confirmation trop tardive ignoree, avalement ; retour : entree sur cloture verte dans la zone, meche seule refusee, veille requise dans la zone ; cassure : entree, repli trop profond annulant ; risque minimum ; pas d'entree en position ; graphique ; parametres ; registre ; moteur vendant au stop et a l'objectif du trade ; niveaux conserves au redemarrage ; migration d'une base existante ; ligne du graphique). Suite complete : **965 tests**.
+
+---
+
+### 3.85 EF-98 : recherche d'un algorithme ETH - vote de momentum, choisi sur 2025, teste une fois sur 2026
+
+**Demande** : "met en place un algo rentable sur l'ETH et seulement lui. Utilise tous les indicateurs dont tu as besoin, prends le temps qu'il faut." Aucune rentabilite future ne peut etre garantie ; la seule reponse honnete est une regle rentable sur des donnees qu'elle n'a jamais vues.
+
+**Protocole, fixe avant tout resultat** (`scripts/research_eth.py`) : 2025-2026 seulement (consigne de l'utilisateur ; fin 2024 pour l'initialisation des indicateurs) ; ENTRAINEMENT = 2025 (S1, S2) ; TEST = 2026-01-01 -> 2026-09-27, regarde une seule fois apres avoir fige le choix (`scripts/research_eth_choix.json`, horodate) ; frais 0,1 % par changement d'exposition ; long ou a plat ; signal a la cloture, execution a l'ouverture 1h suivante, indicateurs 4h/jour utilises seulement une fois leur bougie close. Criteres : gagnant sur les deux semestres 2025, classement sur la mediane du Sharpe de la regle et de ses reglages voisins. Simulateur rapide (vectorise) verifie contre le vrai moteur : +0,3 / +20,8 % contre +0,4 / +20,7 % sur 2025, memes nombres de trades.
+
+**Recherche** : 372 regles (124 reglages x 3 options de ciblage de volatilite) en 5 familles - tendance EMA avec marge (1h/4h/jour), croisement d'EMA, canal de Donchian, vote de momentum multi-horizons, retour a la moyenne RSI(2) en tendance. 124 gagnent sur les deux semestres 2025 (ETH garde : -10,8 %), presque toutes de suivi de tendance. Deux pieges evites : (1) le meilleur Sharpe 2025 (EMA 250 en 4h, +80 a +89 %) est un PIC - EMA 125 et 500 nettement moins bonnes (Sharpe 0,5-1,1 contre 1,4-1,8) ; (2) le classement initial ne comparait pas les variantes du vote de momentum entre elles - corrige : ses 10 variantes sont TOUTES positives en 2025 (Sharpe median 1,20), famille la plus robuste.
+
+**Choix fige** : vote de momentum en bougies jour, horizons 7, 14, 30, 60 et 90 jours, majorite - reglage median de la famille (Sharpe 2025 : 1,18), pas le meilleur (1,50). Regle de decision ecrite avant le test : deploiement si gain 2026 apres frais ET baisse max inferieure a celle de l'ETH garde.
+
+**Test unique sur 2026** :
+
+| Regle | S1 2026 | S2 2026* | 2026* | baisse max | trades |
+|---|---|---|---|---|---|
+| **vote 5 horizons (choisi)** | **-10,5 %** | **+30,5 %** | **+16,8 %** | **-25,9 %** | 14 |
+| vote 3 horizons (meilleur 2025) | -12,1 % | +47,9 % | +30,0 % | -25,6 % | 12 |
+| EMA 250 4h, marge 3 % | -12,0 % | +23,3 % | +8,5 % | -19,3 % | 8 |
+| croisement EMA 100/300 4h | -21,8 % | +40,7 % | +10,0 % | -25,9 % | 3 |
+| EMA 500 1h, marge 3 % (base d'ETH_youenn) | -22,3 % | +37,7 % | +7,0 % | -28,3 % | 14 |
+| ETH garde | -47,1 % | +72,7 % | -8,7 % | -55,0 % | - |
+
+Regle de decision satisfaite. Tous les candidats sont positifs sur 2026 : c'est la famille "suivi de tendance" qui fonctionne sur la periode, pas un reglage chanceux. **Limites, dites a l'utilisateur** : une annee de test et ~14 trades ; perte au S1 2026 (-10,5 %, quand l'ETH perdait 47 %) ; le suivi de tendance perd dans les marches sans direction (faux departs) et rend une partie des hausses avant de sortir.
+
+**Mise en place** : `strategies/momentum_vote.py` (`MomentumVoteStrategy`, enregistree pour les bots), meme decision que la regle de recherche (verifie par test) ; moteur reel sur bougies jour : 2026 -11,4 / +29,4 % (recherche : -10,5 / +30,5 %). Bot `ETH_MOMENTUM` (`config/ETH_MOMENTUM.yml` : 1 decision par jour a 00:00 UTC, 500 USDT, sans stop-loss - non mesure -, `flatten_on_start: false` car compte testnet partage) lance en paper le 2026-10-01. Vote au lancement (cloture du 30/09) : 5 horizons sur 5 haussiers.
+
+**Validation** : `tests/test_momentum_vote.py`, 9 tests (silence pendant le rechauffage, detention a la majorite, liquidites en minorite, egalite = pas de majorite, decision identique a la regle de recherche sur 109 jours, parametres invalides, enregistrement, niveaux du graphique). Suite complete : **974 tests**.
 
 ---
 
