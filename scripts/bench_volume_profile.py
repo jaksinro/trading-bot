@@ -7,7 +7,7 @@ Protocole (consignes de l'utilisateur : 2025-2026 seulement, plusieurs fenetres)
   15 min, profil de la veille), construites a partir des bougies 5 min ;
   stop et objectif verifies sur les clotures 5 min (moteur reel) ;
 - ETH, BTC, DOGE x 4 semestres de 2025-2026 (le dernier partiel) ;
-- frais 0,1 % par ordre, taille 99 % du cash disponible (`CashEngine`) ;
+- frais 0,1 % par ordre, taille 99 % du cash disponible (moteur, EF-99) ;
 - achat seulement (marche au comptant).
 
 Usage : python scripts/bench_volume_profile.py
@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from bench_common import CashEngine as Engine  # noqa: E402  (taille sur le cash, voir bench_common)
+from tradingbot.engine import Engine  # noqa: E402  (taille sur le cash depuis EF-99, dans le moteur)
 from bench_exit_rules import ms, pct  # noqa: E402
 
 from tradingbot.backtest_lab import merge_dual_timeframe  # noqa: E402
