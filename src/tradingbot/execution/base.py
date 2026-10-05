@@ -11,6 +11,12 @@ from tradingbot.types import OrderResult, Position, Side
 
 
 class ExecutionAdapter(ABC):
+    # EF-99 : True si l'adapter simule un compte entierement interne (backtest) ;
+    # le moteur dimensionne alors les achats sur le CASH disponible et non sur
+    # le capital de depart. Les adapters reels (paper/testnet) gardent False :
+    # c'est l'exchange qui refuse un achat sans fonds.
+    sizes_on_cash: bool = False
+
     @abstractmethod
     def place_order(
         self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None

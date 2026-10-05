@@ -279,6 +279,10 @@ class Engine:
         jamais viser plus que ce qui existe globalement, meme si son propre
         plafond est plus grand."""
         if self.shared_pool is None:
+            if getattr(self.executor, "sizes_on_cash", False):
+                # EF-99 : backtest = compte interne ; les gains se reinvestissent,
+                # une perte reduit la mise suivante, jamais de cash negatif.
+                return max(self.portfolio.cash, 0.0)
             return self.portfolio.starting_capital
         base_cap = self.capital_cap if self.capital_cap is not None else self.portfolio.starting_capital
         effective_cap = self.shared_pool.effective_cap(self.instance_name, base_cap)

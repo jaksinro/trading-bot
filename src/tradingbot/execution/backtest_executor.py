@@ -11,6 +11,8 @@ from tradingbot.types import OrderResult, Position, Side
 
 
 class BacktestExecutor(ExecutionAdapter):
+    sizes_on_cash = True
+
     def __init__(self, portfolio: Portfolio):
         self.portfolio = portfolio
 
@@ -18,6 +20,10 @@ class BacktestExecutor(ExecutionAdapter):
         self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None
     ) -> OrderResult:
         if quantity <= 0:
+            return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected", reason=reason)
+
+        # EF-99 : jamais de credit - un achat dont le cout + frais depasse le cash est refuse.
+        if side == Side.BUY and quantity * price * (1 + self.portfolio.fee_pct) > self.portfolio.cash + 1e-9:
             return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected", reason=reason)
 
         order = OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="filled", reason=reason)
