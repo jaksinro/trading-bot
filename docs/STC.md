@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.95 |
-| **Date** | 2026-09-28 |
+| **Version** | 0.96 |
+| **Date** | 2026-10-05 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -109,6 +109,7 @@
 | 0.93 | EF-97 (§3.84) : **strategie Volume Profile refaite d'apres le document de l'utilisateur** (3 setups, entree a la cloture qui valide, stop sous la meche ou le niveau, objectif 2R) ; **stop et objectif propres a chaque trade** dans le moteur, persistes ; mesure 2025-2026 en 15 min : les 3 setups perdent (1/12 fenetres), meme sans frais pas d'avantage net |
 | 0.94 | EF-98 (§3.85) : **recherche d'un algorithme ETH** - 372 regles sur 2025, choix fige puis test unique sur 2026 ; **vote de momentum** (7/14/30/60/90 j, majorite) : +16,8 % en 2026 apres frais, baisse max -25,9 % (ETH : -8,7 %, -55 %) ; bot `ETH_MOMENTUM` lance en paper |
 | 0.95 | §3.85 : **premier lancement sans liquidation** - le bot s'attribuait le solde du compte partage (ETH_MOMENTUM : 0,0928 ETH des autres bots, +50 % fictif) ; solde desormais ignore, ni vendu ni adopte |
+| 0.96 | EF-99 (§3.86) : **backtest dimensionne sur le cash reel** - `BacktestExecutor` refuse un achat au-dela du cash, le moteur dimensionne sur le cash (plus de compte a credit) ; `CashEngine` des bancs supprime |
 
 ---
 
@@ -1929,7 +1930,7 @@ Meme constat : le trailing 1 % perd sur les 4 semestres, toutes les regles large
 
 **Constat** : aucun reglage n'a de mediane positive ni ne gagne plus d'une fenetre sur deux. Les plages d'un jour sont nettement pires (40 a 60 trades par semestre, frais). Le moins mauvais, "retour vers le POC, plage semaine", gagne 3 semestres sur 4 sur ETH mais perd sur BTC et l'or : le retenir pour ETH serait choisir apres coup. **Pas d'avantage demontre.** Bot cree a la demande de l'utilisateur pour observation en paper (`config/ETH_VOLUME_PROFILE.yml`, `flatten_on_start: false` car compte testnet partage), non lance par l'assistant.
 
-**Correction des bancs de mesure precedents** : sans panier commun, `Engine` dimensionne les achats sur le capital de DEPART et `BacktestExecutor` ne verifie pas le cash. Avec 99 % de taille, apres des pertes les bancs achetaient encore ~990 USDT, cash negatif : les rendements de §3.78, §3.79 et §3.81 et du test sur l'or etaient des sommes de trades a mise fixe, et les fortes pertes etaient exagerees (pertes au-dela de -100 % possibles, revelees par le premier banc de cette section). `scripts/bench_common.CashEngine` dimensionne sur le cash disponible ; bancs de sortie et d'indicateurs relances : **conclusions inchangees** (trailing 1 % : -18 / -41 / -32 / -22 % au lieu de -17 / -50 / -38 / -23 % ; "50 % du gain, arme 2 %" : +9,7 / +22,4 / -11,4 / +25,9 % ; filtre ADX : au mieux 8/16 fenetres). Le moteur des bots en paper n'est pas concerne (panier commun : achat borne par le cash du panier).
+**Correction des bancs de mesure precedents** : sans panier commun, `Engine` dimensionne les achats sur le capital de DEPART et `BacktestExecutor` ne verifie pas le cash. Avec 99 % de taille, apres des pertes les bancs achetaient encore ~990 USDT, cash negatif : les rendements de §3.78, §3.79 et §3.81 et du test sur l'or etaient des sommes de trades a mise fixe, et les fortes pertes etaient exagerees (pertes au-dela de -100 % possibles, revelees par le premier banc de cette section). `scripts/bench_common.CashEngine` (supprime par EF-99, §3.86 : le moteur le fait desormais) dimensionnait sur le cash disponible ; bancs de sortie et d'indicateurs relances : **conclusions inchangees** (trailing 1 % : -18 / -41 / -32 / -22 % au lieu de -17 / -50 / -38 / -23 % ; "50 % du gain, arme 2 %" : +9,7 / +22,4 / -11,4 / +25,9 % ; filtre ADX : au mieux 8/16 fenetres). Le moteur des bots en paper n'est pas concerne (panier commun : achat borne par le cash du panier).
 
 *(Strategie remplacee par la version de §3.84, d'apres le document de l'utilisateur.)*
 
@@ -1997,6 +1998,14 @@ Regle de decision satisfaite. Tous les candidats sont positifs sur 2026 : c'est 
 **Validation** : `tests/test_momentum_vote.py`, 10 tests (silence pendant le rechauffage, detention a la majorite, liquidites en minorite, egalite = pas de majorite, decision identique a la regle de recherche sur 109 jours, parametres invalides, enregistrement, niveaux du graphique). Suite complete : **975 tests**.
 
 ---
+
+### 3.86 EF-99 : le backtest dimensionne sur le cash reel, jamais de compte a credit
+
+**Constat** (§3.83) : sans panier commun, `Engine._buy_capital_reference()` renvoyait toujours `portfolio.starting_capital` et `BacktestExecutor.place_order()` ne verifiait pas le cash ; apres des pertes, un backtest achetait plus que ce qu'il possedait (cash negatif). La correction n'existait que dans `scripts/bench_common.CashEngine`.
+
+**Implementation** : `ExecutionAdapter.sizes_on_cash` (faux par defaut) ; `BacktestExecutor.sizes_on_cash = True`. Quand il est vrai et sans panier commun, `Engine._buy_capital_reference()` renvoie `max(cash, 0)` : les gains se reinvestissent, une perte reduit la mise suivante. `BacktestExecutor` renvoie `status="rejected"` pour un achat dont cout + frais depasse le cash ; les ventes ne sont jamais bloquees. Donc `optimize.py`, `run_backtest.py`, `backtest_lab` et le reoptimiseur automatique en beneficient sans changement d'appel. **Inchange** : paper/testnet (`PaperExecutor` garde le capital de depart, l'exchange refuse un achat sans fonds) et panier commun. `CashEngine` et `bench_common.py` supprimes (les 3 bancs utilisent `Engine`). Tests : `tests/test_backtest_cash_sizing.py` (6 : achat rejete au-dela du cash et avec frais, vente jamais bloquee, cash jamais negatif apres une chute continue, 1er achat identique a l'ancien, taille suivant le cash).
+
+**Impact attendu sur les resultats** : un backtest qui reste en position longtemps ou qui gagne est dimensionne sur un cash different de 1000 ; les resultats d'anciens `optimize.py` peuvent bouger legerement. **Reste a faire** : relancer `optimize.py` sur 2-3 bots de la flotte et noter ici si les parametres retenus changent (backtest de ~3 ans, non lance en execution non surveillee).
 
 ## 4. Structure du projet
 

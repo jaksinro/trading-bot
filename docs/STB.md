@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.90 |
+| **Version** | 0.91 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -104,6 +104,7 @@
 | 0.88 | EF-96 : strategie Fixed Range Volume Profile (mesuree, sans avantage demontre) |
 | 0.89 | EF-97 : strategie Volume Profile refaite d'apres le document de l'utilisateur ; stop et objectif par trade |
 | 0.90 | EF-98 : algorithme ETH par vote de momentum (recherche 2025, test 2026), bot ETH_MOMENTUM |
+| 0.91 | EF-99 : le backtest dimensionne sur le cash reel et refuse un achat sans fonds (plus de compte a credit) |
 ---
 
 ## 1. Introduction
