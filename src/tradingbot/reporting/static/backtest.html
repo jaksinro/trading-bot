@@ -35,6 +35,7 @@
   button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .num { font-variant-numeric: tabular-nums; }
   .short { color: var(--short); }
+  .note.warn-note { color: var(--amber); }
   .pos { color: var(--green); } .neg { color: var(--red); } .dim { color: var(--text-dim); } .faint { color: var(--text-faint); }
 
   header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
@@ -187,8 +188,9 @@
     </div>
     <div>
       <h2>Couts</h2>
+      <div class="field wide"><label for="broker">Courtier : remplit les couts ci-dessous pour la paire choisie</label><div class="in"><select id="broker"></select></div></div>
+      <p class="note" id="brokerNote"></p>
       <div class="fields" id="costFields"></div>
-      <p class="note">Courtiers "sans commission" (CFD) : ils se paient sur le spread, et facturent en general un financement pour garder une position d'un jour sur l'autre. Renseigne les valeurs de ton courtier : a zero, le resultat est optimiste.</p>
     </div>
     <div>
       <h2>Capital et donnees</h2>
@@ -295,7 +297,25 @@ function payload() {
     symbol: $("symbol").value, timeframe: document.querySelector("#tf button.active").dataset.tf,
     start: $("start").value, end: $("end").value || null, capital: Number($("capital").value),
     warmup_bars: Number($("warmup").value), exit_check_timeframe: $("exitTf").value || null,
+    broker: $("broker").value === "manual" ? null : $("broker").value,
   };
+}
+
+// EF-106 : le courtier choisi remplit commission, spread et financement de nuit.
+async function applyBroker() {
+  const id = $("broker").value;
+  if (id === "manual") { $("brokerNote").textContent = "Saisie libre : renseigne les couts de ton courtier. A zero, le resultat est optimiste."; return; }
+  const symbol = $("symbol").value;
+  $("brokerNote").textContent = "Lecture des couts du courtier...";
+  try {
+    const r = await api("/api/bt-broker-costs", { broker: id, symbol });
+    if ($("broker").value !== id || $("symbol").value !== symbol) return;   // choix change entre-temps
+    if (r.available) state.catalog.cost_fields.forEach(f => { if (f.name in r) setField("c", f, r[f.name]); });
+    const src = r.sources.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">source</a>`).join(" ");
+    $("brokerNote").innerHTML = (r.live ? "<b>Lu en direct.</b> " : "") + r.notes.map(esc).join("<br>")
+      + `<br><span class="faint">Valeurs publiques relevees le ${esc(r.checked)} - ${src}</span>`;
+    $("brokerNote").classList.toggle("warn-note", !r.available);
+  } catch (e) { $("brokerNote").textContent = e.message; }
 }
 function setTimeframe(tf) {
   document.querySelectorAll("#tf button").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
@@ -320,6 +340,7 @@ function applyForm(p) {
   $("end").value = p.end || "";
   if (p.capital) $("capital").value = p.capital;
   if (p.warmup_bars != null) $("warmup").value = p.warmup_bars;
+  if ("broker" in p) $("broker").value = p.broker && state.catalog.brokers.some(b => b.id === p.broker) ? p.broker : "manual";
   $("exitTf").value = p.exit_check_timeframe || "";
 }
 function loadBot(name) {
@@ -329,6 +350,7 @@ function loadBot(name) {
   const risk = { ...b.risk };
   applyForm({ symbol: b.symbol, timeframe: b.timeframe, strategy_type: type, params, risk,
               costs: { fee_pct: risk.fee_pct ?? 0 }, exit_check_timeframe: b.exit_check_timeframe || "" });
+  if ($("broker").value !== "manual") applyBroker();   // les couts suivent le courtier choisi
   setStatus(`Reglages de ${b.name} charges. Lance le backtest.`);
 }
 
@@ -598,6 +620,13 @@ async function init() {
   $("costFields").innerHTML = c.cost_fields.map(f => fieldHtml("c", f)).join("");
   c.risk_fields.forEach(f => setField("r", f, f.default));
   c.cost_fields.forEach(f => setField("c", f, f.default));
+  $("broker").innerHTML = c.brokers.map(b => `<option value="${esc(b.id)}">${esc(b.label)}</option>`).join("")
+    + '<option value="manual">Saisie libre</option>';
+  $("broker").value = c.default_broker;
+  $("broker").onchange = applyBroker;
+  $("symbol").onchange = () => { if ($("broker").value !== "manual") applyBroker(); };
+  // Une valeur retouchee a la main ne correspond plus au courtier : passage en saisie libre.
+  $("costFields").addEventListener("input", () => { $("broker").value = "manual"; $("brokerNote").textContent = "Valeurs modifiees a la main (saisie libre)."; });
   $("botLoad").innerHTML += c.bots.map(b => `<option value="${esc(b.name)}">${esc(b.name)} (${esc(b.symbol)}, ${esc(b.timeframe)})</option>`).join("");
   $("botLoad").onchange = () => { loadBot($("botLoad").value); $("botLoad").value = ""; };
   $("start").value = c.default_start;
@@ -606,6 +635,7 @@ async function init() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem("bt_form") || "null"); } catch (e) { saved = null; }
   applyForm(saved);
+  applyBroker();
 
   $("runBtn").onclick = runBacktest;
   $("sweepBtn").onclick = runSweep;

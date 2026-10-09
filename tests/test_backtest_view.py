@@ -246,3 +246,22 @@ def test_routes(server):
     assert status == 200 and res["trades"]
     status, sw = call(server, "/api/bt-sweep", {**base(), "target": "costs.spread_pct", "values": [0, 0.002]})
     assert status == 200 and sw["rows"][0]["stats"]["return"] > sw["rows"][1]["stats"]["return"]
+
+
+def test_broker_costs_route_fills_the_cost_fields(server):
+    """EF-106 : le courtier choisi donne les couts du formulaire."""
+    status, r = call(server, "/api/bt-broker-costs", {"broker": "binance", "symbol": "ETH/USDT"})
+    assert status == 200 and r["fee_pct"] == 0.001 and r["shorts"] is False
+    status, err = call(server, "/api/bt-broker-costs", {"broker": "nope", "symbol": "ETH/USDT"})
+    assert status == 400 and "courtier inconnu" in err["error"]
+    status, cat = call(server, "/api/bt-catalog")
+    assert cat["default_broker"] in [b["id"] for b in cat["brokers"]]
+
+
+def test_short_warning_names_a_spot_broker(market):
+    p = base(strategy_type="volume_profile", params={"allow_short": True}, timeframe="1h", broker="binance")
+    assert any("n'autorise pas la vente a decouvert" in w for w in bv._warnings(bv.parse(p), []))
+    with pytest.raises(ValueError):
+        bv.parse({**p, "broker": "inconnu"})
+    doge = bv.parse({**base(broker="ninjatrader"), "symbol": "DOGE/USDT"})
+    assert any("n'est pas proposee" in w for w in bv._warnings(doge, []))

@@ -30,6 +30,7 @@ import ccxt
 import yaml
 
 from tradingbot.backtest_lab import merge_dual_timeframe
+from tradingbot.brokers.costs import BROKERS, DEFAULT_BROKER, broker_list, capitalcom_reader, costs_for
 from tradingbot.data_feed import extend_cache_to_now, fetch_historical_candles
 from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
@@ -155,8 +156,29 @@ def catalog(config_dir) -> dict:
         "risk_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in RISK_FIELDS],
         "cost_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in COST_FIELDS],
         "symbols": SYMBOLS, "timeframes": TIMEFRAMES, "bots": bot_configs(config_dir),
-        "default_start": "2025-01-01",
+        "default_start": "2025-01-01", "brokers": broker_list(), "default_broker": DEFAULT_BROKER,
     }
+
+
+def _last_price(base: str) -> float | None:
+    """Dernier cours journalier connu de BASE/USDT, depuis le cache local : pour
+    convertir un spread en points en %, quelques jours de retard ne changent rien."""
+    since = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 15 * 86_400, timezone.utc)
+    try:
+        candles = fetch_historical_candles(exchange_id="binance", symbol=f"{base}/USDT", timeframe="1d",
+                                           since_iso=since.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except Exception:  # noqa: BLE001 - sans cours, les spreads en points restent a 0 et c'est signale
+        return None
+    return candles[-1].close if candles else None
+
+
+def broker_costs(payload: dict) -> dict:
+    """EF-106 : couts d'un courtier pour la paire choisie, a reporter dans le formulaire."""
+    broker = str(payload.get("broker") or "")
+    symbol = str(payload.get("symbol") or "ETH/USDT").upper()
+    if symbol not in SYMBOLS:
+        raise ValueError(f"paire inconnue : {symbol}")
+    return costs_for(broker, symbol, _last_price, live_reader=capitalcom_reader())
 
 
 # ------------------------------------------------------------------ lecture du formulaire
@@ -243,7 +265,10 @@ def parse(payload: dict) -> dict:
     warmup = _coerce({"name": "warmup_bars", "kind": "int", "default": 500}, payload.get("warmup_bars"))
     if capital <= 0 or not 0 <= warmup <= 5000:
         raise ValueError("capital > 0 et bougies de chauffe entre 0 et 5000")
-    return {"strategy_type": stype, "params": params, "risk": risk, "costs": costs, "symbol": symbol,
+    broker = payload.get("broker") or None
+    if broker is not None and broker not in BROKERS:
+        raise ValueError(f"courtier inconnu : {broker}")
+    return {"strategy_type": stype, "params": params, "risk": risk, "costs": costs, "symbol": symbol, "broker": broker,
             "timeframe": timeframe, "exit_check_timeframe": exit_tf, "start": start, "end": end,
             "capital": capital, "warmup_bars": warmup}
 
@@ -428,7 +453,14 @@ def _warnings(spec, warm) -> list[str]:
     costs = spec["costs"]
     if not costs["spread_pct"] and not costs["fee_pct"]:
         out.append("Aucun cout de transaction : resultats optimistes. Renseigne le spread de ton courtier.")
-    if spec["params"].get("allow_short"):
+    broker = BROKERS.get(spec.get("broker") or "")
+    base = spec["symbol"].split("/")[0]
+    if broker is not None and broker.get("only") and base not in broker["only"]:
+        out.append(f"{base} n'est pas proposee par {broker['label']} : les couts affiches ne sont pas les siens.")
+    if spec["params"].get("allow_short") and broker is not None and not broker["shorts"]:
+        out.append(f"{broker['label']} n'autorise pas la vente a decouvert : les ventes de ce backtest "
+                   "n'y seraient pas possibles.")
+    elif spec["params"].get("allow_short"):
         out.append("Ventes a decouvert : possibles en backtest et chez un courtier CFD (Capital.com), "
                    "refusees par un compte au comptant comme Binance.")
     if datetime.fromtimestamp(spec["start"] / 1000, timezone.utc).year < 2025:

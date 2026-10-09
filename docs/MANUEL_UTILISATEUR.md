@@ -811,7 +811,19 @@ de chaque semestre. « Appliquer » reprend la valeur et relance le backtest com
 Préfère un réglage dont les **voisins marchent aussi** (un plateau) à un réglage
 seul qui brille : celui-là a souvent juste eu de la chance sur la période.
 
-**Les coûts : à renseigner**
+**Les coûts : choisis ton courtier**
+La liste « Courtier », en haut des coûts, remplit toute seule la commission, le
+spread et le financement de nuit pour la paire choisie : Capital.com (sans ou avec
+levier), Trade Nation, NinjaTrader, Binance, Interactive Brokers. Sous la liste, une
+note dit d'où vient chaque valeur, avec un lien vers la page du courtier. Les
+courtiers CFD ne publient le spread que pour le Bitcoin : pour les autres cryptos,
+la valeur est **estimée** et la note le signale. Si tu as renseigné ta clé API
+démo Capital.com, les valeurs de Capital.com sont **lues en direct** (spread du
+moment). Tu peux toujours retoucher un champ : la liste passe alors en « Saisie
+libre ». Un bandeau te prévient si le courtier n'autorise pas la vente à découvert
+ou ne propose pas la paire.
+
+Ce que veut dire chaque coût :
 - *Commission* : 0 chez les courtiers « sans commission ».
 - *Spread* : l'écart entre prix d'achat et prix de vente, c'est là que ces courtiers
   se paient. L'atelier en compte la moitié à chaque achat et à chaque vente.
@@ -905,3 +917,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Atelier de backtest** (lien dans l'onglet Test) : chaque trade sur un graphique TradingView, réglages de la stratégie, du risque et des coûts (commission, spread, financement de nuit), balayage d'un réglage avec le résultat par semestre, chargement des réglages d'un bot. Le champ « Frais par ordre » d'un nouveau bot vaut désormais 0 (courtiers sans commission). Voir §13 |
 | 2026-10-09 | **Ventes à découvert dans l'Atelier de backtest** : nouvelle case « Ventes à découvert » pour le Volume Profile (schémas de vente de ton document), flèches violettes au-dessus de la bougie pour ces ventes, colonne « Sens » dans le tableau des trades, fiche « Vente / Rachat », deux cartes qui séparent le résultat des achats et des ventes, et un second taux de financement de nuit pour les ventes (négatif = tu reçois). Les libellés du stop-loss et de l'objectif parlent désormais d'« écart au prix d'entrée » (valable dans les deux sens). |
 | 2026-10-09 | **Volume Profile : stop trop loin** - trois nouveaux réglages dans l'Atelier (« Stop au plus loin à » avec « cap » ou « skip », « Stop fixe », « Objectif fixe »), à 0 par défaut. Ton bot Volume Profile n'est pas modifié. Voir §13 |
+| 2026-10-09 | **Atelier de backtest : choix du courtier** - une liste « Courtier » remplit automatiquement commission, spread et financement de nuit (Capital.com, Trade Nation, NinjaTrader, Binance, Interactive Brokers), avec la source de chaque valeur et les estimations signalées ; lecture en direct chez Capital.com si ta clé démo est renseignée. Voir §13 |

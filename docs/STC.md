@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.02 |
+| **Version** | 1.03 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -116,6 +116,7 @@
 | 1.00 | EF-103 (§3.90) : **une erreur reseau passagere au demarrage ne tue plus le bot** (502 du testnet sur `load_markets` le 2026-10-07) - connexion, cours et rechauffage reessayes (`StartupRetry`, 5 s doublees jusqu'a 2 min, budget commun de 15 min), chaque tentative journalisee, puis abandon propre (`StartupNetworkGiveUp`, code de sortie 1, sans pile d'appels) ; `requests.HTTPError` 502/503/504 reconnues transitoires |
 | 1.01 | EF-104 (§3.91) : **ventes a decouvert** - `position_side` sur signal/ordre/position, comptabilite entierement couverte (sans levier), regles de risque miroir (stop au-dessus, trailing sur le plus bas), executeurs au comptant qui refusent, atelier (sens, taux de nuit des ventes) ; **schemas de vente du Volume Profile** par miroir des prix (`allow_short`) ; mesure 1 min : seuil de rentabilite vers 0,03 % de spread aller-retour |
 | 1.02 | EF-105 (§3.92) : **Volume Profile, stop trop loin** - `max_risk_pct` + `wide_stop` (cap / skip), `fixed_stop_pct` / `fixed_target_pct` ; banc `bench_vp_stops.py` : plafonner a 1 - 1,5 % aide (somme +39 / +50 % contre +14 %, immobilisation max 3 - 8 j contre 24), ignorer ou fixer -0,5 / +1 % nuit |
+| 1.03 | EF-106 (§3.93) : **courtiers existants dans l'atelier** - `brokers/costs.py` (7 profils, sources, estimations signalees), route `/api/bt-broker-costs`, lecture en direct Capital.com si cle demo ; avertissements courtier sans vente a decouvert ou sans l'actif |
 
 ---
 
@@ -2154,6 +2155,34 @@ Lecture : seul le **plafonnement** aide, avec un plateau 1 - 1,5 % (les deux voi
 **Hors perimetre** : la config du bot `ETH_VOLUME_PROFILE` n'est pas modifiee - changer le comportement d'un bot en cours est une decision de l'utilisateur.
 
 **Validation** : `tests/test_volume_profile.py` (+6 : stop du pattern garde par defaut, plafonnement et objectif qui suit, trade ignore et stop proche intact, niveaux fixes avec et sans objectif, niveaux fixes en miroir pour une vente, reglage `wide_stop` inconnu refuse). Suite complete : **1051 tests**.
+
+### 3.93 EF-106 : choix d'un courtier existant dans l'atelier
+
+**Demande** (2026-10-09) : remplacer la saisie de la commission, du spread et du financement par une selection de courtiers existants qui remplit les champs.
+
+**Conception** :
+- `src/tradingbot/brokers/costs.py` : table `BROKERS` (libelle, commission, spread, financement de nuit achat / vente, vente a decouvert permise, actifs proposes, notes, sources), releve du 2026-10-09 (`CHECKED`). `costs_for(courtier, paire, price_of, live_reader)` rend les quatre champs de l'atelier (fractions, memes conventions que `COST_FIELDS`) avec les notes a afficher.
+  - Spread exprime en % ou en POINTS (dollars par unite) : converti avec le dernier cours journalier du cache local (`backtest_view._last_price`, sans appel reseau superflu). Commission par contrat (futures) convertie de la meme facon.
+  - Spreads crypto des CFD rarement publies : seul le Bitcoin l'est. Une crypto sans spread publie reprend le meme % que le Bitcoin, et la note le dit en premier.
+  - Capital.com : lecture EN DIRECT (`capitalcom_reader`, compte demo, lecture seule : `GET /markets/{BASE}USD` -> spread achat / vente du moment, taux de nuit `overnightFee`) quand `CAPITALCOM_API_KEY` est renseignee ; echec ou cle absente : valeurs publiees, note explicite.
+- Profils (releve 2026-10-09) :
+
+| Courtier | Commission / ordre | Spread | Nuit achat / vente | Vente a decouvert |
+|---|---|---|---|---|
+| Capital.com, CFD sans levier | 0 | BTC 50 points publies (~0,06 %), autres estimes pareil | 0 / 0 (1:1 sans financement) | oui |
+| Capital.com, CFD avec levier | 0 | idem | 0,06164 % / -0,0137 % (credit) | oui |
+| Trade Nation, CFD spread fixe | 0 | BTC 60 (comparatif, unite non confirmee) | non publie, 0 | oui |
+| NinjaTrader, micro-futures CME | 0,79 $ par contrat (0,1 BTC / 0,1 ETH) | 1 cran | 0 (roulement non compte) | oui, BTC et ETH seulement |
+| Binance comptant | 0,1 % | ~0,01 % | 0 | non |
+| Binance comptant, frais en BNB | 0,075 % | ~0,01 % | 0 | non |
+| Interactive Brokers, crypto | 0,18 % (minimum 1,75 $ non simule) | 0,02 % estime | 0 | non |
+
+- Atelier : liste "Courtier" au-dessus des couts (Capital.com sans levier par defaut), note avec la provenance de chaque valeur et le lien source ; changement de courtier ou de paire -> champs remplis ; une valeur retouchee a la main bascule en "Saisie libre". Le courtier part avec le backtest (`broker`) : avertissement si la strategie vend a decouvert chez un courtier qui l'interdit, ou si la paire n'est pas proposee (champs non representatifs).
+- Route `POST /api/bt-broker-costs` (`control_server`, meme gestion d'erreurs que les autres routes de l'atelier : 400 sur courtier ou paire inconnus).
+
+**Limites, assumees** : levier non simule (seul son cout de nuit l'est), minimum par ordre IBKR et taille arrondie au contrat des futures non simules, spreads crypto CFD estimes hors Bitcoin. Valeurs a re-relever de temps en temps : la date du releve est affichee.
+
+**Validation** : `tests/test_broker_costs.py` (17 tests : chaque courtier remplit les quatre champs, points -> %, spread estime et signale, financement avec et sans levier, commission par contrat et actif non propose, vente a decouvert par courtier, courtier inconnu, lecture en direct qui remplace les valeurs publiees, panne de lecture, pas de lecture sans cle) ; `tests/test_backtest_view.py` (+2 : route et catalogue, avertissements). Suite complete : **1070 tests**.
 
 ---
 
