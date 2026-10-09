@@ -33,6 +33,14 @@ bloque le bot des jours (constate le 2026-09-28 : risque 1,9 %, objectif +3,8 %,
 - `fixed_stop_pct` / `fixed_target_pct` : stop et objectif fixes en % du prix
   d'entree, quel que soit le pattern (objectif vide = `reward_risk` fois le stop).
 
+EF-107 : avec spread et commission, un objectif a 2R brut ne fait plus 2R net
+(+20 % sans frais, -0,8 % au mieux avec, constate par l'utilisateur dans
+l'atelier). Le moteur transmet le cout aller-retour (`set_round_trip_cost`) :
+- `cost_cover` : l'objectif est repousse pour que le gain NET reste 2 fois la
+  perte NETTE (couts payes dans les deux cas).
+- `min_risk_cost_ratio` : trade ignore si le stop est a moins de N fois le cout
+  aller-retour (les couts y pesent trop).
+
 Trois setups (`setups`), evalues a chaque cloture :
 1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
    et le rejette : meche sous le POC avec cloture au-dessus, puis bougie verte
@@ -113,14 +121,15 @@ class VolumeProfileStrategy(Strategy):
                  reward_risk: float = 2.0, max_signal_age: int = 3, pullback_max_depth: float = 0.25,
                  stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0, allow_short: bool = False,
                  max_risk_pct: float = 0.0, wide_stop: str = "cap", fixed_stop_pct: float = 0.0,
-                 fixed_target_pct: float = 0.0):
+                 fixed_target_pct: float = 0.0, cost_cover: bool = False, min_risk_cost_ratio: float = 0.0):
         setups = tuple(setups)
         unknown = [s for s in setups if s not in SETUPS]
         if not setups or unknown:
             raise ValueError(f"setups inconnus ou vides : {unknown} (attendus : {', '.join(SETUPS)})")
         if (session_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or reward_risk <= 0
                 or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0
-                or not 0 <= max_risk_pct < 1 or not 0 <= fixed_stop_pct < 1 or not 0 <= fixed_target_pct < 1):
+                or not 0 <= max_risk_pct < 1 or not 0 <= fixed_stop_pct < 1 or not 0 <= fixed_target_pct < 1
+                or min_risk_cost_ratio < 0):
             raise ValueError("parametres hors bornes")
         if wide_stop not in WIDE_STOP_ACTIONS:
             raise ValueError(f"wide_stop : {wide_stop!r} inconnu (attendus : {', '.join(WIDE_STOP_ACTIONS)})")
@@ -131,6 +140,9 @@ class VolumeProfileStrategy(Strategy):
         # EF-105 : stop trop loin -> objectif 2R inatteignable qui bloque le bot des jours.
         self.max_risk_pct, self.wide_stop = max_risk_pct, wide_stop
         self.fixed_stop_pct, self.fixed_target_pct = fixed_stop_pct, fixed_target_pct
+        # EF-107 : objectifs et filtre selon les couts reels, transmis par le moteur.
+        self.cost_cover, self.min_risk_cost_ratio = bool(cost_cover), min_risk_cost_ratio
+        self.round_trip_cost = 0.0
         self._period_ms = session_hours * HOUR_MS
         self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
         self._session: list[Candle] = []
@@ -159,6 +171,10 @@ class VolumeProfileStrategy(Strategy):
             self._reset_session_state()
         self._session_id = session
         self._session.append(candle)
+
+    def set_round_trip_cost(self, pct: float) -> None:
+        """Cout aller-retour en fraction du prix (commission x 2 + spread), donne par le moteur."""
+        self.round_trip_cost = max(0.0, float(pct))
 
     def sync_position(self, entry_price: float | None) -> None:
         """Etat reel transmis par le moteur : pas de nouvelle entree en position.
@@ -268,6 +284,14 @@ class VolumeProfileStrategy(Strategy):
                 return None
             risk = entry * self.max_risk_pct
             reward = self.reward_risk * risk
+        # EF-107 : couts aller-retour (commission + spread) fournis par le moteur.
+        cost = entry * self.round_trip_cost
+        if cost and self.min_risk_cost_ratio and risk < self.min_risk_cost_ratio * cost:
+            return None                  # stop si proche que les couts mangeraient le trade
+        if cost and self.cost_cover:
+            # Objectif repousse pour que, NET des couts, le gain reste `reward / risk` fois la perte :
+            # (R' - c) / (r + c) = R / r  =>  R' = R + c x (1 + R / r).
+            reward += cost * (1 + reward / risk)
         if short:
             if entry - reward <= 0:
                 return None

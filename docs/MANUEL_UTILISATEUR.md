@@ -804,6 +804,19 @@ trade. Trois réglages (tous à 0 = comportement d'origine) :
 Mesuré sur 2025-2026 : seul « cap » à 1 - 1,5 % améliore le résultat ; ignorer ces
 trades, ou des niveaux fixes comme -0,5 % / +1 %, donnent moins bien.
 
+**Volume Profile : tenir compte des coûts**
+Avec un spread ou une commission, un objectif « 2 fois le risque » ne rapporte plus
+2 fois ce que coûte une perte. Deux réglages, qui utilisent les coûts du courtier
+choisi :
+- « Objectif repoussé pour couvrir spread et commission » : l'objectif est éloigné
+  juste assez pour que, coûts déduits, le gain reste 2 fois la perte.
+- « Stop au moins à N fois les coûts » : un trade dont le stop est trop près du prix
+  est ignoré, car les coûts en mangeraient l'essentiel.
+Mesuré sur 2025-2026 : repousser l'objectif seul n'aide pas (il est atteint moins
+souvent). Ignorer les stops trop proches aide nettement : avec « Stop au plus loin à
+1,5 % » et « au moins 10 fois les coûts », la stratégie gagne sur 6 à 7 périodes sur
+12 au lieu de 2 à 4. Elle reste perdante sur DOGE et proche de zéro sur BTC.
+
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
 (ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
@@ -918,3 +931,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Ventes à découvert dans l'Atelier de backtest** : nouvelle case « Ventes à découvert » pour le Volume Profile (schémas de vente de ton document), flèches violettes au-dessus de la bougie pour ces ventes, colonne « Sens » dans le tableau des trades, fiche « Vente / Rachat », deux cartes qui séparent le résultat des achats et des ventes, et un second taux de financement de nuit pour les ventes (négatif = tu reçois). Les libellés du stop-loss et de l'objectif parlent désormais d'« écart au prix d'entrée » (valable dans les deux sens). |
 | 2026-10-09 | **Volume Profile : stop trop loin** - trois nouveaux réglages dans l'Atelier (« Stop au plus loin à » avec « cap » ou « skip », « Stop fixe », « Objectif fixe »), à 0 par défaut. Ton bot Volume Profile n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Atelier de backtest : choix du courtier** - une liste « Courtier » remplit automatiquement commission, spread et financement de nuit (Capital.com, Trade Nation, NinjaTrader, Binance, Interactive Brokers), avec la source de chaque valeur et les estimations signalées ; lecture en direct chez Capital.com si ta clé démo est renseignée. Voir §13 |
+| 2026-10-09 | **Volume Profile selon les coûts** - deux réglages dans l'Atelier : « Objectif repoussé pour couvrir spread et commission » et « Stop au moins à N fois les coûts ». Désactivés par défaut ; ton bot n'est pas modifié. Voir §13 |

@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.03 |
+| **Version** | 1.04 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -117,6 +117,7 @@
 | 1.01 | EF-104 (§3.91) : **ventes a decouvert** - `position_side` sur signal/ordre/position, comptabilite entierement couverte (sans levier), regles de risque miroir (stop au-dessus, trailing sur le plus bas), executeurs au comptant qui refusent, atelier (sens, taux de nuit des ventes) ; **schemas de vente du Volume Profile** par miroir des prix (`allow_short`) ; mesure 1 min : seuil de rentabilite vers 0,03 % de spread aller-retour |
 | 1.02 | EF-105 (§3.92) : **Volume Profile, stop trop loin** - `max_risk_pct` + `wide_stop` (cap / skip), `fixed_stop_pct` / `fixed_target_pct` ; banc `bench_vp_stops.py` : plafonner a 1 - 1,5 % aide (somme +39 / +50 % contre +14 %, immobilisation max 3 - 8 j contre 24), ignorer ou fixer -0,5 / +1 % nuit |
 | 1.03 | EF-106 (§3.93) : **courtiers existants dans l'atelier** - `brokers/costs.py` (7 profils, sources, estimations signalees), route `/api/bt-broker-costs`, lecture en direct Capital.com si cle demo ; avertissements courtier sans vente a decouvert ou sans l'actif |
+| 1.04 | EF-107 (§3.94) : **Volume Profile selon les couts** - `Engine` transmet le cout aller-retour (`set_round_trip_cost`), `cost_cover` (2R net), `min_risk_cost_ratio` (filtre) ; banc `bench_vp_costs.py` : le filtre aide, l'objectif repousse seul non |
 
 ---
 
@@ -2183,6 +2184,33 @@ Lecture : seul le **plafonnement** aide, avec un plateau 1 - 1,5 % (les deux voi
 **Limites, assumees** : levier non simule (seul son cout de nuit l'est), minimum par ordre IBKR et taille arrondie au contrat des futures non simules, spreads crypto CFD estimes hors Bitcoin. Valeurs a re-relever de temps en temps : la date du releve est affichee.
 
 **Validation** : `tests/test_broker_costs.py` (17 tests : chaque courtier remplit les quatre champs, points -> %, spread estime et signale, financement avec et sans levier, commission par contrat et actif non propose, vente a decouvert par courtier, courtier inconnu, lecture en direct qui remplace les valeurs publiees, panne de lecture, pas de lecture sans cle) ; `tests/test_backtest_view.py` (+2 : route et catalogue, avertissements). Suite complete : **1070 tests**.
+
+### 3.94 EF-107 : Volume Profile, objectifs et filtre selon les couts
+
+**Constat** (utilisateur, 2026-10-09, atelier) : +20 % sans frais, -0,8 % au mieux avec spread et commission. Demande : augmenter les objectifs en fonction du spread et de la commission.
+
+**Conception** :
+- `Engine.__init__` : si la strategie expose `set_round_trip_cost(pct)`, elle recoit `2 x RiskConfig.fee_pct` (dans l'atelier, `fee_pct` = commission + demi-spread par ordre, donc l'aller-retour = 2 commissions + le spread). Automatique en backtest, dans l'atelier et pour les bots ; sans effet sur les autres strategies.
+- `VolumeProfileStrategy` (reglages a 0 / faux par defaut : signaux inchanges) :
+  - `cost_cover` : objectif tel que le gain NET (objectif - couts) vaille `reward / risk` fois la perte NETTE (stop + couts) : R' = R + c x (1 + R / r). Applique apres le plafond ou les niveaux fixes d'EF-105, achat et vente.
+  - `min_risk_cost_ratio` : trade ignore si la distance FINALE au stop (apres plafond) est inferieure a N fois le cout aller-retour. Attention a l'interaction : avec un plafond de 1,5 % et N x cout > 1,5 %, plus aucun trade (N = 20 a 0,1 % de spread).
+
+**Mesure** (`scripts/bench_vp_costs.py` ; entrees 15 min, sorties 1 MINUTE au plus haut / plus bas, achats seuls, ETH / BTC / DOGE x 4 semestres 2025-2026 = 12 fenetres, commission 0) :
+
+| Variante | Spread 0,06 % : fen. gagnantes / somme | Spread 0,1 % : fen. gagnantes / somme | Trades par semestre et marche (0,06 %) |
+|---|---|---|---|
+| Actuel (2R brut) | 4/12 / -122 % | 2/12 / -204 % | 199 |
+| Objectif qui couvre les couts | 2/12 / -118 % | 2/12 / -189 % | 191 |
+| Stop >= 10 x couts | 5/12 / -4,5 % | 5/12 / -8,8 % | 64 |
+| Couvre + stop >= 10 x couts | 5/12 / -3,4 % | 6/12 / +17,0 % | 63 |
+| Plafond 1,5 % | 4/12 / -114 % | 2/12 / -210 % | 236 |
+| **Plafond 1,5 % + stop >= 10 x couts** | **6/12 / +10,6 %** | **7/12 / +11,3 %** | 79 |
+| Plafond 1,5 % + stop >= 7 x couts | 6/12 / -10,8 % | 6/12 / -3,7 % | 107 |
+| Plafond 1,5 % + stop >= 15 x couts | 6/12 / +21,5 % | 7/12 / -28,8 % | 51 |
+
+Lecture : repousser l'objectif SEUL n'aide pas - il devient plus dur a atteindre (26 % de gagnants au lieu de 32 %) et le cout reste paye. Le probleme est ailleurs : les trades a stop serre, ou spread et commission representent une grosse part du risque. Les ignorer change tout (de -122 % a -4,5 % en somme a 0,06 %). Le meilleur compromis stable entre les deux spreads : plafond 1,5 % + stop >= 10 x couts (6 a 7 fenetres gagnantes sur 12, mediane 0 a +1 %, pire fenetre -17 a -27 %). Limites : ETH porte le resultat (+34 a +39 %), BTC proche de 0, DOGE perdant partout (-24 a -27 %) ; 4 fois moins de trades ; mediane proche de 0 - ce n'est pas une preuve d'avantage, seulement la fin de l'hemorragie due aux couts.
+
+**Validation** : `tests/test_volume_profile.py` (+5 : couts sans effet par defaut, 2R net avec `cost_cover` a l'achat et en vente, filtre des stops trop proches, cout transmis par le moteur). Suite complete : **1075 tests**.
 
 ---
 

@@ -391,3 +391,58 @@ def test_fixed_levels_are_mirrored_for_short_sells():
 def test_unknown_wide_stop_action_is_refused():
     with pytest.raises(ValueError):
         VolumeProfileStrategy(wide_stop="ignore")
+
+
+# ---------------------------------------------------------------- EF-107 : couts dans l'objectif
+def costly_reentry(cost, **kw):
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], stop_buffer_pct=0.0, **kw)
+    s.set_round_trip_cost(cost)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                   c(at(2), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])
+    return out[1], val + 0.4, val - 1.5
+
+
+def test_costs_change_nothing_unless_asked():
+    sig, entry, low = costly_reentry(0.002)
+    assert sig.target_price == pytest.approx(entry + 2 * (entry - low))
+
+
+def test_cost_cover_keeps_two_r_net_of_costs():
+    sig, entry, low = costly_reentry(0.002, cost_cover=True)
+    risk, cost = entry - low, entry * 0.002
+    net_gain = (sig.target_price - entry) - cost
+    net_loss = (entry - sig.stop_price) + cost
+    assert sig.stop_price == pytest.approx(low)
+    assert net_gain == pytest.approx(2 * net_loss)
+    assert sig.target_price > entry + 2 * risk
+
+
+def test_cost_cover_is_mirrored_for_short_sells():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], stop_buffer_pct=0.0, allow_short=True, cost_cover=True)
+    s.set_round_trip_cost(0.002)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    entry, cost = vah - 0.4, (vah - 0.4) * 0.002
+    sig = out[1]
+    assert (entry - sig.target_price) - cost == pytest.approx(2 * ((sig.stop_price - entry) + cost))
+
+
+def test_stop_too_close_for_the_costs_is_skipped():
+    sig, entry, low = costly_reentry(0.002, min_risk_cost_ratio=10)       # risque ~1,4 % < 10 x 0,2 %
+    assert sig is None
+    sig, _, _ = costly_reentry(0.002, min_risk_cost_ratio=3)
+    assert sig is not None
+
+
+def test_engine_hands_the_round_trip_cost_to_the_strategy():
+    from tradingbot.engine import Engine
+    from tradingbot.execution.backtest_executor import BacktestExecutor
+    from tradingbot.portfolio import Portfolio
+    from tradingbot.risk.risk_manager import RiskConfig, RiskManager
+
+    s = VolumeProfileStrategy()
+    pf = Portfolio(starting_capital=1000, fee_pct=0.0004)
+    Engine(s, RiskManager(RiskConfig(fee_pct=0.0004)), BacktestExecutor(pf), pf)
+    assert s.round_trip_cost == pytest.approx(0.0008)

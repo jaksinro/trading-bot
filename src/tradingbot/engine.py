@@ -68,6 +68,11 @@ class Engine:
         self._last_price: float | None = None
         self._current_day = None  # journee UTC en cours, pour la remise a zero du compteur
         self._strategy_aligned = False  # EF-102 : `align_position` deja appele (une seule fois)
+        # EF-107 : une strategie qui place ses objectifs selon les couts recoit le cout
+        # aller-retour (commission + demi-spread, a l'achat puis a la vente).
+        set_cost = getattr(strategy, "set_round_trip_cost", None)
+        if callable(set_cost):
+            set_cost(2 * (getattr(getattr(risk_manager, "config", None), "fee_pct", 0.0) or 0.0))
 
     def _roll_daily_counters_if_new_day(self, candle: Candle) -> None:
         """Remet a zero le compteur de perte journaliere au changement de jour

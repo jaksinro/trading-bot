@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.98 |
+| **Version** | 0.99 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -112,6 +112,7 @@
 | 0.96 | EF-104 : ventes a decouvert dans le moteur, les backtests et l'atelier ; schemas de vente du Volume Profile ; mesure honnete |
 | 0.97 | EF-105 : Volume Profile - stop trop loin plafonne, ignore, ou niveaux fixes (reglages) ; mesure : seul le plafonnement aide |
 | 0.98 | EF-106 : atelier - choix d'un courtier existant qui remplit commission, spread et financement de nuit |
+| 0.99 | EF-107 : Volume Profile selon les couts - objectif qui couvre spread et commission, filtre des stops trop proches des couts |
 ---
 
 ## 1. Introduction
@@ -296,6 +297,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-104 | Pouvoir vendre a decouvert (parier sur la baisse) : demande de l'utilisateur du 2026-10-09 ("c'est possible d'ajouter les ordres SELL ? La on a que des ordres BUY"), appuyee par son historique TradingView ou les ventes comptaient pour l'essentiel du gain ; courtier vise (Capital.com, CFD) qui le permet | Devrait - **realise en backtest**. Moteur, comptabilite, regles de risque (stop au-dessus, objectif en dessous, trailing sur le plus bas) et atelier (fleches, colonne Sens, financement de nuit propre aux ventes) ; schemas de vente du Volume Profile (`allow_short`, desactive par defaut). Les comptes au comptant (Binance, IBKR) refusent toute vente a decouvert. Mesure (1 min, 12 fenetres) : les ventes ameliorent le resultat sans couts, mais le seuil de rentabilite est vers 0,03 % de spread aller-retour - rien a mettre en reel en l'etat. Executeur CFD a venir. Voir STC §3.91 |
 | EF-105 | Volume Profile : un stop de pattern tres loin donne un objectif 2R inatteignable qui bloque le bot des jours - constate par l'utilisateur le 2026-10-09 (achat du 2026-09-28 a 14h, risque 1,9 %, objectif +3,8 %, vendu au stop le 2026-10-07) ; demande : ponderer stop et objectif, ou les rendre fixes (ex. -0,5 % / +1 %) | Devrait - **realise (reglages, desactives par defaut)** : stop plafonne (`max_risk_pct`, objectif = 2 fois le plafond), trade ignore au-dela (`wide_stop: skip`), ou stop et objectif fixes en % (`fixed_stop_pct`, `fixed_target_pct`). Mesure (12 fenetres, 1 min) : plafonner a 1 - 1,5 % ameliore le resultat et ramene l'immobilisation max de 24 a 3 - 8 jours ; ignorer ces trades ou fixer -0,5 % / +1 % est PIRE. Gain concentre sur ETH, et efface par le spread. Config du bot inchangee (decision de l'utilisateur). Voir STC §3.92 |
 | EF-106 | Choisir un courtier existant dans l'atelier plutot que saisir commission, spread et financement - demande de l'utilisateur du 2026-10-09 ("je voudrais une selection de courtier existant et que ca remplisse automatiquement les champs") | Devrait - **realise**. Capital.com (sans levier / avec levier), Trade Nation, NinjaTrader (micro-futures CME), Binance au comptant (standard / BNB), Interactive Brokers (crypto) : couts publics releves le 2026-10-09, sources affichees, estimations signalees (spreads crypto rarement publies) ; Capital.com lu en direct quand la cle API demo est renseignee. Les champs restent modifiables (saisie libre). Voir STC §3.93 |
+| EF-107 | Volume Profile : tenir compte du spread et de la commission dans l'objectif - demande de l'utilisateur du 2026-10-09 ("augmenter les take profit en fonction du spread et de la com" : +20 % sans frais, -0,8 % au mieux avec) | Devrait - **realise (reglages, desactives par defaut)** : le moteur transmet le cout aller-retour ; `cost_cover` repousse l'objectif pour garder 2R NET ; `min_risk_cost_ratio` ignore les trades dont le stop est a moins de N fois ce cout. Mesure : repousser l'objectif seul n'aide PAS (moins de gagnants) ; le filtre aide nettement - avec le plafond de stop 1,5 % et N = 10, 6 a 7 fenetres gagnantes sur 12 a 0,06 % et 0,1 % de spread (somme +11 %), contre 2 a 4 sans. DOGE reste perdant, mediane proche de 0 : pas une preuve d'avantage. Voir STC §3.94 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---
