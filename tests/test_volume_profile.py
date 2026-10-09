@@ -280,3 +280,60 @@ def test_chart_shows_the_trade_levels():
     lot = Position(quantity=1, avg_entry_price=100, entry_timestamp=0, lot_id=1, stop_price=98.0, target_price=104.0)
     rows = build_orders_table(SimpleNamespace(trade_history=[], positions=[lot]), RiskConfig(stop_loss_pct=0.02))
     assert (rows[0]["target_stop_loss"], rows[0]["target_take_profit"]) == (98.0, 104.0)
+
+
+# ---------------------------------------------------------------- EF-104 : schemas de vente
+def test_short_setups_are_off_by_default():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"])
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    assert out == [None, None]
+
+
+def test_short_poc_rejection_from_below_sells_with_stop_above_wick():
+    s = VolumeProfileStrategy(setups=["poc_rebound"], stop_buffer_pct=0.0, allow_short=True)
+    poc, vah, val = yesterday(s, last_close=100.5)
+    assert s.previous_close < val                                           # veille finie SOUS la zone
+    out = feed(s, [
+        c(at(1), poc - 1.2, poc + 1.0, close=poc - 1.0, open_=poc - 0.9),    # meche au-dessus du POC, cloture dessous
+        c(at(2), poc - 2.0, poc - 0.8, close=poc - 1.8, open_=poc - 1.0),    # rouge qui confirme
+    ])
+    assert out[0] is None
+    sig = out[1]
+    assert (sig.side, sig.position_side, sig.reason) == (Side.SELL, "short", "volume_profile_short_poc_rebound_wick")
+    entry = poc - 1.8
+    assert sig.stop_price == pytest.approx(poc + 1.0)
+    assert sig.target_price == pytest.approx(entry - 2 * (poc + 1.0 - entry))
+
+
+def test_short_value_area_reentry_from_above():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], stop_buffer_pct=0.0, allow_short=True)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),    # cloture au-dessus du VAH
+                   c(at(2), vah + 0.8, vah + 2.0, close=vah + 1.2, open_=vah + 1.0),    # plus haut : vah + 2
+                   c(at(3), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])   # rouge qui rentre
+    assert out[:2] == [None, None]
+    assert out[2].reason == "volume_profile_short_value_area_reentry" and out[2].side == Side.SELL
+    assert out[2].stop_price == pytest.approx(vah + 2.0) and out[2].target_price < out[2].stop_price
+
+
+def test_short_breakdown_below_val_then_close_under_the_old_low():
+    s = VolumeProfileStrategy(setups=["breakout"], stop_buffer_pct=0.0, allow_short=True)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), val - 1.0, val - 0.2, close=val - 0.8, open_=val - 0.3),    # cloture sous le VAL
+                   c(at(2), val - 1.6, val - 0.7, close=val - 1.4, open_=val - 0.8),    # impulsion : plus bas val - 1.6
+                   c(at(3), val - 1.3, val - 0.6, close=val - 0.8, open_=val - 1.3),    # repli sans nouveau plus bas
+                   c(at(4), val - 1.9, val - 0.8, close=val - 1.7, open_=val - 0.9)])   # cloture sous l'ancien plus bas
+    assert out[:3] == [None, None, None]
+    assert out[3].reason == "volume_profile_short_breakdown" and out[3].position_side == "short"
+    assert out[3].stop_price == pytest.approx(val - 1.6)
+
+
+def test_no_short_while_a_position_is_open():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], allow_short=True)
+    poc, vah, val = yesterday(s, last_close=105)
+    s.sync_position(100.0)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    assert out == [None, None]

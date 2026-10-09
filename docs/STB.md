@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.95 |
+| **Version** | 0.96 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -109,6 +109,7 @@
 | 0.93 | EF-101 : connecteur Capital.com (compte demo) |
 | 0.94 | EF-102 : au demarrage, les bots agissent selon leur position reelle et decident sur la derniere bougie close (IBKR compris) |
 | 0.95 | EF-103 : un bot ne meurt plus sur une erreur reseau passagere AU DEMARRAGE (502 du testnet) : nouveaux essais, puis abandon propre |
+| 0.96 | EF-104 : ventes a decouvert dans le moteur, les backtests et l'atelier ; schemas de vente du Volume Profile ; mesure honnete |
 ---
 
 ## 1. Introduction
@@ -290,6 +291,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-101 | Se connecter au courtier vise par l'utilisateur (Capital.com) pour mesurer ses couts reels (spread, financement) et preparer le trading des bots chez lui - 2026-10-09 | Devrait - **realise en partie** : connecteur compte demo (le reel est refuse dans le code) et script de verification ; executeur pour les bots a venir. Voir STC §3.88 |
 | EF-102 | Au demarrage, un bot doit agir selon sa position REELLE et decider sur la derniere bougie close - defauts constates le 2026-10-09 : une strategie a etat (achat unique, RSI, Bollinger) pouvait sortir du rechauffage en se croyant en position, bot a plat (achat unique jamais execute), ou ignorer une position restauree ; un bot actions IBKR relance chaque jour ne decidait jamais | Doit - **realise**. Strategie alignee une fois sur la position reelle avant la premiere decision (backtests inchanges) ; bots IBKR : la derniere bougie close est une vraie decision. Voir STC §3.89 |
 | EF-103 | Un bot ne doit pas mourir sur une erreur reseau passagere pendant son DEMARRAGE - constate le 2026-10-09 : le 2026-10-07 a 09h51, le testnet Binance a repondu "502 Bad Gateway" au chargement des marches, ETH_MOMENTUM s'est arrete et n'a repris qu'a la relance automatique suivante ; EF-85 ne protegeait que la boucle principale | Doit - **realise**. Connexion (marches, solde), cours et rechauffage sont reessayes avec une attente croissante (5 s a 2 min), chaque tentative journalisee ; au-dela de 15 min au total, arret propre avec un message clair. Les erreurs non reseau (cle invalide, bug) arretent toujours le bot aussitot. Voir STC §3.90 |
+| EF-104 | Pouvoir vendre a decouvert (parier sur la baisse) : demande de l'utilisateur du 2026-10-09 ("c'est possible d'ajouter les ordres SELL ? La on a que des ordres BUY"), appuyee par son historique TradingView ou les ventes comptaient pour l'essentiel du gain ; courtier vise (Capital.com, CFD) qui le permet | Devrait - **realise en backtest**. Moteur, comptabilite, regles de risque (stop au-dessus, objectif en dessous, trailing sur le plus bas) et atelier (fleches, colonne Sens, financement de nuit propre aux ventes) ; schemas de vente du Volume Profile (`allow_short`, desactive par defaut). Les comptes au comptant (Binance, IBKR) refusent toute vente a decouvert. Mesure (1 min, 12 fenetres) : les ventes ameliorent le resultat sans couts, mais le seuil de rentabilite est vers 0,03 % de spread aller-retour - rien a mettre en reel en l'etat. Executeur CFD a venir. Voir STC §3.91 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

@@ -79,8 +79,13 @@ class IBPaperExecutor(ExecutionAdapter):
         self.portfolio = Portfolio(starting_capital=0.0)
 
     def place_order(
-        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None
+        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None,
+        position_side: str = "long",
     ) -> OrderResult:
+        if position_side == "short":
+            # EF-104 : compte au comptant (spot / actions) - pas de vente a decouvert ici.
+            return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected",
+                               reason="vente a decouvert impossible sur ce compte (comptant)", position_side="short")
         # Actions IBKR : quantite ENTIERE obligatoire (arrondi a l'entier
         # inferieur), contrairement a la crypto qui accepte des fractions.
         rounded_quantity = int(quantity)

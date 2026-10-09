@@ -63,7 +63,7 @@ def test_catalog_is_generated_from_the_strategies(tmp_path):
 def test_parse_reads_lists_and_validates():
     spec = bv.parse({"strategy_type": "momentum_vote", "params": {"lookbacks": "7, 14;30"}, "timeframe": "1d"})
     assert spec["params"]["lookbacks"] == (7, 14, 30)
-    assert spec["costs"] == {"fee_pct": 0.0, "spread_pct": 0.0, "overnight_pct": 0.0}
+    assert spec["costs"] == {"fee_pct": 0.0, "spread_pct": 0.0, "overnight_pct": 0.0, "overnight_short_pct": 0.0}
     with pytest.raises(ValueError):
         bv.parse({"strategy_type": "inconnue"})
     with pytest.raises(ValueError, match="refuses"):
@@ -130,6 +130,35 @@ def test_trade_stop_and_target_are_reported(market, monkeypatch):
     tr = r["trades"][0]
     assert tr["target"] == pytest.approx(tr["entry_p"] * 1.02)
     assert tr["reason"] in ("objectif_trade", "stop_trade")
+
+
+def test_short_trades_are_reported_with_their_direction_and_own_financing(market, monkeypatch):
+    """EF-104 : vente a decouvert dans l'atelier. Gain si le prix baisse, taux de
+    nuit propre aux ventes (negatif = credit recu)."""
+    class ShortOnce:
+        def __init__(self):
+            self.n = 0
+
+        def on_candle(self, c):
+            self.n += 1
+            if self.n == 80:
+                return Signal(side=Side.SELL, reason="t", stop_price=c.close * 1.5, target_price=c.close * 0.5,
+                              position_side="short")
+            return None
+
+    monkeypatch.setitem(bv.STRATEGY_REGISTRY, "short_once", ShortOnce)
+    monkeypatch.setitem(bv.STRATEGIES, "short_once", ("test", "test"))
+    p = base(strategy_type="short_once", params={}, warmup_bars=0, end="2025-01-20",
+             costs={"overnight_short_pct": -0.001})
+    r = bv.run(p)
+    pos = r["open_positions"][0]
+    last = r["candles"][-1][4]
+    assert pos["direction"] == "short"
+    assert (pos["pnl"] > 0) == (last < pos["entry_p"])          # latent du bon signe
+    assert r["stats"]["financing_paid"] < 0                     # credit recu chaque nuit
+    assert bv.run({**p, "costs": {}})["stats"]["final_equity"] < r["stats"]["final_equity"]
+    with pytest.raises(ValueError):
+        bv.parse({**p, "costs": {"overnight_pct": -0.001}})     # seul le taux des ventes peut etre negatif
 
 
 def test_finer_exit_checks_run(market):

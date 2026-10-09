@@ -13,8 +13,16 @@ son plus bas et son plus haut (TradingView utilise des bougies plus fines).
 Regle generale du document : on n'entre qu'a la CLOTURE de la bougie qui
 valide la derniere condition, jamais avant ; stop et objectif a 2 fois le
 risque (2R) sont propres au trade (`Signal.stop_price/target_price`, surveilles
-par le moteur). Achat seulement : le bot trade au comptant, sans vente a
-decouvert - les schemas "vente" du document ne sont pas transposables.
+par le moteur).
+
+EF-104 : `allow_short` (desactive par defaut) ajoute les schemas "vente" du
+document, miroirs exacts des trois setups d'achat : rejet du POC par le haut
+quand la veille a fini sous le VAL, retour dans la zone depuis le dessus (bougie
+rouge qui reclot sous le VAH), cassure du VAL puis cloture sous l'ancien plus
+bas. Le stop est alors au-dessus du pattern et l'objectif en dessous. Le miroir
+est calcule en inversant les prix (plus haut <-> plus bas), ce qui garantit des
+regles identiques dans les deux sens. Ne s'execute qu'en backtest ou chez un
+courtier qui autorise la vente a decouvert (CFD) : un compte au comptant refuse.
 
 Trois setups (`setups`), evalues a chaque cloture :
 1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
@@ -83,10 +91,17 @@ def volume_profile(candles, rows: int = 50, value_area_pct: float = 0.70) -> tup
     return poc, lo + (high_i + 1) * step, lo + low_i * step
 
 
+def _mirror(c: Candle | None) -> Candle | None:
+    """Bougie vue dans un miroir de prix : une baisse devient une hausse."""
+    if c is None:
+        return None
+    return Candle(timestamp=c.timestamp, open=-c.open, high=-c.low, low=-c.high, close=-c.close, volume=c.volume)
+
+
 class VolumeProfileStrategy(Strategy):
     def __init__(self, setups=SETUPS, session_hours: int = 24, rows: int = 50, value_area_pct: float = 0.70,
                  reward_risk: float = 2.0, max_signal_age: int = 3, pullback_max_depth: float = 0.25,
-                 stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0):
+                 stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0, allow_short: bool = False):
         setups = tuple(setups)
         unknown = [s for s in setups if s not in SETUPS]
         if not setups or unknown:
@@ -97,6 +112,7 @@ class VolumeProfileStrategy(Strategy):
         self.setups, self.session_hours, self.rows, self.value_area_pct = setups, session_hours, rows, value_area_pct
         self.reward_risk, self.max_signal_age = reward_risk, max_signal_age
         self.pullback_max_depth, self.stop_buffer_pct, self.min_risk_pct = pullback_max_depth, stop_buffer_pct, min_risk_pct
+        self.allow_short = bool(allow_short)
         self._period_ms = session_hours * HOUR_MS
         self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
         self._session: list[Candle] = []
@@ -108,10 +124,12 @@ class VolumeProfileStrategy(Strategy):
         self._reset_session_state()
 
     def _reset_session_state(self) -> None:
-        self._wick: dict | None = None        # setup 1 : meche de rejet en attente de confirmation
-        self._outside_low: float | None = None  # setup 2 : plus bas depuis la cloture sous le VAL
-        self._bo_phase = 0                    # setup 3 : 0 attente, 1 impulsion, 2 repli
-        self._bo_high = 0.0
+        # Un etat par sens : les setups de vente suivent leurs propres meches et impulsions.
+        self._state = {direction: {"wick": None,       # setup 1 : meche de rejet en attente de confirmation
+                                   "outside": None,    # setup 2 : extreme atteint depuis la sortie de zone
+                                   "bo_phase": 0,      # setup 3 : 0 attente, 1 impulsion, 2 repli
+                                   "bo_high": 0.0}
+                       for direction in ("long", "short")}
 
     # ------------------------------------------------------------------ seances
     def _roll_session(self, candle: Candle) -> None:
@@ -135,78 +153,96 @@ class VolumeProfileStrategy(Strategy):
         signal = None
         if self.profile is not None:
             poc, vah, val = self.profile
-            # Chaque setup met a jour son etat a chaque bougie ; le premier valide l'emporte.
-            found = [self._poc_rebound(candle, poc, vah) if "poc_rebound" in self.setups else None,
-                     self._reentry(candle, vah, val) if "value_area_reentry" in self.setups else None,
-                     self._breakout(candle, vah, val) if "breakout" in self.setups else None]
-            found = [f for f in found if f is not None]
+            # Vente = memes regles appliquees aux prix inverses (VAH et VAL echangent leur role).
+            views = [("long", candle, self._prev, poc, vah, val, self.previous_close)]
+            if self.allow_short:
+                views.append(("short", _mirror(candle), _mirror(self._prev), -poc, -val, -vah,
+                              None if self.previous_close is None else -self.previous_close))
+            found = []
+            for direction, c, prev, p, hi, lo, prev_close in views:
+                st = self._state[direction]
+                # Chaque setup met a jour son etat a chaque bougie ; le premier valide l'emporte.
+                hits = [self._poc_rebound(st, c, prev, prev_close, p, hi) if "poc_rebound" in self.setups else None,
+                        self._reentry(st, c, prev_close, hi, lo) if "value_area_reentry" in self.setups else None,
+                        self._breakout(st, c, hi, lo) if "breakout" in self.setups else None]
+                found += [(direction, *h) for h in hits if h is not None]
             if found and not self._in_position:
                 signal = self._signal(candle, *found[0])
         self._prev = candle
         return signal
 
-    def _poc_rebound(self, c: Candle, poc: float, vah: float):
-        if self.previous_close is None or self.previous_close <= vah:
-            self._wick = None
+    def _poc_rebound(self, st: dict, c: Candle, prev: Candle | None, prev_close: float | None, poc: float, vah: float):
+        if prev_close is None or prev_close <= vah:
+            st["wick"] = None
             return None
-        prev = self._prev
         # Avalement haussier forme SUR le POC : corps vert qui recouvre tout le corps rouge d'avant.
         if (prev is not None and prev.close < prev.open and c.close > c.open
                 and c.open <= prev.close and c.close >= prev.open
                 and min(prev.low, c.low) <= poc <= max(prev.high, c.high) and c.close > poc):
-            self._wick = None
+            st["wick"] = None
             return ("poc_rebound_engulfing", min(prev.low, c.low))
-        if self._wick is not None:
-            self._wick["age"] += 1
-            if c.close < poc or self._wick["age"] > self.max_signal_age:
-                self._wick = None            # rejet rate, ou signal trop vieux : on ne court pas apres
-            elif c.close > c.open and c.close > self._wick["close"]:
-                low = min(self._wick["low"], c.low)
-                self._wick = None
-                return ("poc_rebound_wick", low)
+        wick = st["wick"]
+        if wick is not None:
+            wick["age"] += 1
+            if c.close < poc or wick["age"] > self.max_signal_age:
+                st["wick"] = None            # rejet rate, ou signal trop vieux : on ne court pas apres
+            elif c.close > c.open and c.close > wick["close"]:
+                st["wick"] = None
+                return ("poc_rebound_wick", min(wick["low"], c.low))
         # Meche de rejet haussiere : meche sous le POC, cloture au-dessus.
         if c.low < poc < c.close and min(c.open, c.close) > poc:
-            self._wick = {"low": c.low, "close": c.close, "age": 0}
+            st["wick"] = {"low": c.low, "close": c.close, "age": 0}
         return None
 
-    def _reentry(self, c: Candle, vah: float, val: float):
-        if self.previous_close is None or not val <= self.previous_close <= vah:
-            self._outside_low = None
+    def _reentry(self, st: dict, c: Candle, prev_close: float | None, vah: float, val: float):
+        if prev_close is None or not val <= prev_close <= vah:
+            st["outside"] = None
             return None
         if c.close < val:
-            self._outside_low = c.low if self._outside_low is None else min(self._outside_low, c.low)
+            st["outside"] = c.low if st["outside"] is None else min(st["outside"], c.low)
             return None
-        if self._outside_low is not None:
-            low = min(self._outside_low, c.low)
+        if st["outside"] is not None:
+            low = min(st["outside"], c.low)
             if c.close > c.open and c.close <= vah:
-                self._outside_low = None
+                st["outside"] = None
                 return ("value_area_reentry", low)
-            self._outside_low = low
+            st["outside"] = low
         return None
 
-    def _breakout(self, c: Candle, vah: float, val: float):
+    def _breakout(self, st: dict, c: Candle, vah: float, val: float):
         floor = vah - self.pullback_max_depth * (vah - val)
-        if self._bo_phase == 0:
+        if st["bo_phase"] == 0:
             if c.close > vah:
-                self._bo_phase, self._bo_high = 1, c.high
+                st["bo_phase"], st["bo_high"] = 1, c.high
             return None
         if c.close < floor:                      # repli trop profond : la cassure a echoue
-            self._bo_phase = 0
+            st["bo_phase"] = 0
             return None
-        if self._bo_phase == 1:
-            if c.high > self._bo_high:
-                self._bo_high = c.high           # l'impulsion continue
+        if st["bo_phase"] == 1:
+            if c.high > st["bo_high"]:
+                st["bo_high"] = c.high           # l'impulsion continue
             else:
-                self._bo_phase = 2               # premiere bougie sans nouveau plus haut : le repli
+                st["bo_phase"] = 2               # premiere bougie sans nouveau plus haut : le repli
             return None
-        if c.close > self._bo_high:              # cloture au-dessus de l'ancien plus haut
-            level = self._bo_high
-            self._bo_phase = 0
-            return ("breakout", level)
+        if c.close > st["bo_high"]:              # cloture au-dessus de l'ancien plus haut
+            st["bo_phase"] = 0
+            return ("breakout", st["bo_high"])
         return None
 
-    def _signal(self, c: Candle, reason: str, stop_level: float) -> Signal | None:
+    def _signal(self, c: Candle, direction: str, reason: str, stop_level: float) -> Signal | None:
         entry = c.close
+        if direction == "short":
+            # Niveau revenu du miroir : stop AU-DESSUS du pattern, objectif en dessous.
+            stop = -stop_level * (1 + self.stop_buffer_pct)
+            if self.min_risk_pct and (stop - entry) / entry < self.min_risk_pct:
+                stop = entry * (1 + self.min_risk_pct)
+            risk = stop - entry
+            target = entry - self.reward_risk * risk
+            if risk <= 0 or target <= 0:
+                return None
+            name = "breakdown" if reason == "breakout" else reason
+            return Signal(side=Side.SELL, reason=f"volume_profile_short_{name}", stop_price=stop,
+                          target_price=target, position_side="short")
         stop = stop_level * (1 - self.stop_buffer_pct)
         if self.min_risk_pct and (entry - stop) / entry < self.min_risk_pct:
             stop = entry * (1 - self.min_risk_pct)

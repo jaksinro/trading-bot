@@ -19,7 +19,8 @@ class ExecutionAdapter(ABC):
 
     @abstractmethod
     def place_order(
-        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None
+        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None,
+        position_side: str = "long",
     ) -> OrderResult:
         """`lot_id` identifie le lot a fermer pour une vente (EF-21, plusieurs
         positions simultanees) ; ignore pour un achat, qui cree toujours un

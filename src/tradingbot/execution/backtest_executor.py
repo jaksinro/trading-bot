@@ -17,16 +17,21 @@ class BacktestExecutor(ExecutionAdapter):
         self.portfolio = portfolio
 
     def place_order(
-        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None
+        self, side: Side, quantity: float, price: float, timestamp: int, reason: str = "", lot_id: int | None = None,
+        position_side: str = "long",
     ) -> OrderResult:
         if quantity <= 0:
             return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected", reason=reason)
 
         # EF-99 : jamais de credit - un achat dont le cout + frais depasse le cash est refuse.
-        if side == Side.BUY and quantity * price * (1 + self.portfolio.fee_pct) > self.portfolio.cash + 1e-9:
-            return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected", reason=reason)
+        # EF-104 : une ouverture (achat, ou vente a decouvert) immobilise son montant : meme controle.
+        opening = (side == Side.BUY) == (position_side != "short")
+        if opening and quantity * price * (1 + self.portfolio.fee_pct) > self.portfolio.cash + 1e-9:
+            return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected",
+                               reason=reason, position_side=position_side)
 
-        order = OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="filled", reason=reason)
+        order = OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="filled",
+                            reason=reason, position_side=position_side)
         self.portfolio.apply_fill(order, lot_id=lot_id)
         return order
 

@@ -52,6 +52,7 @@ class Portfolio:
             lot_id=self._next_lot_id,
             entry_fee=fee,
             peak_price=order.price,
+            direction=order.position_side,
         )
         self._next_lot_id += 1
         return position
@@ -68,7 +69,11 @@ class Portfolio:
         fee = gross * self.fee_pct
         self.total_fees_paid += fee
 
-        if order.side == Side.BUY:
+        # EF-104 : un BUY ouvre une position acheteuse, un SELL "short" ouvre une
+        # vente a decouvert. Dans les deux cas le montant engage est immobilise
+        # (position entierement couverte, sans levier : jamais de cash negatif).
+        opening = (order.side == Side.BUY) == (order.position_side != "short")
+        if opening:
             self.cash -= gross + fee
             self.positions.append(self.open_new_lot(order, fee))
             return
@@ -81,7 +86,11 @@ class Portfolio:
             return
 
         position = self.positions[idx]
-        net_proceeds = gross - fee
+        # Vente a decouvert : on recupere le montant immobilise plus l'ecart
+        # (entree - sortie) - meme formule de P&L ensuite que pour un achat.
+        close_value = (gross if position.direction != "short"
+                       else order.quantity * (2 * position.avg_entry_price - order.price))
+        net_proceeds = close_value - fee
         is_partial = order.quantity < position.quantity - 1e-12  # marge flottante
 
         if is_partial:
@@ -105,6 +114,7 @@ class Portfolio:
                 "quantity": order.quantity,
                 "reason": order.reason,
                 "lot_id": position.lot_id,
+                "direction": position.direction,
                 "fees_paid": fee + entry_fee_share,
                 "partial": True,
             }
@@ -130,6 +140,7 @@ class Portfolio:
             "quantity": order.quantity,
             "reason": order.reason,
             "lot_id": closed.lot_id,
+            "direction": closed.direction,
             "fees_paid": fee + closed.entry_fee,
         }
         self.trade_history.append(trade)
@@ -138,7 +149,15 @@ class Portfolio:
             self.on_trade_closed(trade)
 
     def equity(self, current_price: float) -> float:
-        return self.cash + self.total_position_quantity * current_price
+        return self.cash + sum(position_value(p, current_price) for p in self.positions)
 
     def record_equity(self, timestamp: int, current_price: float) -> None:
         self.equity_curve.append((timestamp, self.equity(current_price)))
+
+
+def position_value(position: Position, price: float) -> float:
+    """Valeur d'un lot au cours `price` : quantite x cours pour un achat ; pour
+    une vente a decouvert (EF-104), montant immobilise + (entree - cours) x quantite."""
+    if position.direction == "short":
+        return position.quantity * (2 * position.avg_entry_price - price)
+    return position.quantity * price

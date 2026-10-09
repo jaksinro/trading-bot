@@ -12,6 +12,25 @@ from tradingbot.types import Position, Side, Signal
 TRAILING_MODES = ("distance", "gain")
 
 
+def is_opening(signal: Signal) -> bool:
+    """EF-104 : BUY ouvre un achat ; SELL "short" ouvre une vente a decouvert."""
+    return (signal.side == Side.BUY) == (getattr(signal, "position_side", "long") != "short")
+
+
+def gain_of(position: Position, price: float) -> float:
+    """Gain latent en part du prix d'entree, dans le sens de la position."""
+    entry = position.avg_entry_price
+    diff = entry - price if getattr(position, "direction", "long") == "short" else price - entry
+    return diff / entry if entry else 0.0
+
+
+def best_price(position: Position) -> float:
+    """Plus haut depuis l'entree (achat) ou plus bas (vente a decouvert), tenu dans `peak_price`."""
+    if getattr(position, "direction", "long") == "short":
+        return min(position.peak_price or position.avg_entry_price, position.avg_entry_price)
+    return max(position.peak_price, position.avg_entry_price)
+
+
 @dataclass
 class RiskConfig:
     max_position_size_pct: float = 0.10  # % du capital par position
@@ -41,12 +60,21 @@ class RiskConfig:
         if self.trailing_mode not in TRAILING_MODES:
             raise ValueError(f"trailing_mode inconnu : {self.trailing_mode!r} (attendu : {', '.join(TRAILING_MODES)})")
 
-    def trailing_stop_price(self, entry: float, peak: float) -> float | None:
+    def trailing_stop_price(self, entry: float, peak: float, direction: str = "long") -> float | None:
         """Seuil de vente du trailing stop, ou None s'il n'est pas actif (desactive,
         ou pas encore arme en mode "gain"). Source unique pour la decision de vente
         ET la ligne affichee sur le graphique."""
         if self.trailing_stop_pct is None or entry <= 0:
             return None
+        if direction == "short":
+            # EF-104 : vente a decouvert - `peak` est le PLUS BAS atteint, le seuil est au-dessus.
+            low = min(peak or entry, entry)
+            if self.trailing_mode == "distance":
+                return low * (1 + self.trailing_stop_pct)
+            arm = self.trailing_arm_pct if self.trailing_arm_pct is not None else 2 * self.fee_pct
+            if (entry - low) / entry < arm or low >= entry:
+                return None
+            return entry - (entry - low) * (1 - self.trailing_stop_pct)
         peak = max(peak, entry)
         if self.trailing_mode == "distance":
             return peak * (1 - self.trailing_stop_pct)
@@ -107,14 +135,12 @@ class RiskManager:
     def should_stop_loss(self, position: Position, current_price: float) -> bool:
         if not position.is_open or position.quantity <= 0 or self.config.stop_loss_pct is None:
             return False
-        loss_pct = (position.avg_entry_price - current_price) / position.avg_entry_price
-        return loss_pct >= self.config.stop_loss_pct
+        return -gain_of(position, current_price) >= self.config.stop_loss_pct
 
     def should_take_profit(self, position: Position, current_price: float) -> bool:
         if not position.is_open or position.quantity <= 0 or self.config.take_profit_pct is None:
             return False
-        gain_pct = (current_price - position.avg_entry_price) / position.avg_entry_price
-        return gain_pct >= self.config.take_profit_pct
+        return gain_of(position, current_price) >= self.config.take_profit_pct
 
     def should_trailing_stop(self, position: Position, current_price: float) -> bool:
         """EF-24 : sort si le prix retombe sous le seuil du trailing stop -
@@ -123,8 +149,11 @@ class RiskManager:
         `RiskConfig.trailing_stop_price`."""
         if not position.is_open or position.quantity <= 0:
             return False
-        threshold = self.config.trailing_stop_price(position.avg_entry_price, position.peak_price)
-        return threshold is not None and current_price <= threshold
+        direction = getattr(position, "direction", "long")
+        threshold = self.config.trailing_stop_price(position.avg_entry_price, position.peak_price, direction)
+        if threshold is None:
+            return False
+        return current_price >= threshold if direction == "short" else current_price <= threshold
 
     def should_profit_lock(self, position: Position, current_price: float) -> bool:
         """Etape 9 (feuille de route performance) : verrou de gain a deux
@@ -142,11 +171,10 @@ class RiskManager:
             return False
         if self.config.profit_lock_arm_pct is None or self.config.profit_lock_trigger_pct is None:
             return False
-        peak = max(position.peak_price, position.avg_entry_price)
-        peak_gain_pct = (peak - position.avg_entry_price) / position.avg_entry_price
+        peak_gain_pct = gain_of(position, best_price(position))
         if peak_gain_pct < self.config.profit_lock_arm_pct:
             return False  # jamais arme : le pic n'a jamais depasse le seuil d'armement
-        current_gain_pct = (current_price - position.avg_entry_price) / position.avg_entry_price
+        current_gain_pct = gain_of(position, current_price)
         return current_gain_pct <= self.config.profit_lock_trigger_pct
 
     def should_partial_take_profit(self, position: Position, current_price: float) -> bool:
@@ -159,8 +187,7 @@ class RiskManager:
             return False
         if self.config.partial_take_profit_pct is None or position.partial_exit_done:
             return False
-        gain_pct = (current_price - position.avg_entry_price) / position.avg_entry_price
-        return gain_pct >= self.config.partial_take_profit_pct
+        return gain_of(position, current_price) >= self.config.partial_take_profit_pct
 
     def validate(
         self,
@@ -173,7 +200,7 @@ class RiskManager:
         """Retourne True si le signal peut etre transmis a l'execution.
         `open_positions`/`current_price` sont optionnels : necessaires
         uniquement pour la regle anti-accumulation (EF-23) sur un achat."""
-        if signal.side == Side.BUY:
+        if is_opening(signal):
             # L'arret journalier ne bloque QUE les achats. Bloquer une vente
             # enfermerait dans une position perdante le jour meme ou la perte
             # max est atteinte : un garde-fou qui aggrave le risque qu'il
@@ -184,9 +211,13 @@ class RiskManager:
             if open_positions_count >= self.config.max_concurrent_positions:
                 return False
             if self.config.block_buy_if_any_position_losing and open_positions and current_price is not None:
-                if any(current_price < p.avg_entry_price for p in open_positions):
+                if any(gain_of(p, current_price) < 0 for p in open_positions):
                     return False
             return True
+        # Fermeture : il faut une position ouverte DANS LE SENS vise (EF-104).
+        if open_positions is not None:
+            side = getattr(signal, "position_side", "long")
+            return any(getattr(p, "direction", "long") == side for p in open_positions)
         return open_positions_count > 0  # SELL : rien a vendre si aucune position ouverte
 
     def explain_rejection(
@@ -199,7 +230,7 @@ class RiskManager:
     ) -> str:
         """Message lisible expliquant pourquoi `validate` a refuse ce signal
         (utilise pour le journal des decisions affiche sur le dashboard)."""
-        if signal.side == Side.BUY:
+        if is_opening(signal):
             if self._halted_for_today:
                 return "trading suspendu pour aujourd'hui (perte journaliere max atteinte)"
             if open_positions_count >= self.config.max_concurrent_positions:
@@ -208,6 +239,6 @@ class RiskManager:
                     f"atteinte ({open_positions_count} ouverte(s))"
                 )
             if self.config.block_buy_if_any_position_losing and open_positions and current_price is not None:
-                if any(current_price < p.avg_entry_price for p in open_positions):
+                if any(gain_of(p, current_price) < 0 for p in open_positions):
                     return "au moins une position ouverte est deja en perte latente (pas d'achat supplementaire)"
         return "aucune position a vendre"

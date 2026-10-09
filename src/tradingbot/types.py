@@ -28,6 +28,9 @@ class Signal:
     # moteur comme le stop-loss. None = seuls les reglages de risque du bot.
     stop_price: float | None = None
     target_price: float | None = None
+    # EF-104 : position visee par le signal. "short" : SELL ouvre une vente a
+    # decouvert, BUY la rachete. "long" (defaut) : BUY achete, SELL revend.
+    position_side: str = "long"
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,9 @@ class OrderResult:
     timestamp: int
     status: str  # "filled" | "rejected"
     reason: str = ""  # "stop_loss" | "take_profit" | raison du signal de strategie
+    # EF-104 : sens de la position concernee. "short" : un SELL ouvre une position
+    # vendeuse, un BUY la ferme (rachat). "long" (defaut) : comportement historique.
+    position_side: str = "long"
 
 
 @dataclass
@@ -75,6 +81,7 @@ class Position:
     entry_fee: float = 0.0  # frais payes a l'achat, deduits du P&L a la revente
     peak_price: float = 0.0  # plus haut prix observe depuis l'entree (trailing stop)
     partial_exit_done: bool = False  # sortie partielle (EF-32) deja declenchee sur ce lot, ne se redeclenche pas
+    direction: str = "long"            # EF-104 : "long" (achat) ou "short" (vente a decouvert, CFD)
     stop_price: float | None = None    # EF-97 : stop propre au trade (Signal.stop_price)
     target_price: float | None = None  # EF-97 : objectif propre au trade (Signal.target_price)
 

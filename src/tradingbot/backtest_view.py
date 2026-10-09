@@ -70,6 +70,7 @@ PARAM_LABELS = {
     "dip_threshold_pct": "Profondeur du creux", "force_trade_after_hours": "Forcer un trade apres (heures, vide = jamais)",
     "slope_threshold_pct": "Pente minimale", "candles_window": "Fenetre de pente (bougies)",
     "one_buy_per_slope": "Un seul achat par pente", "lookback": "Fenetre (bougies)",
+    "allow_short": "Ventes a decouvert (schemas de vente)",
 }
 HIDDEN_PARAMS = {"warmup_candles"}
 
@@ -77,8 +78,8 @@ HIDDEN_PARAMS = {"warmup_candles"}
 # "pct" : fraction affichee en %. "optional_pct" : vide = desactive.
 RISK_FIELDS = [
     ("max_position_size_pct", "Taille de position (part du cash)", "pct", 1.0),
-    ("stop_loss_pct", "Stop-loss sous le prix d'achat", "optional_pct", None),
-    ("take_profit_pct", "Objectif au-dessus du prix d'achat", "optional_pct", None),
+    ("stop_loss_pct", "Stop-loss (ecart au prix d'entree)", "optional_pct", None),
+    ("take_profit_pct", "Objectif (ecart au prix d'entree)", "optional_pct", None),
     ("trailing_stop_pct", "Trailing stop", "optional_pct", None),
     ("trailing_mode", "Sens du trailing", "choice:" + ",".join(TRAILING_MODES), "distance"),
     ("trailing_arm_pct", "Armement du trailing (mode gain)", "optional_pct", None),
@@ -92,7 +93,9 @@ RISK_FIELDS = [
 COST_FIELDS = [
     ("fee_pct", "Commission par ordre", "pct", 0.0),
     ("spread_pct", "Spread (ecart achat/vente)", "pct", 0.0),
-    ("overnight_pct", "Financement par nuit (CFD), sur la valeur detenue", "pct", 0.0),
+    ("overnight_pct", "Financement par nuit (CFD), position acheteuse", "pct", 0.0),
+    # EF-104 : une vente a decouvert a son propre taux, qui peut etre un credit (negatif).
+    ("overnight_short_pct", "Financement par nuit, vente a decouvert (negatif = recu)", "pct", 0.0),
 ]
 
 
@@ -215,8 +218,10 @@ def parse(payload: dict) -> dict:
     costs_raw = payload.get("costs") or {}
     costs = {name: _coerce({"name": name, "kind": "float", "default": default}, costs_raw.get(name))
              for name, _, _, default in COST_FIELDS}
-    if any(v < 0 for v in costs.values()) or costs["spread_pct"] >= 0.2 or costs["fee_pct"] >= 0.1:
-        raise ValueError("couts hors bornes (positifs, commission < 10 %, spread < 20 %)")
+    if (any(v < 0 for k, v in costs.items() if k != "overnight_short_pct") or costs["spread_pct"] >= 0.2
+            or costs["fee_pct"] >= 0.1 or abs(costs["overnight_short_pct"]) >= 0.05):
+        raise ValueError("couts hors bornes (positifs sauf le credit de nuit des ventes, commission < 10 %, "
+                         "spread < 20 %)")
 
     symbol = str(payload.get("symbol") or "ETH/USDT").upper()
     timeframe = payload.get("timeframe") or "1h"
@@ -298,9 +303,10 @@ def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict
                 if fine else [(c, True) for c in entry])
     for candle, is_entry in timeline:
         day = candle.timestamp // DAY_MS
-        if day > last_day and portfolio.positions and costs["overnight_pct"]:
+        if day > last_day and portfolio.positions and (costs["overnight_pct"] or costs["overnight_short_pct"]):
             for p in portfolio.positions:
-                charge = p.quantity * candle.open * costs["overnight_pct"] * (day - last_day)
+                rate = costs["overnight_short_pct"] if p.direction == "short" else costs["overnight_pct"]
+                charge = p.quantity * candle.open * rate * (day - last_day)
                 portfolio.cash -= charge
                 financing[p.lot_id] = financing.get(p.lot_id, 0.0) + charge
         last_day = max(last_day, day)
@@ -329,15 +335,17 @@ def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict
         cost_basis = t["entry_price"] * t["quantity"]
         net = t["pnl"] - fin
         trades.append({
-            "entry_t": t["entry_timestamp"], "entry_p": t["entry_price"], "exit_t": t["timestamp"],
+            "direction": t.get("direction", "long"), "entry_t": t["entry_timestamp"], "entry_p": t["entry_price"], "exit_t": t["timestamp"],
             "exit_p": t["exit_price"], "qty": t["quantity"], "pnl": net,
             "pnl_pct": net / cost_basis if cost_basis else 0.0, "fees": t.get("fees_paid", 0.0),
             "financing": fin, "reason": t.get("reason") or "signal", "partial": bool(t.get("partial")),
             "stop": (levels.get(lot) or {}).get("stop"), "target": (levels.get(lot) or {}).get("target"),
         })
     last = entry[-1]
-    open_positions = [{"entry_t": p.entry_timestamp, "entry_p": p.avg_entry_price, "qty": p.quantity,
-                       "pnl": p.quantity * (last.close - p.avg_entry_price) - p.entry_fee - financing.get(p.lot_id, 0.0),
+    open_positions = [{"direction": p.direction, "entry_t": p.entry_timestamp, "entry_p": p.avg_entry_price,
+                       "qty": p.quantity,
+                       "pnl": (p.quantity * (last.close - p.avg_entry_price) * (-1 if p.direction == "short" else 1)
+                               - p.entry_fee - financing.get(p.lot_id, 0.0)),
                        "stop": p.stop_price, "target": p.target_price} for p in portfolio.positions]
     financing_total = sum(t["financing"] for t in trades) + sum(financing.get(p.lot_id, 0.0) for p in portfolio.positions)
     result = {"stats": _stats(spec, entry, equity, trades, open_positions, financing_total),
@@ -381,6 +389,11 @@ def _stats(spec, entry, equity, trades, open_positions, financing_total) -> dict
         "avg_hours": sum(durations) / len(durations) if durations else None,
         "exposure": min(1.0, in_pos / span), "costs_paid": sum(t["fees"] for t in trades),
         "financing_paid": financing_total, "open_positions": len(open_positions),
+        # EF-104 : achats et ventes a decouvert separes, pour voir lequel des deux sens gagne.
+        "by_direction": {d: {"trades": len([t for t in closed if t["direction"] == d]),
+                             "pnl": sum(t["pnl"] for t in trades if t["direction"] == d),
+                             "wins": len([t for t in trades if t["direction"] == d and t["pnl"] > 0])}
+                         for d in ("long", "short")},
     }
 
 
@@ -412,6 +425,9 @@ def _warnings(spec, warm) -> list[str]:
     costs = spec["costs"]
     if not costs["spread_pct"] and not costs["fee_pct"]:
         out.append("Aucun cout de transaction : resultats optimistes. Renseigne le spread de ton courtier.")
+    if spec["params"].get("allow_short"):
+        out.append("Ventes a decouvert : possibles en backtest et chez un courtier CFD (Capital.com), "
+                   "refusees par un compte au comptant comme Binance.")
     if datetime.fromtimestamp(spec["start"] / 1000, timezone.utc).year < 2025:
         out.append("Periode avant 2025 : tu as demande de ne pas juger les strategies sur 2023-2024.")
     return out

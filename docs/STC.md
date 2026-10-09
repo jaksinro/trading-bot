@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.00 |
+| **Version** | 1.01 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -114,6 +114,7 @@
 | 0.98 | EF-101 (§3.88) : **connecteur Capital.com, compte demo seulement** (session, cotation et spread, bougies, positions) ; script de verification des couts reels ; QuantStats et GateGuard laisses a l'utilisateur |
 | 0.99 | EF-102 (§3.89) : **etat "en position" des strategies aligne une fois sur la position reelle avant la premiere decision** (achat unique, RSI, Bollinger : rechauffage et position restauree) ; synchro a chaque bougie mesuree et ecartee (pire dans 20 cas sur 24 avec stop) ; **bots IBKR : decision sur la derniere bougie close au demarrage** |
 | 1.00 | EF-103 (§3.90) : **une erreur reseau passagere au demarrage ne tue plus le bot** (502 du testnet sur `load_markets` le 2026-10-07) - connexion, cours et rechauffage reessayes (`StartupRetry`, 5 s doublees jusqu'a 2 min, budget commun de 15 min), chaque tentative journalisee, puis abandon propre (`StartupNetworkGiveUp`, code de sortie 1, sans pile d'appels) ; `requests.HTTPError` 502/503/504 reconnues transitoires |
+| 1.01 | EF-104 (§3.91) : **ventes a decouvert** - `position_side` sur signal/ordre/position, comptabilite entierement couverte (sans levier), regles de risque miroir (stop au-dessus, trailing sur le plus bas), executeurs au comptant qui refusent, atelier (sens, taux de nuit des ventes) ; **schemas de vente du Volume Profile** par miroir des prix (`allow_short`) ; mesure 1 min : seuil de rentabilite vers 0,03 % de spread aller-retour |
 
 ---
 
@@ -2085,6 +2086,40 @@ Exemples : Bollinger ETH 1h stop 2 % -21,6 % -> -46,3 % ; achat unique ETH 1h st
 - Le filtre de probabilite (`probability_filter`, active par aucune config actuelle) interroge le reseau dans l'appel a `write_dashboard`, hors de toute protection, au demarrage comme dans la boucle.
 
 **Validation** : `tests/test_startup_network_retry.py`, 13 tests sur exchange factice : l'incident reproduit (deux 502 sur `load_markets` avec le message exact de ccxt, puis reponse : executeur cree, attentes de 5 puis 10 s, 2 avertissements et 1 info, sans HTML) ; abandon a 900 s pile, attentes 5/10/20/40/80/120 plafonnees, evenement `error` identique au message de l'exception ; budget partage entre etapes ; erreurs non reseau sans nouvel essai (3) ; rechauffage reessaye sans bougie comptee deux fois ; `HTTPError` 502/503/504 transitoires, 400/401 non (5) ; scenario complet par `run_paper.main()` (deux 502, puis boucle principale atteinte) - ce dernier echouait avant correction avec l'`ExchangeNotAvailable` du journal. Suite complete : **1026 tests**.
+
+### 3.91 EF-104 : ventes a decouvert (moteur, backtests, atelier, Volume Profile)
+
+**Demande** (2026-10-09) : "c'est possible d'ajouter les ordres SELL ? La on a que des ordres BUY", avec l'historique de trading papier TradingView de l'utilisateur (23 trades, ventes +585 USD sur 10 trades, achats +140 USD sur 13 : petit echantillon, sans couts). Le courtier vise (Capital.com, CFD) autorise la vente a decouvert, stop et objectif poses chez lui.
+
+**Conception** :
+- `types.py` : `Signal.position_side`, `OrderResult.position_side`, `Position.direction` (`"long"` par defaut partout : rien ne change pour l'existant). Semantique : BUY+long ouvre un achat, SELL+long le ferme ; SELL+short ouvre une vente a decouvert, BUY+short la rachete. `risk_manager.is_opening(signal)` porte cette regle.
+- `portfolio.py` : vente a decouvert **entierement couverte, sans levier** - l'ouverture immobilise `notional + frais` comme un achat ; la fermeture rend `qty x (2 x entree - sortie) - frais` ; `position_value()` donne la valeur d'une position selon son sens (equity juste dans les deux sens, cash jamais negatif). Les trades portent `direction`.
+- `risk_manager.py` : `gain_of(position, prix)` (gain signe selon le sens) remplace les comparaisons de prix dans stop-loss, objectif, sortie partielle et verrou de gain ; `trailing_stop_price(entree, extreme, direction)` - pour une vente, `peak_price` tient le PLUS BAS atteint, stop a `bas x (1 + pct)` (mode distance) ou `entree - (entree - bas) x (1 - pct)` (mode gain, arme apres `trailing_arm_pct` de gain). `validate` : fermer exige une position du meme sens.
+- Executeurs : `place_order(..., position_side)`. `BacktestExecutor` l'accepte ; Binance papier/reel et IBKR (comptes au comptant) renvoient un ordre REJETE ("vente a decouvert impossible sur ce compte (comptant)"), aucun ordre n'est envoye. Le moteur refuse aussi toute vente a decouvert quand le panier commun est actif (bots en papier) : double barriere.
+- `engine.py` : ouverture dans le sens du signal ; filtres de tendance et de probabilite reserves aux achats ; stop/objectif propres au trade et trailing en miroir ; fermeture par rachat (BUY) ; un signal ne ferme que les positions de son sens. `stats.build_orders_table` : niveaux cibles dans le bon sens.
+- `VolumeProfileStrategy(allow_short=False)` : les trois schemas de vente du document (rejet du POC par le haut si la veille a fini sous le VAL ; retour dans la zone par le dessus ; cassure du VAL puis cloture sous l'ancien plus bas). Implementation par **miroir des prix** : la bougie inversee (`open=-o, high=-l, low=-h, close=-c`) et le profil inverse (POC -> -POC, VAH <-> -VAL) passent dans les MEMES fonctions que l'achat, avec un etat separe par sens. Les regles sont donc identiques par construction. Motifs `volume_profile_short_<setup>` (`breakout` -> `breakdown`).
+- Atelier (`backtest_view.py`, `backtest.html`) : `direction` par trade et position ouverte, resultat separe achats / ventes (`stats.by_direction`), second taux de nuit `overnight_short_pct` (negatif = credit recu, seul cout autorise negatif) ; fleches violettes descendantes au-dessus de la bougie pour les ventes, colonne Sens, fiche Vente / Rachat ; avertissement quand les ventes sont activees.
+
+**Hors perimetre, assume** :
+- Pas de levier : une position vaut au plus le cash. Le levier 2:1 (crypto, ESMA) multiplierait gains ET pertes, et ajoute un financement de nuit ; a modeliser avec l'executeur CFD.
+- Pas d'executeur Capital.com pour les bots (en attente de la cle API demo de l'utilisateur) : la vente a decouvert ne tourne qu'en backtest.
+- Le formulaire de bot du dashboard n'expose pas `allow_short` (inutile tant qu'aucun compte des bots ne l'accepte).
+- La surveillance 1 min au plus haut / plus bas (ordres poses chez le courtier) reste dans le banc de mesure, pas dans le moteur.
+
+**Mesure** (`scripts/bench_vp_intrabar.py` et balayage du spread ; entrees 15 min, stop et objectif surveilles sur bougies 1 MINUTE au plus haut / plus bas et executes au niveau ; ETH, BTC, DOGE x 4 semestres 2025-2026 = 12 fenetres ; 3 setups ensemble) :
+
+| Variante | Spread aller-retour | Fenetres gagnantes | Somme des 12 fenetres | Pire fenetre |
+|---|---|---|---|---|
+| Achats seuls | 0 | 6/12 | +13,6 % | -21,6 % |
+| Achats + ventes | 0 | 8/12 | +105,1 % | -23,2 % |
+| Achats seuls | 0,02 % | 5/12 | -33,6 % | -23,4 % |
+| Achats + ventes | 0,02 % | 8/12 | +19,6 % | -26,9 % |
+| Achats + ventes | 0,04 % | 4/12 | -59,8 % | -32,2 % |
+| Achats + ventes | 0,1 % | 0/12 | mediane -23,7 % | -46,1 % |
+
+Lecture : les ventes ameliorent nettement le resultat SANS couts (BTC et DOGE surtout ; ETH perd 3 fenetres sur 4 avec les ventes alors qu'il gagnait en achats seuls), mais l'avantage est minuscule par trade (environ 330 trades par semestre et par marche, soit ~0,03 % de gain moyen par trade ; 34 % de ventes gagnantes) : le seuil de rentabilite se situe vers **0,03 % de spread aller-retour**, bien en dessous des spreads crypto habituels des CFD. Ordre stop / objectif dans la meme minute : 8 cas ambigus sur ~3 950 trades, sans effet. Conclusion : rien a mettre en reel en l'etat ; a re-mesurer avec le spread reel lu par `scripts/capitalcom_check.py`.
+
+**Validation** : `tests/test_short_positions.py` (13 tests : comptabilite et frais, perte a la hausse, valeur par sens, stop / objectif / trailing en miroir dans les deux modes, fermeture du meme sens, moteur avec stop et objectif du trade, rachat par signal, refus de l'executeur au comptant) ; `tests/test_volume_profile.py` (+5 : ventes desactivees par defaut, rejet du POC par le haut, retour dans la zone par le dessus, cassure du VAL, pas de vente en position) ; `tests/test_backtest_view.py` (+1 : sens, latent et credit de nuit d'une vente dans l'atelier). Suite complete : **1045 tests**.
 
 ---
 

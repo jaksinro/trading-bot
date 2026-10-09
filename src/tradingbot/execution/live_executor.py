@@ -232,8 +232,12 @@ class LiveExecutor(ExecutionAdapter):
 
     def place_order(
         self, side: Side, quantity: float, price: float, timestamp: int,
-        reason: str = "", lot_id: int | None = None,
+        reason: str = "", lot_id: int | None = None, position_side: str = "long",
     ) -> OrderResult:
+        if position_side == "short":
+            # EF-104 : compte au comptant - pas de vente a decouvert ici.
+            return OrderResult(side=side, quantity=quantity, price=price, timestamp=timestamp, status="rejected",
+                               reason="vente a decouvert impossible sur ce compte (comptant)", position_side="short")
         def rejected(qty: float, why: str) -> OrderResult:
             return OrderResult(
                 side=side, quantity=qty, price=price, timestamp=timestamp,

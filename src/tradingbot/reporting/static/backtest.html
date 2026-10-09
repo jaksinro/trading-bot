@@ -23,6 +23,7 @@
     --green: #2fd699; --green-soft: rgba(47,214,153,0.14);
     --red: #ff6b6b; --red-soft: rgba(255,107,107,0.14);
     --amber: #f5b74f; --amber-soft: rgba(245,183,79,0.14);
+    --short: #c08cff;
     --radius-md: 10px; --radius-sm: 7px;
   }
   * { box-sizing: border-box; }
@@ -33,6 +34,7 @@
   button { font-family: inherit; cursor: pointer; }
   button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .num { font-variant-numeric: tabular-nums; }
+  .short { color: var(--short); }
   .pos { color: var(--green); } .neg { color: var(--red); } .dim { color: var(--text-dim); } .faint { color: var(--text-faint); }
 
   header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px;
@@ -161,7 +163,7 @@
       <div class="box">
         <h3 id="tradesTitle">Trades</h3>
         <div class="scroll"><table id="trades">
-          <thead><tr><th>#</th><th class="l">Achat</th><th>Prix</th><th class="l">Vente</th><th>Prix</th><th>Duree</th><th class="l">Motif</th><th>Resultat</th><th>USDT</th></tr></thead>
+          <thead><tr><th>#</th><th class="l">Sens</th><th class="l">Entree</th><th>Prix</th><th class="l">Sortie</th><th>Prix</th><th>Duree</th><th class="l">Motif</th><th>Resultat</th><th>USDT</th></tr></thead>
           <tbody></tbody></table></div>
       </div>
       <div class="box">
@@ -423,12 +425,16 @@ function renderMarkers() {
   if (!$("tgMarkers").checked) { state.series.candles.setMarkers([]); return; }
   const many = r.trades.length > 80;
   const m = [];
+  // Achat : fleche montante sous la bougie. Vente a decouvert : fleche descendante au-dessus (EF-104).
+  const up = { position: "belowBar", shape: "arrowUp" }, down = { position: "aboveBar", shape: "arrowDown" };
   r.trades.forEach((tr, i) => {
-    if (!tr.partial) m.push({ time: snap(tr.entry_t), position: "belowBar", color: css("--accent"), shape: "arrowUp", text: many && i !== state.sel ? "" : "achat" });
-    m.push({ time: snap(tr.exit_t), position: "aboveBar", color: tr.pnl > 0 ? css("--green") : css("--red"), shape: "arrowDown",
-             text: many && i !== state.sel ? "" : pct(tr.pnl_pct) });
+    const short = tr.direction === "short", quiet = many && i !== state.sel;
+    if (!tr.partial) m.push({ time: snap(tr.entry_t), ...(short ? down : up), color: css(short ? "--short" : "--accent"),
+                              text: quiet ? "" : (short ? "vente" : "achat") });
+    m.push({ time: snap(tr.exit_t), ...(short ? up : down), color: tr.pnl > 0 ? css("--green") : css("--red"),
+             text: quiet ? "" : pct(tr.pnl_pct) });
   });
-  r.open_positions.forEach(p => m.push({ time: snap(p.entry_t), position: "belowBar", color: css("--amber"), shape: "arrowUp", text: "en cours" }));
+  r.open_positions.forEach(p => m.push({ time: snap(p.entry_t), ...(p.direction === "short" ? down : up), color: css("--amber"), text: "en cours" }));
   m.sort((a, b) => a.time - b.time);
   state.series.candles.setMarkers(m);
 }
@@ -448,8 +454,9 @@ function selectTrade(i, scroll) {
   const line = (price, color, title, style) => {
     if (price != null) state.lines.push(state.series.candles.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
   };
-  line(tr.entry_p, css("--accent"), "achat", 0);
-  line(tr.exit_p, tr.pnl > 0 ? css("--green") : css("--red"), "vente", 0);
+  const short = tr.direction === "short";
+  line(tr.entry_p, css(short ? "--short" : "--accent"), short ? "vente" : "achat", 0);
+  line(tr.exit_p, tr.pnl > 0 ? css("--green") : css("--red"), short ? "rachat" : "vente", 0);
   line(tr.stop, css("--red"), "stop", 2);
   line(tr.target, css("--green"), "objectif", 2);
   const a = snap(tr.entry_t), b = snap(tr.exit_t);
@@ -460,8 +467,9 @@ function selectTrade(i, scroll) {
   $("tradeLabel").textContent = `Trade ${state.sel + 1} / ${r.trades.length}`;
   $("tradeCard").style.display = "block";
   $("tradeCard").innerHTML = `<div class="t ${cls(tr.pnl)}">Trade ${state.sel + 1} : ${pct(tr.pnl_pct, 2)} (${num(tr.pnl)} USDT)</div><dl>
-    <dt>Achat</dt><dd>${date(tr.entry_t, true)} a ${px(tr.entry_p)}</dd>
-    <dt>Vente</dt><dd>${date(tr.exit_t, true)} a ${px(tr.exit_p)}</dd>
+    <dt>Sens</dt><dd>${short ? "vente a decouvert (gagne si le prix baisse)" : "achat"}</dd>
+    <dt>${short ? "Vente" : "Achat"}</dt><dd>${date(tr.entry_t, true)} a ${px(tr.entry_p)}</dd>
+    <dt>${short ? "Rachat" : "Vente"}</dt><dd>${date(tr.exit_t, true)} a ${px(tr.exit_p)}</dd>
     <dt>Duree</dt><dd>${dur((tr.exit_t - tr.entry_t) / 3.6e6)}</dd>
     <dt>Motif de sortie</dt><dd>${esc(reasonLabel(tr.reason))}${tr.partial ? " (partielle)" : ""}</dd>
     ${tr.stop != null || tr.target != null ? `<dt>Stop / objectif</dt><dd>${px(tr.stop)} / ${px(tr.target)}</dd>` : ""}
@@ -482,6 +490,14 @@ function clearSelection() {
   state.charts.price.timeScale().fitContent();
 }
 
+// EF-104 : sens du trade, et resultat des achats et des ventes a decouvert quand il y en a.
+function sideLabel(d) { return d === "short" ? '<span class="short">vente</span>' : "achat"; }
+function shortCards(bd) {
+  if (!bd || !bd.short.trades) return [];
+  const one = (name, x) => `<div class="stat"><div class="k">${name}</div><div class="v ${cls(x.pnl)}">${num(x.pnl)} $</div>`
+    + `<div class="s">${x.trades} trade(s), ${x.wins} gagnant(s)</div></div>`;
+  return [one("Achats", bd.long), one("Ventes a decouvert", bd.short)];
+}
 function renderTables() {
   const r = state.result, s = r.stats;
   const card = (k, v, sub, c) => `<div class="stat"><div class="k">${k}</div><div class="v ${c || ""}">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
@@ -495,15 +511,15 @@ function renderTables() {
     card("Profit factor", s.profit_factor == null ? "-" : num(s.profit_factor), "gains / pertes"),
     card("En position", num(s.exposure * 100, 0) + " %", `duree moy. ${dur(s.avg_hours)}`),
     card("Couts", num(s.costs_paid + s.financing_paid) + " $", s.financing_paid ? `dont financement ${num(s.financing_paid)}` : "commission + spread"),
-  ].join("");
+  ].concat(shortCards(s.by_direction)).join("");
   $("warn").style.display = r.warnings.length ? "block" : "none";
   $("warn").textContent = r.warnings.join("  ");
   $("tradesTitle").textContent = `Trades (${r.trades.length}) - clique une ligne, ou fleches gauche / droite du clavier`;
   $("trades").querySelector("tbody").innerHTML = r.trades.map((tr, i) => `<tr data-i="${i}">
-    <td>${i + 1}</td><td class="l">${date(tr.entry_t, true)}</td><td>${px(tr.entry_p)}</td>
+    <td>${i + 1}</td><td class="l">${sideLabel(tr.direction)}</td><td class="l">${date(tr.entry_t, true)}</td><td>${px(tr.entry_p)}</td>
     <td class="l">${date(tr.exit_t, true)}</td><td>${px(tr.exit_p)}</td><td>${dur((tr.exit_t - tr.entry_t) / 3.6e6)}</td>
     <td class="l">${esc(reasonLabel(tr.reason))}</td><td class="${cls(tr.pnl)}">${pct(tr.pnl_pct, 2)}</td><td class="${cls(tr.pnl)}">${num(tr.pnl)}</td></tr>`).join("")
-    + r.open_positions.map(p => `<tr><td>-</td><td class="l">${date(p.entry_t, true)}</td><td>${px(p.entry_p)}</td><td class="l faint">en cours</td><td></td><td></td><td></td><td class="${cls(p.pnl)}">latent</td><td class="${cls(p.pnl)}">${num(p.pnl)}</td></tr>`).join("");
+    + r.open_positions.map(p => `<tr><td>-</td><td class="l">${sideLabel(p.direction)}</td><td class="l">${date(p.entry_t, true)}</td><td>${px(p.entry_p)}</td><td class="l faint">en cours</td><td></td><td></td><td></td><td class="${cls(p.pnl)}">latent</td><td class="${cls(p.pnl)}">${num(p.pnl)}</td></tr>`).join("");
   $("trades").querySelectorAll("tbody tr[data-i]").forEach(row => row.onclick = () => selectTrade(Number(row.dataset.i), false));
   $("semesters").querySelector("tbody").innerHTML = r.semesters.map(x => `<tr><td>${esc(x.label)}</td><td class="${cls(x.return)}">${pct(x.return)}</td><td class="${cls(x.hold)}">${pct(x.hold)}</td></tr>`).join("");
 }

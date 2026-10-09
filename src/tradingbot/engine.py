@@ -21,7 +21,7 @@ from tradingbot.analysis.probability_gate import ProbabilityGate
 from tradingbot.analysis.trend_filter import TrendFilter
 from tradingbot.execution.base import ExecutionAdapter
 from tradingbot.portfolio import Portfolio
-from tradingbot.risk.risk_manager import RiskManager
+from tradingbot.risk.risk_manager import RiskManager, is_opening
 from tradingbot.shared_pool import InsufficientFunds, SharedPool, credit_for_sell, reserve_for_buy, settle_or_release_buy
 from tradingbot.strategies.base import Strategy
 from tradingbot.types import Candle, OrderResult, Position, Side
@@ -139,14 +139,23 @@ class Engine:
         frequents que les bougies vues par la strategie (`process_price_update`)."""
         messages: list[str] = []
         for position in list(self.executor.get_positions()):
-            position.peak_price = max(position.peak_price, position.avg_entry_price, candle.close)
+            short = position.direction == "short"
+            if short:   # EF-104 : pour une vente a decouvert, `peak_price` tient le PLUS BAS atteint
+                position.peak_price = min(position.peak_price or position.avg_entry_price, position.avg_entry_price,
+                                          candle.close)
+            else:
+                position.peak_price = max(position.peak_price, position.avg_entry_price, candle.close)
+            beyond = (lambda level: candle.close >= level) if short else (lambda level: candle.close <= level)
+            reached = (lambda level: candle.close <= level) if short else (lambda level: candle.close >= level)
             # EF-97 : niveaux propres au trade d'abord (stop sous la meche, objectif 2R).
-            if position.stop_price is not None and candle.close <= position.stop_price:
+            if position.stop_price is not None and beyond(position.stop_price):
                 self._close_position(position, candle, reason="stop_trade")
-                messages.append(f"Vente (stop du trade a {position.stop_price:.4f}) lot #{position.lot_id}")
-            elif position.target_price is not None and candle.close >= position.target_price:
+                messages.append(f"{'Rachat' if short else 'Vente'} (stop du trade a {position.stop_price:.4f}) "
+                                f"lot #{position.lot_id}")
+            elif position.target_price is not None and reached(position.target_price):
                 self._close_position(position, candle, reason="objectif_trade")
-                messages.append(f"Vente (objectif du trade a {position.target_price:.4f}) lot #{position.lot_id}")
+                messages.append(f"{'Rachat' if short else 'Vente'} (objectif du trade a {position.target_price:.4f}) "
+                                f"lot #{position.lot_id}")
             elif self.risk_manager.should_stop_loss(position, candle.close):
                 self._close_position(position, candle, reason="stop_loss")
                 messages.append(f"Vente (stop-loss) lot #{position.lot_id}")
@@ -214,9 +223,10 @@ class Engine:
             signal, open_positions_count=open_positions_count,
             open_positions=open_positions, current_price=candle.close,
         ):
-            if signal.side == Side.BUY:
+            if is_opening(signal):
                 return [self._handle_buy_signal(signal, candle)]
-            return self._close_all_positions(candle, reason=signal.reason or "signal")
+            return self._close_all_positions(candle, reason=signal.reason or "signal",
+                                             direction=getattr(signal, "position_side", "long"))
         rejection = self.risk_manager.explain_rejection(
             signal, open_positions_count=open_positions_count,
             open_positions=open_positions, current_price=candle.close,
@@ -236,13 +246,18 @@ class Engine:
         return messages
 
     def _handle_buy_signal(self, signal, candle: Candle) -> str:
-        if self.trend_filter is not None and not self.trend_filter.is_bullish(candle.close):
+        # EF-104 : ouvre une position dans le sens du signal (achat, ou vente a decouvert).
+        # Filtres de tendance et de probabilite : penses pour l'achat, sans effet sur une vente.
+        is_short = getattr(signal, "position_side", "long") == "short"
+        if is_short and self.shared_pool is not None:
+            return "Vente a decouvert ignoree : compte au comptant (panier commun), pas de vente a decouvert"
+        if not is_short and self.trend_filter is not None and not self.trend_filter.is_bullish(candle.close):
             return (
                 f"Achat bloque par le filtre de tendance "
                 f"(prix {candle.close:.4f} sous l'EMA{self.trend_filter.ema_period} a {self.trend_filter.ema:.4f})"
             )
 
-        if self.probability_gate is not None:
+        if not is_short and self.probability_gate is not None:
             allowed, probability = self.probability_gate.allows_buy()
             if not allowed:
                 pct = f"{probability:.0%}" if probability >= 0 else "indisponible"
@@ -266,12 +281,15 @@ class Engine:
             except InsufficientFunds:
                 return "Achat ignore : panier de capital commun insuffisant"
 
-        order = self._place_order(Side.BUY, quantity, candle, reason=signal.reason)
+        position_side = getattr(signal, "position_side", "long")
+        order = self._place_order(signal.side, quantity, candle, reason=signal.reason, position_side=position_side)
 
         if self.shared_pool is not None:
             settle_or_release_buy(self.shared_pool, reservation_id, order, self.portfolio.fee_pct)
 
         if order.status == "rejected":
+            if is_short:
+                return f"Vente a decouvert rejetee ({order.reason or 'refus de l execution'})"
             return "Achat rejete par l'exchange (quantite/montant sous le minimum autorise)"
         levels = ""
         stop, target = getattr(signal, "stop_price", None), getattr(signal, "target_price", None)
@@ -285,7 +303,7 @@ class Engine:
                 levels = f" - stop {stop:.4f}" if stop is not None else ""
                 levels += f", objectif {target:.4f}" if target is not None else ""
         reason = f" ({signal.reason})" if signal.reason else ""
-        return f"Achat execute{reason}{levels}"
+        return f"{'Vente a decouvert executee' if is_short else 'Achat execute'}{reason}{levels}"
 
     def _buy_capital_reference(self) -> float:
         """Reference de capital passee a `RiskManager.size_for_signal` :
@@ -306,15 +324,22 @@ class Engine:
         return min(effective_cap, self.shared_pool.available_cash())
 
     def _close_position(self, position: Position, candle: Candle, reason: str) -> OrderResult:
-        return self._place_order(Side.SELL, position.quantity, candle, reason=reason, lot_id=position.lot_id)
+        # EF-104 : une vente a decouvert se ferme par un rachat (BUY).
+        side = Side.BUY if position.direction == "short" else Side.SELL
+        return self._place_order(side, position.quantity, candle, reason=reason, lot_id=position.lot_id,
+                                 position_side=position.direction)
 
     def _partial_close_position(self, position: Position, candle: Candle) -> OrderResult:
         sell_quantity = position.quantity * self.risk_manager.config.partial_exit_fraction
-        return self._place_order(Side.SELL, sell_quantity, candle, reason="partial_take_profit", lot_id=position.lot_id)
+        side = Side.BUY if position.direction == "short" else Side.SELL
+        return self._place_order(side, sell_quantity, candle, reason="partial_take_profit", lot_id=position.lot_id,
+                                 position_side=position.direction)
 
-    def _close_all_positions(self, candle: Candle, reason: str) -> list[str]:
+    def _close_all_positions(self, candle: Candle, reason: str, direction: str | None = None) -> list[str]:
         messages = []
         for position in list(self.executor.get_positions()):
+            if direction is not None and position.direction != direction:
+                continue   # EF-104 : un signal ne ferme que les positions de son sens
             order = self._close_position(position, candle, reason=reason)
             if order.status == "rejected":
                 messages.append(f"Vente rejetee par l'exchange pour le lot #{position.lot_id}")
@@ -323,10 +348,13 @@ class Engine:
         return messages
 
     def _place_order(
-        self, side: Side, quantity: float, candle: Candle, reason: str = "", lot_id: int | None = None
+        self, side: Side, quantity: float, candle: Candle, reason: str = "", lot_id: int | None = None,
+        position_side: str = "long",
     ) -> OrderResult:
         realized_before = self.portfolio.realized_pnl
-        order = self.executor.place_order(side, quantity, candle.close, candle.timestamp, reason=reason, lot_id=lot_id)
+        kwargs = {"position_side": position_side} if position_side != "long" else {}
+        order = self.executor.place_order(side, quantity, candle.close, candle.timestamp, reason=reason, lot_id=lot_id,
+                                          **kwargs)
 
         # Alimente le garde-fou de perte journaliere (EF-71). Sans cet appel,
         # `max_daily_loss_pct` etait une configuration MORTE : presente dans
@@ -340,7 +368,7 @@ class Engine:
                 realized_delta / self.portfolio.starting_capital
             )
 
-        if self.shared_pool is not None and side == Side.SELL:
+        if self.shared_pool is not None and side == Side.SELL and position_side == "long":
             # Vente : quantite/prix deja connus, pas de reservation prealable
             # necessaire (contrairement a l'achat) - on reverse directement
             # le produit net au panier commun.

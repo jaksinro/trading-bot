@@ -58,9 +58,12 @@ def compute_buy_and_hold_return_pct(candles: list[Candle]) -> float | None:
     return (candles[-1].close - first_price) / first_price
 
 
-def _target_prices(entry_price: float, risk_config: RiskConfig) -> tuple[float | None, float | None]:
-    take_profit = entry_price * (1 + risk_config.take_profit_pct) if risk_config.take_profit_pct else None
-    stop_loss = entry_price * (1 - risk_config.stop_loss_pct) if risk_config.stop_loss_pct is not None else None
+def _target_prices(entry_price: float, risk_config: RiskConfig,
+                   direction: str = "long") -> tuple[float | None, float | None]:
+    # EF-104 : une vente a decouvert gagne a la baisse, objectif sous l'entree et stop au-dessus.
+    sign = -1 if direction == "short" else 1
+    take_profit = entry_price * (1 + sign * risk_config.take_profit_pct) if risk_config.take_profit_pct else None
+    stop_loss = entry_price * (1 - sign * risk_config.stop_loss_pct) if risk_config.stop_loss_pct is not None else None
     return take_profit, stop_loss
 
 
@@ -72,9 +75,10 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
     raison (stop_loss, take_profit, ou le signal de la strategie)."""
     rows = []
     for trade in portfolio.trade_history:
-        take_profit, stop_loss = _target_prices(trade["entry_price"], risk_config)
+        take_profit, stop_loss = _target_prices(trade["entry_price"], risk_config, trade.get("direction", "long"))
         rows.append({
             "status": "vendu",
+            "direction": trade.get("direction", "long"),
             "buy_price": trade["entry_price"],
             "quantity": trade["quantity"],
             "target_take_profit": take_profit,
@@ -88,13 +92,15 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
         })
 
     for position in portfolio.positions:
-        take_profit, stop_loss = _target_prices(position.avg_entry_price, risk_config)
+        direction = getattr(position, "direction", "long")
+        take_profit, stop_loss = _target_prices(position.avg_entry_price, risk_config, direction)
         # EF-97 : un trade qui porte ses propres niveaux (stop sous la meche, objectif 2R)
         # affiche ceux-la : ce sont eux qui le feront vendre.
         stop_loss = position.stop_price if getattr(position, "stop_price", None) is not None else stop_loss
         take_profit = position.target_price if getattr(position, "target_price", None) is not None else take_profit
         rows.append({
             "status": "ouvert",
+            "direction": direction,
             "buy_price": position.avg_entry_price,
             "quantity": position.quantity,
             "target_take_profit": take_profit,
@@ -105,9 +111,9 @@ def build_orders_table(portfolio: Portfolio, risk_config: RiskConfig) -> list[di
             # EF-89 : plus haut atteint depuis l'achat, publie meme sans trailing
             # actif - l'apercu du trailing dans la page Trading en a besoin, sinon
             # il partirait du prix d'achat et placerait la ligne trop bas.
-            "peak_price": max(position.peak_price, position.avg_entry_price),
+            "peak_price": (min if direction == "short" else max)(position.peak_price, position.avg_entry_price),
             "target_trailing_stop": (
-                risk_config.trailing_stop_price(position.avg_entry_price, position.peak_price)
+                risk_config.trailing_stop_price(position.avg_entry_price, position.peak_price, direction)
                 if risk_config.trailing_stop_pct else None
             ),
             "profit_lock_arm": (

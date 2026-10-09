@@ -763,8 +763,9 @@ TradingView.
 - Les cartes du haut : rendement, ce qu'aurait donné « garder l'actif », baisse
   maximale, nombre de trades, part de gagnants, gain et perte moyens, rapport
   gains/pertes, temps passé en position, coûts payés.
-- Le graphique : flèches bleues = achats, flèches vertes ou rouges = ventes
-  gagnantes ou perdantes ; bandes colorées = périodes où la stratégie détenait
+- Le graphique : flèches bleues (montantes, sous la bougie) = achats, flèches
+  vertes ou rouges = sorties gagnantes ou perdantes ; flèches violettes
+  (descendantes, au-dessus de la bougie) = ventes à découvert ; bandes colorées = périodes où la stratégie détenait
   l'actif ; lignes fines = les niveaux de la stratégie (moyenne mobile, horizons du
   vote de momentum, POC / VAH / VAL du Volume Profile...). Chaque élément se masque
   avec les cases au-dessus du graphique.
@@ -776,6 +777,20 @@ TradingView.
 - Sous le graphique : la courbe de ton capital (bleue), celle de « garder l'actif »
   (grise) et celle du backtest précédent (orange), pour comparer un réglage au
   précédent. Le tableau « Par semestre » montre si le résultat tient dans le temps.
+
+**Les ventes à découvert**
+Vendre à découvert, c'est parier sur la baisse : on vend d'abord, on rachète plus
+tard, et on gagne si le prix a baissé entre les deux. Pour le Volume Profile, la
+case « Ventes à découvert » ajoute les schémas « vente » de ton document (rejet
+du POC par le haut, retour dans la zone par le dessus, cassure du VAL). Le stop
+est alors **au-dessus** du prix d'entrée et l'objectif **en dessous**.
+- Le tableau des trades a une colonne « Sens » (achat ou vente), et la fiche d'un
+  trade dit « Vente » puis « Rachat ».
+- Deux cartes s'ajoutent en haut : le résultat des achats et celui des ventes,
+  séparés, pour voir lequel des deux sens rapporte.
+- C'est possible en backtest et chez un courtier qui le permet (CFD chez
+  Capital.com). Ton compte Binance actuel, au comptant, le refuse : un bot qui
+  tenterait une vente à découvert verrait l'ordre rejeté, sans risque.
 
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
@@ -790,7 +805,9 @@ seul qui brille : celui-là a souvent juste eu de la chance sur la période.
   se paient. L'atelier en compte la moitié à chaque achat et à chaque vente.
 - *Financement par nuit* : sur les CFD, garder une position d'un jour sur l'autre
   coûte un pourcentage de sa valeur. Pour une stratégie qui garde ses positions
-  plusieurs semaines, c'est souvent le coût principal.
+  plusieurs semaines, c'est souvent le coût principal. Il y a deux taux : un pour
+  les achats, un pour les ventes à découvert. Celui des ventes peut être négatif :
+  dans ce cas, c'est toi qui **reçois** ce montant chaque nuit.
 Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 
 ## Historique des changements de l'interface
@@ -874,3 +891,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-09-27 | **Protection contre les essais de mot de passe en série** pour l'accès au dashboard depuis un autre appareil : après 10 mots de passe faux en 15 minutes, l'appareil est bloqué 15 minutes. Ouvrir la page sans avoir encore tapé le mot de passe ne compte pas comme un échec, et la machine du serveur n'est jamais bloquée. Voir §9 |
 | 2026-09-28 | **Protection contre les essais de secret sur les alertes TradingView** : après 10 alertes au secret faux en 15 minutes, l'adresse d'où elles viennent est bloquée 15 minutes (pour les alertes seulement, pas pour le dashboard). Aucun changement visible dans le dashboard. Voir §11 |
 | 2026-10-09 | **Atelier de backtest** (lien dans l'onglet Test) : chaque trade sur un graphique TradingView, réglages de la stratégie, du risque et des coûts (commission, spread, financement de nuit), balayage d'un réglage avec le résultat par semestre, chargement des réglages d'un bot. Le champ « Frais par ordre » d'un nouveau bot vaut désormais 0 (courtiers sans commission). Voir §13 |
+| 2026-10-09 | **Ventes à découvert dans l'Atelier de backtest** : nouvelle case « Ventes à découvert » pour le Volume Profile (schémas de vente de ton document), flèches violettes au-dessus de la bougie pour ces ventes, colonne « Sens » dans le tableau des trades, fiche « Vente / Rachat », deux cartes qui séparent le résultat des achats et des ventes, et un second taux de financement de nuit pour les ventes (négatif = tu reçois). Les libellés du stop-loss et de l'objectif parlent désormais d'« écart au prix d'entrée » (valable dans les deux sens). |
