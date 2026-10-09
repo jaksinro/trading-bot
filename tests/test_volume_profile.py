@@ -446,3 +446,21 @@ def test_engine_hands_the_round_trip_cost_to_the_strategy():
     pf = Portfolio(starting_capital=1000, fee_pct=0.0004)
     Engine(s, RiskManager(RiskConfig(fee_pct=0.0004)), BacktestExecutor(pf), pf)
     assert s.round_trip_cost == pytest.approx(0.0008)
+
+
+# ---------------------------------------------------------------- EF-108 : objectif minimal
+def test_target_below_the_minimum_is_not_traded():
+    sig, entry, low = far_stop_reentry()                                   # objectif ~ +5 %
+    assert sig is not None
+    sig, _, _ = far_stop_reentry(min_target_pct=0.10)
+    assert sig is None
+    sig, _, _ = far_stop_reentry(max_risk_pct=0.001, min_target_pct=0.005)  # plafond 0,1 % -> objectif 0,2 %
+    assert sig is None
+
+
+def test_minimum_target_works_without_costs_and_for_short_sells():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], allow_short=True, min_target_pct=0.5)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    assert out == [None, None]                                              # objectif de vente < 50 %

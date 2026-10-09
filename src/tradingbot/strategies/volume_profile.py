@@ -41,6 +41,10 @@ l'atelier). Le moteur transmet le cout aller-retour (`set_round_trip_cost`) :
 - `min_risk_cost_ratio` : trade ignore si le stop est a moins de N fois le cout
   aller-retour (les couts y pesent trop).
 
+EF-108 : `min_target_pct` - trade ignore si l'objectif est a moins de ce % du
+prix d'entree (objectifs de 0,2 - 0,3 % releves par l'utilisateur : intradables).
+Seuil absolu, actif meme quand les couts ne sont pas renseignes (bots a 0 frais).
+
 Trois setups (`setups`), evalues a chaque cloture :
 1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
    et le rejette : meche sous le POC avec cloture au-dessus, puis bougie verte
@@ -121,7 +125,8 @@ class VolumeProfileStrategy(Strategy):
                  reward_risk: float = 2.0, max_signal_age: int = 3, pullback_max_depth: float = 0.25,
                  stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0, allow_short: bool = False,
                  max_risk_pct: float = 0.0, wide_stop: str = "cap", fixed_stop_pct: float = 0.0,
-                 fixed_target_pct: float = 0.0, cost_cover: bool = False, min_risk_cost_ratio: float = 0.0):
+                 fixed_target_pct: float = 0.0, cost_cover: bool = False, min_risk_cost_ratio: float = 0.0,
+                 min_target_pct: float = 0.0):
         setups = tuple(setups)
         unknown = [s for s in setups if s not in SETUPS]
         if not setups or unknown:
@@ -129,7 +134,7 @@ class VolumeProfileStrategy(Strategy):
         if (session_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or reward_risk <= 0
                 or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0
                 or not 0 <= max_risk_pct < 1 or not 0 <= fixed_stop_pct < 1 or not 0 <= fixed_target_pct < 1
-                or min_risk_cost_ratio < 0):
+                or min_risk_cost_ratio < 0 or not 0 <= min_target_pct < 1):
             raise ValueError("parametres hors bornes")
         if wide_stop not in WIDE_STOP_ACTIONS:
             raise ValueError(f"wide_stop : {wide_stop!r} inconnu (attendus : {', '.join(WIDE_STOP_ACTIONS)})")
@@ -143,6 +148,7 @@ class VolumeProfileStrategy(Strategy):
         # EF-107 : objectifs et filtre selon les couts reels, transmis par le moteur.
         self.cost_cover, self.min_risk_cost_ratio = bool(cost_cover), min_risk_cost_ratio
         self.round_trip_cost = 0.0
+        self.min_target_pct = min_target_pct   # EF-108 : objectif minimal en % du prix d'entree
         self._period_ms = session_hours * HOUR_MS
         self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
         self._session: list[Candle] = []
@@ -292,6 +298,9 @@ class VolumeProfileStrategy(Strategy):
             # Objectif repousse pour que, NET des couts, le gain reste `reward / risk` fois la perte :
             # (R' - c) / (r + c) = R / r  =>  R' = R + c x (1 + R / r).
             reward += cost * (1 + reward / risk)
+        # EF-108 : objectif trop proche (0,2 - 0,3 %) : trade non tradable, couts et bruit l'emportent.
+        if self.min_target_pct and reward < entry * self.min_target_pct:
+            return None
         if short:
             if entry - reward <= 0:
                 return None

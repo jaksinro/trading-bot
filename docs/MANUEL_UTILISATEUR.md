@@ -817,6 +817,14 @@ souvent). Ignorer les stops trop proches aide nettement : avec « Stop au plus l
 1,5 % » et « au moins 10 fois les coûts », la stratégie gagne sur 6 à 7 périodes sur
 12 au lieu de 2 à 4. Elle reste perdante sur DOGE et proche de zéro sur BTC.
 
+**Volume Profile : objectif minimal**
+« Objectif minimal » ignore les trades dont l'objectif est trop près du prix d'entrée
+(par exemple 0,2 ou 0,3 %) : impossibles à trader une fois le spread payé. Le seuil
+est en % du prix, il marche même si les coûts ne sont pas renseignés. Mesuré sur
+2025-2026 : avec « Stop au plus loin à 1,5 % » et « Objectif minimal 2 % », la
+stratégie gagne sur 7 périodes sur 12, sans frais comme avec 0,06 % ou 0,1 % de
+spread, avec 4 fois moins de trades. Elle reste perdante sur DOGE.
+
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
 (ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
@@ -932,3 +940,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Volume Profile : stop trop loin** - trois nouveaux réglages dans l'Atelier (« Stop au plus loin à » avec « cap » ou « skip », « Stop fixe », « Objectif fixe »), à 0 par défaut. Ton bot Volume Profile n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Atelier de backtest : choix du courtier** - une liste « Courtier » remplit automatiquement commission, spread et financement de nuit (Capital.com, Trade Nation, NinjaTrader, Binance, Interactive Brokers), avec la source de chaque valeur et les estimations signalées ; lecture en direct chez Capital.com si ta clé démo est renseignée. Voir §13 |
 | 2026-10-09 | **Volume Profile selon les coûts** - deux réglages dans l'Atelier : « Objectif repoussé pour couvrir spread et commission » et « Stop au moins à N fois les coûts ». Désactivés par défaut ; ton bot n'est pas modifié. Voir §13 |
+| 2026-10-09 | **Volume Profile : objectif minimal** - nouveau réglage « Objectif minimal » dans l'Atelier (trades à objectif trop proche ignorés). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |

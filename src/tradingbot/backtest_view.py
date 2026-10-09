@@ -77,6 +77,7 @@ PARAM_LABELS = {
     "fixed_stop_pct": "Stop fixe (0 = stop du pattern)", "fixed_target_pct": "Objectif fixe (0 = multiple du risque)",
     "cost_cover": "Objectif repousse pour couvrir spread et commission",
     "min_risk_cost_ratio": "Stop au moins a N fois les couts (0 = sans filtre)",
+    "min_target_pct": "Objectif minimal (trade ignore en dessous, 0 = sans filtre)",
 }
 HIDDEN_PARAMS = {"warmup_candles"}
 

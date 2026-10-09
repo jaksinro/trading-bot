@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.04 |
+| **Version** | 1.05 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -118,6 +118,7 @@
 | 1.02 | EF-105 (§3.92) : **Volume Profile, stop trop loin** - `max_risk_pct` + `wide_stop` (cap / skip), `fixed_stop_pct` / `fixed_target_pct` ; banc `bench_vp_stops.py` : plafonner a 1 - 1,5 % aide (somme +39 / +50 % contre +14 %, immobilisation max 3 - 8 j contre 24), ignorer ou fixer -0,5 / +1 % nuit |
 | 1.03 | EF-106 (§3.93) : **courtiers existants dans l'atelier** - `brokers/costs.py` (7 profils, sources, estimations signalees), route `/api/bt-broker-costs`, lecture en direct Capital.com si cle demo ; avertissements courtier sans vente a decouvert ou sans l'actif |
 | 1.04 | EF-107 (§3.94) : **Volume Profile selon les couts** - `Engine` transmet le cout aller-retour (`set_round_trip_cost`), `cost_cover` (2R net), `min_risk_cost_ratio` (filtre) ; banc `bench_vp_costs.py` : le filtre aide, l'objectif repousse seul non |
+| 1.05 | EF-108 (§3.95) : **Volume Profile, objectif minimal** `min_target_pct` ; mesure : plafond 1,5 % + objectif >= 2 % gagne 7 fenetres sur 12 a tous les spreads testes |
 
 ---
 
@@ -2211,6 +2212,28 @@ Lecture : seul le **plafonnement** aide, avec un plateau 1 - 1,5 % (les deux voi
 Lecture : repousser l'objectif SEUL n'aide pas - il devient plus dur a atteindre (26 % de gagnants au lieu de 32 %) et le cout reste paye. Le probleme est ailleurs : les trades a stop serre, ou spread et commission representent une grosse part du risque. Les ignorer change tout (de -122 % a -4,5 % en somme a 0,06 %). Le meilleur compromis stable entre les deux spreads : plafond 1,5 % + stop >= 10 x couts (6 a 7 fenetres gagnantes sur 12, mediane 0 a +1 %, pire fenetre -17 a -27 %). Limites : ETH porte le resultat (+34 a +39 %), BTC proche de 0, DOGE perdant partout (-24 a -27 %) ; 4 fois moins de trades ; mediane proche de 0 - ce n'est pas une preuve d'avantage, seulement la fin de l'hemorragie due aux couts.
 
 **Validation** : `tests/test_volume_profile.py` (+5 : couts sans effet par defaut, 2R net avec `cost_cover` a l'achat et en vente, filtre des stops trop proches, cout transmis par le moteur). Suite complete : **1075 tests**.
+
+### 3.95 EF-108 : Volume Profile, objectif minimal
+
+**Constat** (utilisateur, 2026-10-09, atelier) : beaucoup de trades a stop et objectif de 0,2 - 0,3 %, intradables : couts et bruit l'emportent. Demande : ne prendre un trade que si son objectif couvre au moins les couts de l'ordre. Le filtre d'EF-107 (`min_risk_cost_ratio`) le faisait deja en proportion des couts, mais il est inerte quand les couts ne sont pas renseignes - cas des bots, configures a `fee_pct: 0` depuis EF-100.
+
+**Conception** : `VolumeProfileStrategy(min_target_pct=0.0)` - apres le calcul final de l'objectif (plafond, niveaux fixes, couverture des couts), trade ignore si l'objectif est a moins de ce % du prix d'entree. Seuil absolu, independant des couts declares ; achat et vente. Reglage visible dans l'atelier.
+
+**Mesure** (`scripts/bench_vp_costs.py`, variantes passees en argument ; entrees 15 min, sorties 1 MINUTE au plus haut / plus bas, achats seuls, ETH / BTC / DOGE x 4 semestres 2025-2026 = 12 fenetres, commission 0) - fenetres gagnantes / somme des 12 :
+
+| Variante | Spread 0 | Spread 0,06 % | Spread 0,1 % | Trades par semestre et marche |
+|---|---|---|---|---|
+| Actuel | 6/12 / +13,6 % | 4/12 / -122 % | 2/12 / -204 % | 199 |
+| Objectif >= 1 % | 7/12 / +54,0 % | 5/12 / -2,0 % | 4/12 / -37,6 % | 76 |
+| Objectif >= 1,5 % | 7/12 / +54,9 % | 6/12 / +17,7 % | 4/12 / -6,3 % | 50 |
+| Plafond 1,5 % + objectif >= 1 % | 7/12 / +80,7 % | 6/12 / +10,2 % | 6/12 / -34,2 % | 94 |
+| Plafond 1,5 % + objectif >= 1,5 % | 7/12 / +81,4 % | 6/12 / +33,7 % | 6/12 / +3,1 % | 63 |
+| **Plafond 1,5 % + objectif >= 2 %** | **7/12 / +68,6 %** | **7/12 / +33,8 %** | **7/12 / +11,3 %** | 46 |
+| Plafond 1,5 % + stop >= 10 x couts (EF-107) | 6/12 / +50,4 % | 6/12 / +10,6 % | 7/12 / +11,3 % | 46 a 236 |
+
+Lecture : supprimer les petits objectifs aide a TOUS les niveaux de spread, meme a 0 (les petits trades perdaient deja sans couts). Plateau 1,5 - 2 % avec le plafond de 1,5 % ; 2 % est le plus regulier (7/12 partout, pire fenetre -12 a -17 % contre -22 a -38 % aujourd'hui). Avec ce plafond, les trades retenus ont un stop entre 1 et 1,5 % et un objectif entre 2 et 3 %. Limites : DOGE reste perdant a 0,06 % et 0,1 % de spread (-17 et -27 %), ETH porte l'essentiel ; 4 fois moins de trades (46 par semestre et par marche) ; mediane +1 a +4 % par semestre - un avantage modeste, a confirmer sur la suite de 2026.
+
+**Validation** : `tests/test_volume_profile.py` (+2 : objectif sous le minimum ignore, y compris apres plafond ; fonctionne sans couts et en vente). Suite complete : **1077 tests**.
 
 ---
 
