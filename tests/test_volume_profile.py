@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from tradingbot.strategies.volume_profile import WEEK_OFFSET_MS, VolumeProfileStrategy, volume_profile
+from tradingbot.strategies.volume_profile import WEEK_OFFSET_MS, VolumeProfileStrategy, price_tick, volume_profile
 from tradingbot.types import Candle, Position, Side, Signal
 
 H = 3_600_000
@@ -25,11 +25,74 @@ def test_poc_is_where_most_volume_traded():
 
 
 def test_value_area_computed_by_hand():
-    # Total 232, cible 162,4. POC = rang 4 (80). Voisins 40/40 -> haut (120) ; 20 au-dessus
-    # contre 40 en dessous -> bas (160) ; 20/20 -> haut (180). Zone = 103 -> 107.
+    # Methode TradingView (EF-109). Total 232, cible 162,4 ; POC = ligne 4 (80), reste 82,4.
+    # 40 dessus / 40 dessous, a egale distance -> dessus (reste 42,4) ; 20 dessus contre 40
+    # dessous -> dessous (reste 2,4) ; 20 / 20 a egale distance -> dessus, mais 20 > 2,4 :
+    # on s'arrete SANS depasser. Zone = lignes 3 a 5, soit 103 -> 106.
     candles = [c(i, 100 + i, 101 + i, volume=v) for i, v in enumerate([5, 10, 20, 40, 80, 40, 20, 10, 5, 2])]
     poc, vah, val = volume_profile(candles, rows=10)
-    assert (val, vah) == pytest.approx((103, 107))
+    assert (val, vah) == pytest.approx((103, 106))
+    assert poc == pytest.approx(104.5)
+
+
+def test_value_area_tie_goes_to_the_row_closest_to_the_poc():
+    # Lignes 100..106 : POC ligne 3 (50). Dessus 30 puis 10 ; dessous 10 puis 30.
+    # Etape 1 : 30 dessus contre 10 dessous -> dessus. Etape 2 : 10 (dessus, distance 2)
+    # contre 10 (dessous, distance 1) -> egalite, le plus proche du POC : dessous.
+    vols = [5, 30, 10, 50, 30, 10, 5]
+    candles = [c(i, 100 + i, 101 + i, volume=v) for i, v in enumerate(vols)]
+    poc, vah, val = volume_profile(candles, rows=7, value_area_pct=(50 + 30 + 10) / sum(vols))
+    assert (val, vah) == pytest.approx((102, 105))
+
+
+def test_rows_are_whole_ticks_and_count_is_closest_to_the_setting():
+    # 100 a 110 au pas de 0,01 : 1000 pas / 24 = 41,7 -> 42 pas (24 lignes) plutot que 41 (25).
+    candles = [c(0, 100.00, 110.00, volume=10), c(1, 104.01, 104.99, volume=500)]
+    poc, vah, val = volume_profile(candles)
+    assert poc == pytest.approx(100 + 10.5 * 0.42)          # ligne 104,20 - 104,62, la plus couverte
+    assert price_tick(candles) == pytest.approx(0.01)
+    assert price_tick([c(0, 0.20123, 0.20456, close=0.20301)]) == pytest.approx(0.00001)
+
+
+def test_profile_uses_the_fine_candles_of_the_finished_session():
+    """Profil de la veille calcule sur les bougies fines fournies, pas sur les bougies 1 h."""
+    s = VolumeProfileStrategy(setups=["breakout"])
+    asked = []
+
+    def source(start, end):
+        asked.append((start, end))
+        return [c(start + i * 60_000, 200 + i % 3, 201 + i % 3, volume=1) for i in range(1440)]
+
+    s.set_profile_source(source)
+    yesterday(s, last_close=105)
+    assert asked == [(DAY0, DAY1)]
+    assert 200 <= s.profile[0] <= 204                          # niveaux venus de la source
+
+
+def test_profile_falls_back_to_own_candles_when_the_source_fails():
+    s = VolumeProfileStrategy()
+
+    def broken(start, end):
+        raise ConnectionError("exchange injoignable")
+
+    s.set_profile_source(broken)
+    poc, vah, val = yesterday(s, last_close=105)
+    assert 100 <= val < poc < vah <= 110 and s.profile_source_errors == 1
+
+
+def test_developing_profile_never_sees_the_future():
+    s = VolumeProfileStrategy(profile_period="developing")
+    seen = []
+
+    def source(start, end):
+        seen.append(end)
+        return [c(start, 100, 101)]
+
+    s.set_profile_source(source)
+    yesterday(s, last_close=105)                               # dont la 1re bougie du jour (DAY1)
+    feed(s, [c(at(1), 104, 105), c(at(2), 104, 105)])
+    assert seen[-2:] == [at(1) + H, at(2) + H]                 # jusqu'a la cloture de la bougie, pas plus
+    assert "du jour" in s.chart_levels()[0]["label"]
 
 
 def test_empty_or_flat_profile():

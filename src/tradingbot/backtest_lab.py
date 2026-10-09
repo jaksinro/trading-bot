@@ -40,6 +40,7 @@ from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
 from tradingbot.mm_engine import MarketMakingEngine
 from tradingbot.portfolio import Portfolio
+from tradingbot.profile_source import attach_preloaded
 from tradingbot.reporting.stats import compute_buy_and_hold_return_pct, compute_report
 from tradingbot.risk.risk_manager import MarketMakingConfig, RiskConfig, RiskManager
 from tradingbot.run_backtest import STRATEGY_REGISTRY
@@ -549,6 +550,7 @@ def run_one_period(
     price_level_sizer_kwargs: dict | None = None, exit_check_candles: list[Candle] | None = None,
     entry_timeframe: str = "1h", exit_check_timeframe: str | None = None,
     trend_filter_kwargs: dict | None = None, atr_sizer_kwargs: dict | None = None,
+    profile_loader=None,
 ):
     """Cree une strategie/un portefeuille/un moteur FRAIS et joue la periode
     donnee - indispensable en mode --repeat pour que chaque sous-periode
@@ -567,6 +569,8 @@ def run_one_period(
     aligner correctement les instants de cloture, pas seulement les
     timestamps d'ouverture)."""
     strategy = build_strategy_instance(preset, params)
+    if profile_loader is not None:   # EF-109 : profil de volume sur bougies fines, comme TradingView
+        attach_preloaded(strategy, entry_timeframe, profile_loader)
     if preset.engine == "market_making":
         mm_config = MarketMakingConfig()
         portfolio = Portfolio(starting_capital=capital, fee_pct=mm_config.fee_pct)
@@ -929,6 +933,16 @@ def run_backtest_job(
         )
         risk_summary["exit_check_timeframe"] = exit_check_timeframe
 
+    profile_cache: dict[str, list] = {}
+
+    def profile_loader(tf: str) -> list:
+        """EF-109 : bougies fines du profil de volume, telechargees une seule fois."""
+        if tf not in profile_cache:
+            report({"stage": "download", "message": f"Telechargement des bougies du profil de volume ({tf})..."})
+            profile_cache[tf] = fetch_historical_candles(exchange_id=args.exchange, symbol=args.symbol, timeframe=tf,
+                                                         since_iso=f"{args.since}T00:00:00Z")
+        return profile_cache[tf]
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     safe_symbol = args.symbol.replace("/", "-")
@@ -946,7 +960,7 @@ def run_backtest_job(
         report({"stage": "running", "current": 0, "total": 1, "message": "Simulation en cours..."})
         result, benchmark_pct, trade_stats, portfolio = run_one_period(
             preset, params, risk_kwargs, args.capital, candles, price_level_sizer_kwargs, exit_check_candles,
-            timeframe, exit_check_timeframe, trend_filter_kwargs, atr_sizer_kwargs,
+            timeframe, exit_check_timeframe, trend_filter_kwargs, atr_sizer_kwargs, profile_loader,
         )
         report({"stage": "running", "current": 1, "total": 1})
 
@@ -977,6 +991,7 @@ def run_backtest_job(
             result, benchmark_pct, trade_stats, _portfolio = run_one_period(
                 preset, params, risk_kwargs, args.capital, window_candles, price_level_sizer_kwargs,
                 window_exit_check_candles, timeframe, exit_check_timeframe, trend_filter_kwargs, atr_sizer_kwargs,
+                profile_loader,
             )
             periods.append({
                 "start": _fmt_dt(start_ms), "end": _fmt_dt(end_ms),

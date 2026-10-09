@@ -36,6 +36,7 @@ from tradingbot.process_lock import acquire_lock
 from tradingbot.reporting.dashboard import MASTER_DASHBOARD_PATH, write_dashboard
 from tradingbot.reporting.logger import TradeLogger
 from tradingbot.reporting.stats import build_orders_table, compute_report
+from tradingbot.profile_source import from_exchange as profile_from_exchange, wants_profile
 from tradingbot.risk.risk_manager import MarketMakingConfig, RiskConfig, RiskManager
 from tradingbot.run_backtest import build_strategy
 from tradingbot.shared_pool import SharedPool
@@ -792,6 +793,9 @@ def main(config_path: str) -> None:
         fetch_current_price = lambda: exchange.fetch_ticker(config["symbol"])["last"]
         fetch_closed_candle = lambda last_ts: poll_new_closed_candle(exchange, config["symbol"], config["timeframe"], last_ts)
         timeframe_seconds = exchange.parse_timeframe(config["timeframe"])
+        # EF-109 : profil de volume calcule comme TradingView, sur les bougies fines de ce marche.
+        if wants_profile(strategy):
+            strategy.set_profile_source(profile_from_exchange(exchange, config["symbol"], config["timeframe"]))
 
     baseline_price = startup.run("lecture du cours", fetch_current_price)
 

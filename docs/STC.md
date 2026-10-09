@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.05 |
+| **Version** | 1.06 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -119,6 +119,7 @@
 | 1.03 | EF-106 (§3.93) : **courtiers existants dans l'atelier** - `brokers/costs.py` (7 profils, sources, estimations signalees), route `/api/bt-broker-costs`, lecture en direct Capital.com si cle demo ; avertissements courtier sans vente a decouvert ou sans l'actif |
 | 1.04 | EF-107 (§3.94) : **Volume Profile selon les couts** - `Engine` transmet le cout aller-retour (`set_round_trip_cost`), `cost_cover` (2R net), `min_risk_cost_ratio` (filtre) ; banc `bench_vp_costs.py` : le filtre aide, l'objectif repousse seul non |
 | 1.05 | EF-108 (§3.95) : **Volume Profile, objectif minimal** `min_target_pct` ; mesure : plafond 1,5 % + objectif >= 2 % gagne 7 fenetres sur 12 a tous les spreads testes |
+| 1.06 | EF-109 (§3.96) : **profil de volume de TradingView** - `volume_profile` (lignes en pas entiers, zone de valeur officielle), `profile_source.py` (bougies fines, table TradingView), sources branchees dans l'atelier, `backtest_lab`, `run_paper` et les bancs ; `profile_period: developing` ; mesures refaites |
 
 ---
 
@@ -2234,6 +2235,41 @@ Lecture : repousser l'objectif SEUL n'aide pas - il devient plus dur a atteindre
 Lecture : supprimer les petits objectifs aide a TOUS les niveaux de spread, meme a 0 (les petits trades perdaient deja sans couts). Plateau 1,5 - 2 % avec le plafond de 1,5 % ; 2 % est le plus regulier (7/12 partout, pire fenetre -12 a -17 % contre -22 a -38 % aujourd'hui). Avec ce plafond, les trades retenus ont un stop entre 1 et 1,5 % et un objectif entre 2 et 3 %. Limites : DOGE reste perdant a 0,06 % et 0,1 % de spread (-17 et -27 %), ETH porte l'essentiel ; 4 fois moins de trades (46 par semestre et par marche) ; mediane +1 a +4 % par semestre - un avantage modeste, a confirmer sur la suite de 2026.
 
 **Validation** : `tests/test_volume_profile.py` (+2 : objectif sous le minimum ignore, y compris apres plafond ; fonctionne sans couts et en vente). Suite complete : **1077 tests**.
+
+### 3.96 EF-109 : profil de volume calcule comme TradingView
+
+**Constat** (utilisateur, 2026-10-09, captures ETH) : "le calcul de ton volume profile est faux et n'est pas le meme que dans TradingView". Quatre ecarts avec la methode officielle de TradingView (pages d'aide "Volume profile indicators: basic concepts" et "Session Volume Profile", relevees le 2026-10-09) :
+
+| | TradingView | Avant EF-109 |
+|---|---|---|
+| Donnees | bougies FINES du symbole, selon l'unite du graphique (1-15 min -> 1 min ; 16-30 -> 5 ; 31-60 -> 10 ; 61-120 -> 15 ; 121-240 -> 30 ; au-dela -> 60) | les bougies 15 min de la strategie |
+| Lignes | `Row Size` lignes (24 dans la strategie, comme le reglage courant), hauteur en nombre ENTIER de pas de cotation, arrondie pour s'approcher du nombre demande | 50 lignes de hauteur quelconque |
+| Zone de valeur | depuis le POC, ligne suivante dessus / dessous, la plus chargee ajoutee SI elle ne fait pas depasser 70 %, sinon arret | ajout jusqu'a depasser 70 % |
+| Egalite | ligne la plus proche du POC, puis celle du dessus | toujours celle du dessus |
+
+Deuxieme constat, sur la capture : le profil TradingView montre etait une PLAGE FIXE du 08/10 00:00 au 09/10, qui contient la chute du 08/10 et le rebond ; son VAL (~2 405) integre des volumes posterieurs au rebond et n'etait pas connu a ce moment-la. Le bot utilisait, lui, le profil du 07/10 (VAL 2 571,76), casse des l'ouverture du 08/10.
+
+**Conception** :
+- `strategies/volume_profile.py` : `volume_profile(candles, rows=24, value_area_pct=0.70, tick=None)` - pas de cotation deduit des prix (`price_tick`), hauteur de ligne `_ticks_per_row`, repartition du volume d'une bougie au prorata de la hauteur couverte (non publie par TradingView ; avec des bougies d'1 min l'effet est marginal), zone de valeur selon l'algorithme officiel. Calcul vectorise (numpy).
+- `src/tradingbot/profile_source.py` : table TradingView (`lower_minutes`), `fetch_plan` (10 min = deux 5 min fusionnees, Binance n'ayant pas de 10 min), sources `preloaded` (cache local, ne rend que des bougies CLOSES avant la fin demandee) et `from_exchange` (bots, par pages), `attach_preloaded`.
+- `VolumeProfileStrategy` : `set_profile_source(source)` ; a la fin d'une seance, le profil est calcule sur les bougies fines de cette seance ; erreur ou source absente -> bougies de la strategie (`profile_source_errors` compte les replis). `lower_timeframe_profile=True` (desactivable). `rows` par defaut 24. `profile_period="developing"` : profil de la seance EN COURS recalcule a chaque cloture jusqu'a cette cloture (jamais de futur).
+- Branchements : atelier (`backtest_view.simulate`, bougies fines gardees en memoire pour un balayage), backtests du dashboard (`backtest_lab.run_one_period`, `profile_loader`), bots (`run_paper`, marche public deja utilise pour les bougies), bancs `bench_vp_*`.
+
+**Verification sur la capture** (ETH/USDT Binance, 1 min, plage du 08/10 00:00 UTC au 09/10 17:06) : POC 2 491 - 2 493, VAH 2 526 - 2 528, VAL 2 410 - 2 414 selon 24 / 50 / 100 lignes, contre ~2 495 / ~2 522 / ~2 405 lus sur TradingView. Ecart de quelques dollars : source de cours (plus bas 2 403 sur le graphique de l'utilisateur, 2 406,11 chez Binance) et nombre de lignes. L'atelier affiche bien le profil du 07/10 le 08/10 et celui du 08/10 le 09/10.
+
+**Mesures refaites** (`bench_vp_costs.py` ; entrees 15 min, profil TradingView sur 1 min, sorties 1 min au plus haut / plus bas, achats seuls, ETH / BTC / DOGE x 4 semestres 2025-2026 = 12 fenetres) - fenetres gagnantes / mediane / somme :
+
+| Variante | Spread 0 | Spread 0,06 % | Spread 0,1 % |
+|---|---|---|---|
+| Veille, reglages actuels | 5/12 / -7,4 % / -68,6 % | 2/12 / -20,4 % / -194 % | 2/12 / -26,2 % / -268 % |
+| **Veille + plafond 1,5 % + objectif >= 1,5 %** | **7/12 / +8,1 % / +58,6 %** | **7/12 / +6,5 % / +11,9 %** | **7/12 / +5,4 % / -18,1 %** |
+| Veille + plafond 1,5 % + objectif >= 2 % | 7/12 / +7,6 % / +23,9 % | 7/12 / +5,4 % / -9,4 % | 7/12 / +3,6 % / -31,0 % |
+| En cours (developing), reglages actuels | 4/12 / -15,7 % / -162 % | 1/12 / -32,4 % / -363 % | 0/12 / -42,9 % / -473 % |
+| En cours + plafond 1,5 % + objectif >= 1,5 % | 5/12 / -8,3 % / -92 % | 5/12 / -12,3 % / -164 % | 3/12 / -14,9 % / -209 % |
+
+Lecture : avec le profil de TradingView, les reglages d'origine sont nettement perdants ; plafond 1,5 % + objectif minimal 1,5 % reste le meilleur et le plus regulier (7 fenetres sur 12 a tous les spreads, mediane +5 a +8 % par semestre), et devient preferable a 2 % (mesure EF-108 faite avec l'ancien calcul). ETH et BTC gagnent (+30 / +10 % a 0,06 %), DOGE perd (-29 %). Le profil en developpement - "le rebond sur le VAL du jour" de la capture - perd partout : le VAL d'une plage tracee apres coup n'est pas tradable.
+
+**Validation** : `tests/test_volume_profile.py` (zone de valeur recalculee a la main selon TradingView : 103 -> 106 au lieu de 103 -> 107 ; +5 : egalite au plus proche du POC, lignes en pas entiers et nombre le plus proche, profil sur les bougies fines de la seance, repli si la source echoue, profil en developpement sans futur) ; `tests/test_profile_source.py` (12 : table TradingView, 10 min depuis 5 min, bougies closes seulement, pagination de l'exchange, branchement a la demande). Suite complete : **1094 tests**.
 
 ---
 

@@ -24,6 +24,7 @@ chaque ordre (achat au-dessus du milieu, vente en dessous).
 from __future__ import annotations
 
 import inspect
+from functools import lru_cache
 from datetime import datetime, timezone
 
 import ccxt
@@ -35,6 +36,7 @@ from tradingbot.data_feed import extend_cache_to_now, fetch_historical_candles
 from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
 from tradingbot.portfolio import Portfolio
+from tradingbot.profile_source import attach_preloaded
 from tradingbot.risk.risk_manager import TRAILING_MODES, RiskConfig, RiskManager
 from tradingbot.run_backtest import STRATEGY_REGISTRY
 
@@ -78,6 +80,8 @@ PARAM_LABELS = {
     "cost_cover": "Objectif repousse pour couvrir spread et commission",
     "min_risk_cost_ratio": "Stop au moins a N fois les couts (0 = sans filtre)",
     "min_target_pct": "Objectif minimal (trade ignore en dessous, 0 = sans filtre)",
+    "lower_timeframe_profile": "Profil sur bougies fines, comme TradingView (1 min en 15 min)",
+    "profile_period": "Profil : previous (veille) ou developing (jour en cours, sans futur)",
 }
 HIDDEN_PARAMS = {"warmup_candles"}
 
@@ -173,6 +177,16 @@ def _last_price(base: str) -> float | None:
     except Exception:  # noqa: BLE001 - sans cours, les spreads en points restent a 0 et c'est signale
         return None
     return candles[-1].close if candles else None
+
+
+@lru_cache(maxsize=4)
+def _profile_candles_cached(symbol: str, timeframe: str, since_iso: str, end: int) -> tuple:
+    return tuple(c for c in _fresh(symbol, timeframe, since_iso) if c.timestamp < end)
+
+
+def _profile_candles(symbol: str, timeframe: str, since_iso: str, end: int) -> list:
+    """Bougies fines du profil de volume, gardees en memoire le temps d'un balayage."""
+    return list(_profile_candles_cached(symbol, timeframe, since_iso, end))
 
 
 def broker_costs(payload: dict) -> dict:
@@ -312,6 +326,11 @@ def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict
     if len(entry) < 2:
         raise ValueError("pas assez de bougies sur la periode choisie")
     strategy = STRATEGY_REGISTRY[spec["strategy_type"]](**spec["params"])
+    # EF-109 : profil de volume sur bougies fines (table TradingView), depuis le cache local.
+    first = (warm or entry)[0].timestamp - 2 * DAY_MS
+    attach_preloaded(strategy, spec["timeframe"], lambda tf: _profile_candles(
+        spec["symbol"], tf, datetime.fromtimestamp(first / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        spec["end"]))
     for c in warm:
         # Chauffe des indicateurs, signaux ignores (comme run_paper). Une strategie
         # qui retient son etat "en position" est alignee par le moteur avant sa

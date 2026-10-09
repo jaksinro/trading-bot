@@ -825,6 +825,18 @@ est en % du prix, il marche même si les coûts ne sont pas renseignés. Mesuré
 stratégie gagne sur 7 périodes sur 12, sans frais comme avec 0,06 % ou 0,1 % de
 spread, avec 4 fois moins de trades. Elle reste perdante sur DOGE.
 
+**Volume Profile : le même calcul que TradingView**
+Le profil (POC, VAH, VAL) est calculé comme sur TradingView : avec les bougies
+d'une minute (pour un graphique 15 minutes), 24 lignes, et la zone de valeur
+construite de la même façon. Sur une même plage, les niveaux tombent à quelques
+dollars de ceux de TradingView (le cours de référence peut varier d'une plateforme
+à l'autre). Attention en comparant : un profil tracé sur TradingView **après coup**
+sur une plage qui contient un mouvement (par exemple du 8 au 9 octobre) intègre des
+volumes qui n'existaient pas encore au moment du mouvement. La stratégie utilise le
+profil de la **veille**, connu dès l'ouverture. Le réglage « Profil : developing »
+utilise le profil du jour en cours, calculé seulement avec ce qui est déjà passé :
+mesuré sur 2025-2026, il perd partout.
+
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
 (ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
@@ -941,3 +953,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Atelier de backtest : choix du courtier** - une liste « Courtier » remplit automatiquement commission, spread et financement de nuit (Capital.com, Trade Nation, NinjaTrader, Binance, Interactive Brokers), avec la source de chaque valeur et les estimations signalées ; lecture en direct chez Capital.com si ta clé démo est renseignée. Voir §13 |
 | 2026-10-09 | **Volume Profile selon les coûts** - deux réglages dans l'Atelier : « Objectif repoussé pour couvrir spread et commission » et « Stop au moins à N fois les coûts ». Désactivés par défaut ; ton bot n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Volume Profile : objectif minimal** - nouveau réglage « Objectif minimal » dans l'Atelier (trades à objectif trop proche ignorés). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |
+| 2026-10-09 | **Volume Profile calculé comme TradingView** - bougies d'une minute, 24 lignes, zone de valeur officielle ; nouveaux réglages « Profil sur bougies fines » et « Profil : previous / developing ». Les backtests, l'Atelier et le bot utilisent ce calcul. Voir §13 |

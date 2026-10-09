@@ -31,6 +31,7 @@ from tradingbot.backtest_lab import merge_dual_timeframe  # noqa: E402
 from tradingbot.data_feed import fetch_historical_candles  # noqa: E402
 from tradingbot.execution.backtest_executor import BacktestExecutor  # noqa: E402
 from tradingbot.portfolio import Portfolio  # noqa: E402
+from tradingbot.profile_source import preloaded  # noqa: E402
 from tradingbot.risk.risk_manager import RiskConfig, RiskManager  # noqa: E402
 from tradingbot.strategies.volume_profile import VolumeProfileStrategy  # noqa: E402
 
@@ -52,6 +53,8 @@ def run_one(m1, m15, start, end, kw, cost):
     warm = [c for c in m15 if start - 2 * 86_400_000 <= c.timestamp < start]
     entry = [c for c in m15 if start <= c.timestamp < end]
     strategy = VolumeProfileStrategy(setups=ALL, **kw)
+    # EF-109 : profil calcule comme TradingView, sur les bougies 1 min (graphique 15 min).
+    strategy.set_profile_source(preloaded(m1, 60_000))
     for c in warm:
         strategy.on_candle(c)
     portfolio = Portfolio(starting_capital=1000.0, fee_pct=cost)

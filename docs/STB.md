@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.00 |
+| **Version** | 1.01 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -114,6 +114,7 @@
 | 0.98 | EF-106 : atelier - choix d'un courtier existant qui remplit commission, spread et financement de nuit |
 | 0.99 | EF-107 : Volume Profile selon les couts - objectif qui couvre spread et commission, filtre des stops trop proches des couts |
 | 1.00 | EF-108 : Volume Profile - objectif minimal en % (trades a objectif de 0,2 - 0,3 % ignores) |
+| 1.01 | EF-109 : profil de volume calcule comme TradingView (bougies fines, lignes, zone de valeur) ; profil en developpement en option |
 ---
 
 ## 1. Introduction
@@ -300,6 +301,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-106 | Choisir un courtier existant dans l'atelier plutot que saisir commission, spread et financement - demande de l'utilisateur du 2026-10-09 ("je voudrais une selection de courtier existant et que ca remplisse automatiquement les champs") | Devrait - **realise**. Capital.com (sans levier / avec levier), Trade Nation, NinjaTrader (micro-futures CME), Binance au comptant (standard / BNB), Interactive Brokers (crypto) : couts publics releves le 2026-10-09, sources affichees, estimations signalees (spreads crypto rarement publies) ; Capital.com lu en direct quand la cle API demo est renseignee. Les champs restent modifiables (saisie libre). Voir STC §3.93 |
 | EF-107 | Volume Profile : tenir compte du spread et de la commission dans l'objectif - demande de l'utilisateur du 2026-10-09 ("augmenter les take profit en fonction du spread et de la com" : +20 % sans frais, -0,8 % au mieux avec) | Devrait - **realise (reglages, desactives par defaut)** : le moteur transmet le cout aller-retour ; `cost_cover` repousse l'objectif pour garder 2R NET ; `min_risk_cost_ratio` ignore les trades dont le stop est a moins de N fois ce cout. Mesure : repousser l'objectif seul n'aide PAS (moins de gagnants) ; le filtre aide nettement - avec le plafond de stop 1,5 % et N = 10, 6 a 7 fenetres gagnantes sur 12 a 0,06 % et 0,1 % de spread (somme +11 %), contre 2 a 4 sans. DOGE reste perdant, mediane proche de 0 : pas une preuve d'avantage. Voir STC §3.94 |
 | EF-108 | Volume Profile : ne prendre un trade que si son objectif est assez loin pour couvrir les couts - constat de l'utilisateur du 2026-10-09 ("beaucoup de stop loss et de take profit tres bas genre 0.3% 0.2%, c'est pas possible de faire de trade avec ce genre de take profit") | Devrait - **realise (reglage, desactive par defaut)** : `min_target_pct`, objectif minimal en % du prix, actif meme sans couts renseignes. Mesure (12 fenetres) : avec le plafond de stop 1,5 % et un objectif minimal de 2 %, 7 fenetres gagnantes sur 12 a 0, 0,06 % et 0,1 % de spread (somme +69 / +34 / +11 %, pire fenetre -12 a -17 %) ; 1,5 % proche. DOGE reste perdant. Config du bot inchangee (decision de l'utilisateur). Voir STC §3.95 |
+| EF-109 | Calculer le profil de volume exactement comme TradingView - demande de l'utilisateur du 2026-10-09 ("le calcul de ton volume profile est faux et n'est pas le meme que dans TradingView", avec une capture ETH 08/10 -> 09/10) | Doit - **realise**. Methode officielle de TradingView : bougies fines selon la table du Session Volume Profile (1 min pour un graphique 15 min), 24 lignes par defaut en pas de cotation entiers, zone de valeur construite ligne a ligne sans depasser 70 %. Verifie sur la plage de la capture : POC / VAH / VAL a quelques dollars de TradingView (source de cours differente). Fournie aux backtests, a l'atelier et aux bots. Option `profile_period: developing` (profil du jour sans futur) : mesuree perdante. Voir STC §3.96 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---
