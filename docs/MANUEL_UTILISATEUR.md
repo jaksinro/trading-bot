@@ -792,6 +792,18 @@ est alors **au-dessus** du prix d'entrée et l'objectif **en dessous**.
   Capital.com). Ton compte Binance actuel, au comptant, le refuse : un bot qui
   tenterait une vente à découvert verrait l'ordre rejeté, sans risque.
 
+**Volume Profile : quand le stop est trop loin**
+L'objectif d'un trade Volume Profile vaut 2 fois la distance au stop. Si le stop est
+très loin, l'objectif l'est aussi, et le bot peut rester bloqué des jours sur un seul
+trade. Trois réglages (tous à 0 = comportement d'origine) :
+- « Stop au plus loin à » : distance maximale du stop. Au-delà, avec « cap », le stop
+  est rapproché à cette distance et l'objectif suit (2 fois) ; avec « skip », le
+  trade est ignoré.
+- « Stop fixe » et « Objectif fixe » : des niveaux en % du prix d'entrée, quel que
+  soit le pattern.
+Mesuré sur 2025-2026 : seul « cap » à 1 - 1,5 % améliore le résultat ; ignorer ces
+trades, ou des niveaux fixes comme -0,5 % / +1 %, donnent moins bien.
+
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
 (ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
@@ -892,3 +904,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-09-28 | **Protection contre les essais de secret sur les alertes TradingView** : après 10 alertes au secret faux en 15 minutes, l'adresse d'où elles viennent est bloquée 15 minutes (pour les alertes seulement, pas pour le dashboard). Aucun changement visible dans le dashboard. Voir §11 |
 | 2026-10-09 | **Atelier de backtest** (lien dans l'onglet Test) : chaque trade sur un graphique TradingView, réglages de la stratégie, du risque et des coûts (commission, spread, financement de nuit), balayage d'un réglage avec le résultat par semestre, chargement des réglages d'un bot. Le champ « Frais par ordre » d'un nouveau bot vaut désormais 0 (courtiers sans commission). Voir §13 |
 | 2026-10-09 | **Ventes à découvert dans l'Atelier de backtest** : nouvelle case « Ventes à découvert » pour le Volume Profile (schémas de vente de ton document), flèches violettes au-dessus de la bougie pour ces ventes, colonne « Sens » dans le tableau des trades, fiche « Vente / Rachat », deux cartes qui séparent le résultat des achats et des ventes, et un second taux de financement de nuit pour les ventes (négatif = tu reçois). Les libellés du stop-loss et de l'objectif parlent désormais d'« écart au prix d'entrée » (valable dans les deux sens). |
+| 2026-10-09 | **Volume Profile : stop trop loin** - trois nouveaux réglages dans l'Atelier (« Stop au plus loin à » avec « cap » ou « skip », « Stop fixe », « Objectif fixe »), à 0 par défaut. Ton bot Volume Profile n'est pas modifié. Voir §13 |

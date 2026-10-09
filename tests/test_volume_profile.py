@@ -337,3 +337,57 @@ def test_no_short_while_a_position_is_open():
     out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
                    c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
     assert out == [None, None]
+
+
+# ---------------------------------------------------------------- EF-105 : stop trop loin
+def far_stop_reentry(**kw):
+    """Retour dans la zone dont le plus bas dehors est ~3 sous le VAL : stop tres loin."""
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], stop_buffer_pct=0.0, **kw)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), val - 3.0, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                   c(at(2), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])
+    return out[1], val + 0.4, val - 3.0
+
+
+def test_pattern_stop_is_kept_by_default():
+    sig, entry, low = far_stop_reentry()
+    assert sig.stop_price == pytest.approx(low)
+    assert sig.target_price == pytest.approx(entry + 2 * (entry - low))
+
+
+def test_far_stop_is_capped_and_target_follows():
+    sig, entry, low = far_stop_reentry(max_risk_pct=0.01)
+    assert (entry - low) / entry > 0.01
+    assert sig.stop_price == pytest.approx(entry * 0.99)
+    assert sig.target_price == pytest.approx(entry * 1.02)
+
+
+def test_far_stop_can_skip_the_trade_and_close_stop_is_untouched():
+    sig, _, _ = far_stop_reentry(max_risk_pct=0.01, wide_stop="skip")
+    assert sig is None
+    sig, entry, low = far_stop_reentry(max_risk_pct=0.2, wide_stop="skip")
+    assert sig.stop_price == pytest.approx(low)
+
+
+def test_fixed_stop_and_target_in_percent():
+    sig, entry, _ = far_stop_reentry(fixed_stop_pct=0.005, fixed_target_pct=0.01)
+    assert sig.stop_price == pytest.approx(entry * 0.995)
+    assert sig.target_price == pytest.approx(entry * 1.01)
+    sig, entry, _ = far_stop_reentry(fixed_stop_pct=0.005)
+    assert sig.target_price == pytest.approx(entry * 1.01)               # objectif vide = 2 fois le stop
+
+
+def test_fixed_levels_are_mirrored_for_short_sells():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], allow_short=True, fixed_stop_pct=0.005,
+                              fixed_target_pct=0.01)
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    entry = vah - 0.4
+    assert out[1].stop_price == pytest.approx(entry * 1.005)
+    assert out[1].target_price == pytest.approx(entry * 0.99)
+
+
+def test_unknown_wide_stop_action_is_refused():
+    with pytest.raises(ValueError):
+        VolumeProfileStrategy(wide_stop="ignore")

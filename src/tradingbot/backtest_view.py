@@ -71,6 +71,9 @@ PARAM_LABELS = {
     "slope_threshold_pct": "Pente minimale", "candles_window": "Fenetre de pente (bougies)",
     "one_buy_per_slope": "Un seul achat par pente", "lookback": "Fenetre (bougies)",
     "allow_short": "Ventes a decouvert (schemas de vente)",
+    "max_risk_pct": "Stop au plus loin a (0 = stop du pattern)",
+    "wide_stop": "Stop plus loin : cap (rapproche) ou skip (trade ignore)",
+    "fixed_stop_pct": "Stop fixe (0 = stop du pattern)", "fixed_target_pct": "Objectif fixe (0 = multiple du risque)",
 }
 HIDDEN_PARAMS = {"warmup_candles"}
 

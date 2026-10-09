@@ -24,6 +24,15 @@ est calcule en inversant les prix (plus haut <-> plus bas), ce qui garantit des
 regles identiques dans les deux sens. Ne s'execute qu'en backtest ou chez un
 courtier qui autorise la vente a decouvert (CFD) : un compte au comptant refuse.
 
+EF-105 : un stop de pattern tres loin donne un objectif 2R inatteignable qui
+bloque le bot des jours (constate le 2026-09-28 : risque 1,9 %, objectif +3,8 %,
+9 jours en position). Reglages, tous desactives par defaut :
+- `max_risk_pct` : distance maximale au stop. Au-dela, `wide_stop="cap"` rapproche
+  le stop a cette distance (objectif = `reward_risk` fois celle-ci), `"skip"`
+  ignore le trade.
+- `fixed_stop_pct` / `fixed_target_pct` : stop et objectif fixes en % du prix
+  d'entree, quel que soit le pattern (objectif vide = `reward_risk` fois le stop).
+
 Trois setups (`setups`), evalues a chaque cloture :
 1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
    et le rejette : meche sous le POC avec cloture au-dessus, puis bougie verte
@@ -50,6 +59,7 @@ HOUR_MS = 3_600_000
 # (seances de 168 h). Sans effet pour des seances d'un jour.
 WEEK_OFFSET_MS = 4 * 24 * HOUR_MS
 SETUPS = ("poc_rebound", "value_area_reentry", "breakout")
+WIDE_STOP_ACTIONS = ("cap", "skip")   # stop plus loin que `max_risk_pct` : rapproche, ou trade ignore
 
 
 def volume_profile(candles, rows: int = 50, value_area_pct: float = 0.70) -> tuple[float, float, float] | None:
@@ -101,18 +111,26 @@ def _mirror(c: Candle | None) -> Candle | None:
 class VolumeProfileStrategy(Strategy):
     def __init__(self, setups=SETUPS, session_hours: int = 24, rows: int = 50, value_area_pct: float = 0.70,
                  reward_risk: float = 2.0, max_signal_age: int = 3, pullback_max_depth: float = 0.25,
-                 stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0, allow_short: bool = False):
+                 stop_buffer_pct: float = 0.0005, min_risk_pct: float = 0.0, allow_short: bool = False,
+                 max_risk_pct: float = 0.0, wide_stop: str = "cap", fixed_stop_pct: float = 0.0,
+                 fixed_target_pct: float = 0.0):
         setups = tuple(setups)
         unknown = [s for s in setups if s not in SETUPS]
         if not setups or unknown:
             raise ValueError(f"setups inconnus ou vides : {unknown} (attendus : {', '.join(SETUPS)})")
         if (session_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or reward_risk <= 0
-                or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0):
+                or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0
+                or not 0 <= max_risk_pct < 1 or not 0 <= fixed_stop_pct < 1 or not 0 <= fixed_target_pct < 1):
             raise ValueError("parametres hors bornes")
+        if wide_stop not in WIDE_STOP_ACTIONS:
+            raise ValueError(f"wide_stop : {wide_stop!r} inconnu (attendus : {', '.join(WIDE_STOP_ACTIONS)})")
         self.setups, self.session_hours, self.rows, self.value_area_pct = setups, session_hours, rows, value_area_pct
         self.reward_risk, self.max_signal_age = reward_risk, max_signal_age
         self.pullback_max_depth, self.stop_buffer_pct, self.min_risk_pct = pullback_max_depth, stop_buffer_pct, min_risk_pct
         self.allow_short = bool(allow_short)
+        # EF-105 : stop trop loin -> objectif 2R inatteignable qui bloque le bot des jours.
+        self.max_risk_pct, self.wide_stop = max_risk_pct, wide_stop
+        self.fixed_stop_pct, self.fixed_target_pct = fixed_stop_pct, fixed_target_pct
         self._period_ms = session_hours * HOUR_MS
         self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
         self._session: list[Candle] = []
@@ -231,26 +249,33 @@ class VolumeProfileStrategy(Strategy):
 
     def _signal(self, c: Candle, direction: str, reason: str, stop_level: float) -> Signal | None:
         entry = c.close
-        if direction == "short":
-            # Niveau revenu du miroir : stop AU-DESSUS du pattern, objectif en dessous.
-            stop = -stop_level * (1 + self.stop_buffer_pct)
-            if self.min_risk_pct and (stop - entry) / entry < self.min_risk_pct:
-                stop = entry * (1 + self.min_risk_pct)
-            risk = stop - entry
-            target = entry - self.reward_risk * risk
-            if risk <= 0 or target <= 0:
-                return None
-            name = "breakdown" if reason == "breakout" else reason
-            return Signal(side=Side.SELL, reason=f"volume_profile_short_{name}", stop_price=stop,
-                          target_price=target, position_side="short")
-        stop = stop_level * (1 - self.stop_buffer_pct)
-        if self.min_risk_pct and (entry - stop) / entry < self.min_risk_pct:
-            stop = entry * (1 - self.min_risk_pct)
-        risk = entry - stop
+        short = direction == "short"
+        # Distance au stop du pattern. Vente : niveau revenu du miroir, stop AU-DESSUS.
+        risk = (-stop_level * (1 + self.stop_buffer_pct) - entry if short
+                else entry - stop_level * (1 - self.stop_buffer_pct))
+        if self.min_risk_pct and risk / entry < self.min_risk_pct:
+            risk = entry * self.min_risk_pct
         if risk <= 0:
             return None
+        reward = self.reward_risk * risk
+        # EF-105 : niveaux fixes en % du prix, ou stop du pattern plafonne / trade ignore
+        # quand il est trop loin (objectif 2R inatteignable qui bloque le bot des jours).
+        if self.fixed_stop_pct:
+            risk = entry * self.fixed_stop_pct
+            reward = entry * self.fixed_target_pct if self.fixed_target_pct else self.reward_risk * risk
+        elif self.max_risk_pct and risk > entry * self.max_risk_pct:
+            if self.wide_stop == "skip":
+                return None
+            risk = entry * self.max_risk_pct
+            reward = self.reward_risk * risk
+        if short:
+            if entry - reward <= 0:
+                return None
+            name = "breakdown" if reason == "breakout" else reason
+            return Signal(side=Side.SELL, reason=f"volume_profile_short_{name}", stop_price=entry + risk,
+                          target_price=entry - reward, position_side="short")
         return Signal(side=Side.BUY, reason=f"volume_profile_{reason}" if not reason.startswith("volume") else reason,
-                      stop_price=stop, target_price=entry + self.reward_risk * risk)
+                      stop_price=entry - risk, target_price=entry + reward)
 
     # ------------------------------------------------------------------ graphique
     def chart_levels(self) -> list[dict]:

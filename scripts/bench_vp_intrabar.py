@@ -108,10 +108,10 @@ def _merge(b, step):
                   low=min(x.low for x in b), close=b[-1].close, volume=sum(x.volume for x in b))
 
 
-def run(m1, m5, m15, start, end, setups, mode, cost, stop_first=True, allow_short=False):
+def run(m1, m5, m15, start, end, setups, mode, cost, stop_first=True, allow_short=False, **strategy_kw):
     warm = [c for c in m15 if start - 2 * 86_400_000 <= c.timestamp < start]
     entry = [c for c in m15 if start <= c.timestamp < end]
-    strategy = VolumeProfileStrategy(setups=setups, allow_short=allow_short)
+    strategy = VolumeProfileStrategy(setups=setups, allow_short=allow_short, **strategy_kw)
     for c in warm:
         strategy.on_candle(c)
     portfolio = Portfolio(starting_capital=1000.0, fee_pct=cost)

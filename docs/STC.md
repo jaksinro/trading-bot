@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.01 |
+| **Version** | 1.02 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -115,6 +115,7 @@
 | 0.99 | EF-102 (§3.89) : **etat "en position" des strategies aligne une fois sur la position reelle avant la premiere decision** (achat unique, RSI, Bollinger : rechauffage et position restauree) ; synchro a chaque bougie mesuree et ecartee (pire dans 20 cas sur 24 avec stop) ; **bots IBKR : decision sur la derniere bougie close au demarrage** |
 | 1.00 | EF-103 (§3.90) : **une erreur reseau passagere au demarrage ne tue plus le bot** (502 du testnet sur `load_markets` le 2026-10-07) - connexion, cours et rechauffage reessayes (`StartupRetry`, 5 s doublees jusqu'a 2 min, budget commun de 15 min), chaque tentative journalisee, puis abandon propre (`StartupNetworkGiveUp`, code de sortie 1, sans pile d'appels) ; `requests.HTTPError` 502/503/504 reconnues transitoires |
 | 1.01 | EF-104 (§3.91) : **ventes a decouvert** - `position_side` sur signal/ordre/position, comptabilite entierement couverte (sans levier), regles de risque miroir (stop au-dessus, trailing sur le plus bas), executeurs au comptant qui refusent, atelier (sens, taux de nuit des ventes) ; **schemas de vente du Volume Profile** par miroir des prix (`allow_short`) ; mesure 1 min : seuil de rentabilite vers 0,03 % de spread aller-retour |
+| 1.02 | EF-105 (§3.92) : **Volume Profile, stop trop loin** - `max_risk_pct` + `wide_stop` (cap / skip), `fixed_stop_pct` / `fixed_target_pct` ; banc `bench_vp_stops.py` : plafonner a 1 - 1,5 % aide (somme +39 / +50 % contre +14 %, immobilisation max 3 - 8 j contre 24), ignorer ou fixer -0,5 / +1 % nuit |
 
 ---
 
@@ -2120,6 +2121,39 @@ Exemples : Bollinger ETH 1h stop 2 % -21,6 % -> -46,3 % ; achat unique ETH 1h st
 Lecture : les ventes ameliorent nettement le resultat SANS couts (BTC et DOGE surtout ; ETH perd 3 fenetres sur 4 avec les ventes alors qu'il gagnait en achats seuls), mais l'avantage est minuscule par trade (environ 330 trades par semestre et par marche, soit ~0,03 % de gain moyen par trade ; 34 % de ventes gagnantes) : le seuil de rentabilite se situe vers **0,03 % de spread aller-retour**, bien en dessous des spreads crypto habituels des CFD. Ordre stop / objectif dans la meme minute : 8 cas ambigus sur ~3 950 trades, sans effet. Conclusion : rien a mettre en reel en l'etat ; a re-mesurer avec le spread reel lu par `scripts/capitalcom_check.py`.
 
 **Validation** : `tests/test_short_positions.py` (13 tests : comptabilite et frais, perte a la hausse, valeur par sens, stop / objectif / trailing en miroir dans les deux modes, fermeture du meme sens, moteur avec stop et objectif du trade, rachat par signal, refus de l'executeur au comptant) ; `tests/test_volume_profile.py` (+5 : ventes desactivees par defaut, rejet du POC par le haut, retour dans la zone par le dessus, cassure du VAL, pas de vente en position) ; `tests/test_backtest_view.py` (+1 : sens, latent et credit de nuit d'une vente dans l'atelier). Suite complete : **1045 tests**.
+
+### 3.92 EF-105 : Volume Profile, stop de pattern trop loin
+
+**Constat** (utilisateur, 2026-10-09, atelier) : l'objectif vaut 2 fois la distance au stop du pattern. Quand ce stop est tres loin, l'objectif devient inatteignable et le bot reste bloque : achat ETH du 2026-09-28 12:00 UTC a 2 685, stop 2 634 (-1,89 %), objectif 2 787 (+3,79 %), sorti au stop le 2026-10-07 (-2,67 %, ecart a la cloture 5 min), 9 jours sans autre entree possible. Demande : ponderer stop et objectif, ou les rendre fixes (ex. -0,5 % / +1 %).
+
+**Contre-intuition mesuree avant de coder** (ETH 15 min, sorties 5 min, 2025-01 -> 2026-10, 772 trades) : par tranche de distance au stop, les trades a stop LOIN sont en moyenne les plus rentables (2-3 % : +1,54 %/trade, 54 % gagnants ; < 0,5 % : -0,02 %/trade sur 466 trades). Ignorer ces trades n'etait donc pas evidemment bon ; le cout est ailleurs (les entrees manquees pendant le blocage).
+
+**Conception** (`VolumeProfileStrategy._signal`, commun achat / vente grace au miroir d'EF-104) : distance au stop du pattern (avec `stop_buffer_pct` et `min_risk_pct` comme avant), puis :
+- `fixed_stop_pct` > 0 : stop a ce % de l'entree, objectif a `fixed_target_pct` (vide = `reward_risk` fois le stop) ; prioritaire.
+- sinon `max_risk_pct` > 0 et distance au-dela : `wide_stop="cap"` rapproche le stop a `max_risk_pct` et l'objectif a `reward_risk` fois celui-ci ; `"skip"` ne donne pas de signal.
+- Tout a 0 par defaut : signaux identiques a avant (tests existants inchanges). Reglages visibles dans l'atelier (catalogue introspecte).
+
+**Mesure** (`scripts/bench_vp_stops.py` ; entrees 15 min, sorties 1 MINUTE au plus haut / plus bas executees au niveau, achats seuls comme le bot, 3 setups, ETH / BTC / DOGE x 4 semestres 2025-2026 = 12 fenetres) :
+
+| Variante | Fen. gagnantes (spread 0) | Somme (spread 0) | Pire | Somme (spread 0,02 %) | Plus longue immobilisation |
+|---|---|---|---|---|---|
+| Stop du pattern, 2R (actuel) | 6/12 | +13,6 % | -21,6 % | -33,6 % | 23,6 j |
+| Stop plafonne 0,5 % | 7/12 | +1,5 % | -14,9 % | -66,1 % | 2,3 j |
+| **Stop plafonne 1 %** | 7/12 | **+38,6 %** | -27,2 % | -22,9 % | 3,4 j |
+| **Stop plafonne 1,5 %** | 6/12 | **+50,4 %** | -27,8 % | **-7,2 %** | 8,5 j |
+| Ignore si stop > 1 % | 5/12 | -24,5 % | -21,3 % | -77,1 % | 3,4 j |
+| Ignore si stop > 1,5 % | 6/12 | -9,7 % | -21,0 % | -63,3 % | 8,5 j |
+| Fixe -0,5 % / +1 % | 5/12 | -15,9 % | -20,4 % | -75,2 % | 2,8 j |
+| Fixe -0,75 % / +1,5 % | 7/12 | -38,0 % | -22,6 % | -84,5 % | 5,1 j |
+| Fixe -1 % / +2 % | 5/12 | -10,6 % | -28,5 % | -49,9 % | 4,9 j |
+
+Spread 0,1 % aller-retour : 0 a 2 fenetres gagnantes sur 12 pour toutes les variantes.
+
+Lecture : seul le **plafonnement** aide, avec un plateau 1 - 1,5 % (les deux voisins marchent, bon signe) ; il debloque le bot (immobilisation max divisee par 3 a 7) sans renoncer aux trades a stop loin, qui restent les plus rentables. Ignorer ces trades ou passer a des niveaux fixes (dont le -0,5 % / +1 % propose) est pire : les niveaux fixes ignorent la structure du marche que le pattern decrit. Limites : le gain est concentre sur ETH (cap 1 % : ETH +62 %, BTC -6 %, DOGE -18 % en somme sur 4 semestres) ; la pire fenetre se degrade (-27 % contre -22 %) ; avec 0,02 % de spread tout reste negatif. Rejoue sur le trade du 2026-09-28 : plafond 1 % -> stop le lendemain (-1,07 %) ; plafond 1,5 % -> objectif le 2026-10-02 (+3,06 %).
+
+**Hors perimetre** : la config du bot `ETH_VOLUME_PROFILE` n'est pas modifiee - changer le comportement d'un bot en cours est une decision de l'utilisateur.
+
+**Validation** : `tests/test_volume_profile.py` (+6 : stop du pattern garde par defaut, plafonnement et objectif qui suit, trade ignore et stop proche intact, niveaux fixes avec et sans objectif, niveaux fixes en miroir pour une vente, reglage `wide_stop` inconnu refuse). Suite complete : **1051 tests**.
 
 ---
 
