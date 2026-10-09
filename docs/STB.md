@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.94 |
+| **Version** | 0.95 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -108,6 +108,7 @@
 | 0.92 | EF-100 : atelier de backtest trade par trade ; frais des bots a zero ; decision au demarrage des bots |
 | 0.93 | EF-101 : connecteur Capital.com (compte demo) |
 | 0.94 | EF-102 : au demarrage, les bots agissent selon leur position reelle et decident sur la derniere bougie close (IBKR compris) |
+| 0.95 | EF-103 : un bot ne meurt plus sur une erreur reseau passagere AU DEMARRAGE (502 du testnet) : nouveaux essais, puis abandon propre |
 ---
 
 ## 1. Introduction
@@ -288,6 +289,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-100 | Un outil dedie pour visualiser et regler les strategies en backtest, trade par trade, avec l'interface de TradingView - demande de l'utilisateur du 2026-10-09 ; frais des bots a zero (courtiers sans commission) | Doit - **realise**. Atelier de backtest (`/backtest.html`) ; couts separes commission / spread / financement de nuit ; frais des bots a 0. Voir STC §3.87 |
 | EF-101 | Se connecter au courtier vise par l'utilisateur (Capital.com) pour mesurer ses couts reels (spread, financement) et preparer le trading des bots chez lui - 2026-10-09 | Devrait - **realise en partie** : connecteur compte demo (le reel est refuse dans le code) et script de verification ; executeur pour les bots a venir. Voir STC §3.88 |
 | EF-102 | Au demarrage, un bot doit agir selon sa position REELLE et decider sur la derniere bougie close - defauts constates le 2026-10-09 : une strategie a etat (achat unique, RSI, Bollinger) pouvait sortir du rechauffage en se croyant en position, bot a plat (achat unique jamais execute), ou ignorer une position restauree ; un bot actions IBKR relance chaque jour ne decidait jamais | Doit - **realise**. Strategie alignee une fois sur la position reelle avant la premiere decision (backtests inchanges) ; bots IBKR : la derniere bougie close est une vraie decision. Voir STC §3.89 |
+| EF-103 | Un bot ne doit pas mourir sur une erreur reseau passagere pendant son DEMARRAGE - constate le 2026-10-09 : le 2026-10-07 a 09h51, le testnet Binance a repondu "502 Bad Gateway" au chargement des marches, ETH_MOMENTUM s'est arrete et n'a repris qu'a la relance automatique suivante ; EF-85 ne protegeait que la boucle principale | Doit - **realise**. Connexion (marches, solde), cours et rechauffage sont reessayes avec une attente croissante (5 s a 2 min), chaque tentative journalisee ; au-dela de 15 min au total, arret propre avec un message clair. Les erreurs non reseau (cle invalide, bug) arretent toujours le bot aussitot. Voir STC §3.90 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

@@ -253,9 +253,101 @@ def is_transient_network_error(error: BaseException) -> bool:
 
         if isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
             return True
+        if isinstance(error, requests.exceptions.HTTPError):
+            # `is not None` et non un test de verite : une Response en erreur (5xx) est "fausse".
+            return error.response is not None and error.response.status_code in TRANSIENT_HTTP_STATUSES
     except ImportError:
         pass
     return isinstance(error, (ConnectionError, TimeoutError))
+
+
+TRANSIENT_HTTP_STATUSES = {502, 503, 504}  # passerelle en erreur, service indisponible, delai de passerelle depasse
+
+STARTUP_RETRY_BUDGET_SECONDS = 15 * 60
+STARTUP_RETRY_FIRST_DELAY_SECONDS = 5
+STARTUP_RETRY_MAX_DELAY_SECONDS = 120
+
+
+class StartupNetworkGiveUp(RuntimeError):
+    """Reseau ou exchange reste indisponible pendant tout le budget de
+    demarrage : le bot s'arrete proprement, cause deja journalisee."""
+
+
+def _short_error(error: BaseException) -> str:
+    """`Type: message` sur une seule ligne, sans la page HTML d'erreur que
+    ccxt recopie dans ses messages (le 502 de nginx en faisait 7 lignes)."""
+    text = " ".join(str(error).split()).split(" <html", 1)[0]
+    return f"{type(error).__name__}: {text[:160]}"
+
+
+class StartupRetry:
+    """EF-103 : reessais du DEMARRAGE sur erreur reseau passagere.
+
+    Le 2026-10-07 a 09h51, le testnet Binance a repondu "502 Bad Gateway" a
+    `load_markets` (constructeur de PaperExecutor). La boucle principale
+    rattrape ce genre d'erreur depuis EF-85, mais pas le demarrage : le
+    processus est mort et ETH_MOMENTUM est reste a l'arret jusqu'a la
+    relance automatique suivante (ouverture de session).
+
+    Chaque etape passee a `run` est reessayee avec une attente croissante
+    (5 s, 10 s, 20 s... plafonnee a 2 min), chaque tentative journalisee dans
+    les evenements du bot. Le budget est COMMUN a toutes les etapes du
+    demarrage : au-dela, `StartupNetworkGiveUp` avec un message clair. Toute
+    autre erreur (cle invalide, bug) remonte aussitot, comme avant.
+
+    Reserve aux etapes de LECTURE (aucun ordre passe) : un nouvel essai y est
+    sans risque."""
+
+    def __init__(
+        self, logger: TradeLogger, budget_seconds: float = STARTUP_RETRY_BUDGET_SECONDS,
+        first_delay_seconds: float = STARTUP_RETRY_FIRST_DELAY_SECONDS,
+        max_delay_seconds: float = STARTUP_RETRY_MAX_DELAY_SECONDS, sleep=None, clock=None,
+    ):
+        self.logger = logger
+        self.budget_seconds = budget_seconds
+        self.first_delay_seconds = first_delay_seconds
+        self.max_delay_seconds = max_delay_seconds
+        self._sleep = sleep or time.sleep
+        self._clock = clock or time.monotonic
+        self._started_at = self._clock()
+
+    def _report(self, level: str, message: str) -> None:
+        self.logger.log_event(level, message)
+        print(message, flush=True)
+
+    def run(self, step: str, action):
+        attempt = 1
+        delay = self.first_delay_seconds
+        while True:
+            try:
+                result = action()
+            except Exception as e:
+                if not is_transient_network_error(e):
+                    raise
+                elapsed = self._clock() - self._started_at
+                remaining = self.budget_seconds - elapsed
+                if remaining <= 0:
+                    message = (
+                        f"DEMARRAGE ABANDONNE : {step} toujours impossible apres {attempt} tentatives en "
+                        f"{elapsed:.0f}s ({_short_error(e)}). Exchange ou reseau indisponible : relancer le bot "
+                        "quand il repond (bouton Demarrer du dashboard, sinon relance automatique a la "
+                        "prochaine ouverture de session)."
+                    )
+                    self._report("error", message)
+                    raise StartupNetworkGiveUp(message) from e
+                wait = min(delay, remaining)
+                self._report(
+                    "warning",
+                    f"Demarrage : {step} impossible (tentative {attempt}, {_short_error(e)}) - "
+                    f"nouvel essai dans {wait:.0f}s.",
+                )
+                self._sleep(wait)
+                delay = min(delay * 2, self.max_delay_seconds)
+                attempt += 1
+                continue
+            if attempt > 1:
+                self._report("info", f"Demarrage : {step} reussi a la tentative {attempt}.")
+            return result
 
 
 def build_market_data_exchange(exchange_id: str, fallback=None):
@@ -521,7 +613,15 @@ def main(config_path: str) -> None:
     risk_manager = None if is_market_making else RiskManager(RiskConfig(**config["risk"]))
     mm_config = MarketMakingConfig(**config["risk"]) if is_market_making else None
 
+    # Cree AVANT l'executeur : les tentatives de connexion (EF-103) sont
+    # journalisees dans les evenements du bot.
+    logger = TradeLogger(config["name"])
+    startup = StartupRetry(logger)
+
     if is_ibkr:
+        # Hors EF-103 : un echec de connexion a TWS est deja une erreur explicite
+        # (ValueError), et reconnecter apres un echec a mi-chemin risquerait un
+        # "client id deja utilise".
         ib_host = os.environ.get("IBKR_HOST", "127.0.0.1")
         ib_port = int(os.environ.get("IBKR_PORT", "7497"))
         client_id = config.get("ibkr_client_id") or _derive_ib_client_id(instance_name)
@@ -529,8 +629,11 @@ def main(config_path: str) -> None:
     else:
         api_key = os.environ.get("BINANCE_TESTNET_API_KEY", "")
         api_secret = os.environ.get("BINANCE_TESTNET_API_SECRET", "")
-        executor = PaperExecutor(config["exchange"], config["symbol"], api_key, api_secret)
-    logger = TradeLogger(config["name"])
+        # Marches (`load_markets`, le 502 du 2026-10-07) puis solde : lecture seule.
+        executor = startup.run(
+            "connexion au testnet (marches, solde)",
+            lambda: PaperExecutor(config["exchange"], config["symbol"], api_key, api_secret),
+        )
     # EF-88 : ordres "acheter si le cours descend sous X" poses depuis le
     # dashboard, stockes dans la base de CE bot et executes par lui.
     manual_triggers = TriggerStore(logger.db_path)
@@ -690,7 +793,7 @@ def main(config_path: str) -> None:
         fetch_closed_candle = lambda last_ts: poll_new_closed_candle(exchange, config["symbol"], config["timeframe"], last_ts)
         timeframe_seconds = exchange.parse_timeframe(config["timeframe"])
 
-    baseline_price = fetch_current_price()
+    baseline_price = startup.run("lecture du cours", fetch_current_price)
 
     # Etat de depart persiste immediatement : si le PC s'eteint avant meme la
     # premiere bougie traitee, une reprise ulterieure retrouve quand meme cet
@@ -698,16 +801,20 @@ def main(config_path: str) -> None:
     logger.save_open_positions(executor.portfolio.positions)
 
     warmup_candles = config.get("warmup_candles", DEFAULT_WARMUP_CANDLES)
+    # Reessai sans risque (EF-103) : les deux fonctions telechargent TOUT
+    # l'historique avant de nourrir la strategie, un nouvel essai ne lui fait
+    # donc jamais compter une bougie deux fois (verifie par test).
     if is_ibkr:
-        last_seen_ts = ib_warm_up_strategy(
+        warm_up = lambda: ib_warm_up_strategy(
             executor.ib, executor.contract, strategy, warmup_candles,
             price_history, trend_filter, atr_sizer, price_level_sizer,
         )
     else:
-        last_seen_ts = warm_up_strategy(
+        warm_up = lambda: warm_up_strategy(
             exchange, config["symbol"], config["timeframe"], strategy, warmup_candles,
             price_history, trend_filter, atr_sizer, price_level_sizer,
         )
+    last_seen_ts = startup.run("rechauffage (historique des bougies)", warm_up)
     # EF-83 : ce message affichait le nombre DEMANDE, pas le nombre RECU - il
     # annoncait "500 bougies" pendant que la strategie n'en avait vu que 338.
     fed = getattr(strategy, "_seen", None)
@@ -797,7 +904,7 @@ def main(config_path: str) -> None:
                     raise
                 if network_outage_since is None:
                     network_outage_since = time.time()
-                    message = f"Coupure reseau, nouvel essai toutes les {poll_interval_seconds}s : {type(e).__name__}: {str(e)[:160]}"
+                    message = f"Coupure reseau, nouvel essai toutes les {poll_interval_seconds}s : {_short_error(e)}"
                     logger.log_event("warning", message)
                     print(message, flush=True)
                 time.sleep(poll_interval_seconds)
@@ -885,4 +992,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python -m tradingbot.run_paper <config.yml>")
         sys.exit(1)
-    main(sys.argv[1])
+    try:
+        main(sys.argv[1])
+    except StartupNetworkGiveUp:
+        sys.exit(1)  # cause deja journalisee et affichee (EF-103) : pas de pile d'appels a rallonge

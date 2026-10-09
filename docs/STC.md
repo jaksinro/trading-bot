@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.99 |
+| **Version** | 1.00 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -113,6 +113,7 @@
 | 0.97 | EF-100 (§3.87) : **atelier de backtest** (chaque trade sur le graphique TradingView, reglages, couts commission / spread / financement, balayage) ; frais des bots a zero ; cache des bougies complete par la fin ; **les bots decident sur la derniere bougie close au demarrage** (ETH_MOMENTUM n'avait rien decide en 8 jours) |
 | 0.98 | EF-101 (§3.88) : **connecteur Capital.com, compte demo seulement** (session, cotation et spread, bougies, positions) ; script de verification des couts reels ; QuantStats et GateGuard laisses a l'utilisateur |
 | 0.99 | EF-102 (§3.89) : **etat "en position" des strategies aligne une fois sur la position reelle avant la premiere decision** (achat unique, RSI, Bollinger : rechauffage et position restauree) ; synchro a chaque bougie mesuree et ecartee (pire dans 20 cas sur 24 avec stop) ; **bots IBKR : decision sur la derniere bougie close au demarrage** |
+| 1.00 | EF-103 (§3.90) : **une erreur reseau passagere au demarrage ne tue plus le bot** (502 du testnet sur `load_markets` le 2026-10-07) - connexion, cours et rechauffage reessayes (`StartupRetry`, 5 s doublees jusqu'a 2 min, budget commun de 15 min), chaque tentative journalisee, puis abandon propre (`StartupNetworkGiveUp`, code de sortie 1, sans pile d'appels) ; `requests.HTTPError` 502/503/504 reconnues transitoires |
 
 ---
 
@@ -1649,7 +1650,7 @@ Limite assumee et ecrite dans `.env.example` : mot de passe en clair sur le rese
 
 **Cause** : le 2026-09-25 a 02h09, `fetch_ticker` a recu "connexion existante fermee par l'hote distant" (`ccxt.NetworkError`, erreur Windows 10054) - une coupure reseau de quelques secondes. Aucun `try` dans la boucle principale : l'exception a remonte, le processus est mort. Le bot ETH est reste **six heures a l'arret avec une position ouverte**, donc incapable de la vendre si la tendance s'etait retournee. Verifie apres coup : ETH est reste 5 % au-dessus de sa tendance toute la nuit, aucune vente n'a ete ratee - c'etait de la chance, pas une protection. BTC et DOGE, touches par la meme boucle, ont simplement echappe a la coupure.
 
-**Correction** : la LECTURE des donnees de marche (bougie close, cours courant) rattrape desormais les erreurs de reseau passageres (`is_transient_network_error` : `ccxt.NetworkError` et ses sous-classes - delai depasse, exchange indisponible, limite de debit - plus les coupures `requests`/systeme) : avertissement journalise une fois, nouvel essai au cycle suivant, message quand le reseau revient. **Delimitation voulue** : toute autre erreur (cle invalide, paire inconnue, bug) continue d'arreter le bot plutot que d'etre masquee par des essais sans fin ; et une erreur pendant le TRAITEMENT d'une bougie, qui peut passer un ordre, continue de remonter - son etat serait ambigu (ordre parti ou non ?), et le reessayer pourrait doubler un achat.
+**Correction** : la LECTURE des donnees de marche (bougie close, cours courant) rattrape desormais les erreurs de reseau passageres (`is_transient_network_error` : `ccxt.NetworkError` et ses sous-classes - delai depasse, exchange indisponible, limite de debit - plus les coupures `requests`/systeme) : avertissement journalise une fois, nouvel essai au cycle suivant, message quand le reseau revient. *(La phase de demarrage, restee sans protection, est couverte depuis par EF-103, §3.90.)* **Delimitation voulue** : toute autre erreur (cle invalide, paire inconnue, bug) continue d'arreter le bot plutot que d'etre masquee par des essais sans fin ; et une erreur pendant le TRAITEMENT d'une bougie, qui peut passer un ordre, continue de remonter - son etat serait ambigu (ordre parti ou non ?), et le reessayer pourrait doubler un achat.
 
 **Second defaut, decouvert en relancant le bot** : le serveur ouvrait le journal du bot en ecriture (`"w"`) a chaque lancement - **la trace du plantage etait effacee par la relance**. Celle-ci n'a ete lue que parce qu'elle avait ete consultee juste avant. Le journal est desormais complete (en-tete `===== lancement ... =====` par session), tourne vers `{nom}.log.1` au-dela de 2 Mo (Raspberry Pi), et le message d'erreur renvoye au formulaire en cas de crash immediat ne lit que la sortie du lancement courant - avec un journal en ajout, la derniere ligne du fichier pourrait sinon appartenir a une session precedente.
 
@@ -2062,6 +2063,28 @@ Exemples : Bollinger ETH 1h stop 2 % -21,6 % -> -46,3 % ; achat unique ETH 1h st
 **Correction 2 - IBKR** : `ib_warm_up_strategy` demande une bougie de plus (`warmup_needed + 1` + 10 jours de marge), exclut la bougie du jour (en formation, EF-75) ET la derniere close (`bars[:-2][-warmup_needed:]`), et renvoie l'horodatage de l'avant-derniere close : `ib_poll_new_closed_candle` renvoie aussitot la derniere close, traitee comme une vraie decision. Aucun bot actions en service : correction non verifiee sur une vraie session TWS. **Point non verifie** : la marge de 10 jours suppose que `durationStr` en "D" compte des jours calendaires ; si c'est le cas, 60 jours ne donnent qu'environ 42 bougies pour 50 voulues (rechauffage incomplet, signale par l'avertissement EF-83 pour les strategies qui exposent `_seen`).
 
 **Validation** : `tests/test_startup_strategy_position.py`, 9 tests rejouant le demarrage (rechauffage, puis premiere decision sur la derniere close) : achat unique qui achete bot a plat et pas une 2e fois avec une position restauree ; RSI et Bollinger qui achetent apres un signal ignore pendant la chauffe, revendent une position restauree sur leur signal, ne doublent pas une position restauree ; alignement unique (apres un stop-loss, pas de rachat avant le signal de sortie). Les 6 tests du defaut echouaient avant correction. `tests/test_run_paper_ibkr.py` : decision sur la derniere close au demarrage, une bougie de plus demandee, bougies exactes du rechauffage (3 tests, echouaient avant correction). `tests/test_backtest_view.py` : depart a plat de l'atelier sans `_start_flat`. Suite complete : **1013 tests**.
+
+---
+
+### 3.90 EF-103 : une erreur reseau passagere au demarrage tuait le bot
+
+**Constat** (2026-10-09, `logs/ETH_MOMENTUM.log`) : au lancement du 2026-10-07 a 09h51, `load_markets` (constructeur de `PaperExecutor`) a recu "502 Bad Gateway" de `testnet.binance.vision/api/v3/exchangeInfo`, traduit par ccxt en `ccxt.ExchangeNotAvailable`. EF-85 (§3.71) ne rattrape les erreurs reseau que dans la boucle principale : au demarrage, l'exception a remonte, le processus est mort, et ETH_MOMENTUM est reste a l'arret jusqu'a la relance automatique suivante (tache planifiee a l'ouverture de session, `scripts/autostart_bots.ps1`), lancee a 20h45 - pres de 11 h sans bot.
+
+**Conception** (`run_paper.py`) :
+- `StartupRetry(logger)`, cree juste apres le `TradeLogger` - desormais construit AVANT l'executeur pour journaliser les tentatives de connexion. `run(etape, action)` execute l'action ; sur erreur reseau passagere (`is_transient_network_error`), evenement `warning` "Demarrage : <etape> impossible (tentative n, Type: message) - nouvel essai dans Xs.", attente, nouvel essai. Attente de 5 s, doublee a chaque echec, plafonnee a 2 min. Succes apres echec : evenement `info` "reussi a la tentative n".
+- Budget **commun** a tout le demarrage : 15 min (`STARTUP_RETRY_BUDGET_SECONDS`), mesure sur l'horloge monotone depuis la creation. Une etape suivante ne repart pas avec un budget neuf : sinon trois etapes en panne feraient 45 min d'attente pour 15 annoncees. La derniere attente est raccourcie pour tomber pile sur l'echeance.
+- Au-dela : evenement `error` "DEMARRAGE ABANDONNE : <etape> toujours impossible apres n tentatives en Xs (...)", avec la marche a suivre (bouton Demarrer du dashboard, sinon relance a la prochaine ouverture de session), puis `StartupNetworkGiveUp`. Le bloc `__main__` la convertit en code de sortie 1 sans pile d'appels : le journal du bot montre le message, pas 40 lignes de traceback.
+- Etapes couvertes, toutes en LECTURE seule : connexion Binance (`PaperExecutor` : `load_markets`, `fetch_balance`, `fetch_ticker` si un solde de base existe), cours de reference, rechauffage. Les deux fonctions de rechauffage (`warm_up_strategy`, `ib_warm_up_strategy`) telechargent TOUT l'historique avant de nourrir la strategie : un nouvel essai ne lui fait jamais compter une bougie deux fois (verifie par test).
+- Erreurs non reseau (cle invalide `AuthenticationError`, `BadSymbol`, bug) : remontent au premier essai, comme avant - attendre ne les corrige pas.
+- `is_transient_network_error` reconnait aussi la forme brute `requests.HTTPError` pour 502/503/504 (le 502 nait sous cette forme dans ccxt avant traduction) ; les autres codes HTTP restent fatals. Piege evite : une `Response` en erreur est "fausse" en Python, d'ou le test `is not None`.
+- `_short_error` : message sur une seule ligne, sans la page HTML de nginx que ccxt recopie (7 lignes) ; aussi utilise par le message de coupure d'EF-85.
+
+**Hors perimetre, assume** :
+- IBKR : la connexion a TWS n'est pas reessayee (erreur deja explicite, `ValueError` ; reconnecter apres un echec a mi-chemin risquerait un "client id deja utilise"). Cours et rechauffage IBKR passent, eux, par `StartupRetry`.
+- `flatten_existing_position` (premier lancement seulement, `flatten_on_start: true`) passe des ORDRES : non reessaye, un essai rejoue pourrait vendre deux fois. Une erreur reseau y reste fatale.
+- Le filtre de probabilite (`probability_filter`, active par aucune config actuelle) interroge le reseau dans l'appel a `write_dashboard`, hors de toute protection, au demarrage comme dans la boucle.
+
+**Validation** : `tests/test_startup_network_retry.py`, 13 tests sur exchange factice : l'incident reproduit (deux 502 sur `load_markets` avec le message exact de ccxt, puis reponse : executeur cree, attentes de 5 puis 10 s, 2 avertissements et 1 info, sans HTML) ; abandon a 900 s pile, attentes 5/10/20/40/80/120 plafonnees, evenement `error` identique au message de l'exception ; budget partage entre etapes ; erreurs non reseau sans nouvel essai (3) ; rechauffage reessaye sans bougie comptee deux fois ; `HTTPError` 502/503/504 transitoires, 400/401 non (5) ; scenario complet par `run_paper.main()` (deux 502, puis boucle principale atteinte) - ce dernier echouait avant correction avec l'`ExchangeNotAvailable` du journal. Suite complete : **1026 tests**.
 
 ---
 
