@@ -108,13 +108,11 @@ def test_overnight_financing_is_charged_per_day_held(market):
 
 
 def test_strategies_start_flat_after_warmup(market):
-    """Achat unique : son seul achat etait consomme pendant la chauffe."""
+    """Achat unique : son seul achat etait consomme pendant la chauffe. Le
+    moteur lui transmet desormais l'etat reel (`align_position`, EF-102)."""
     r = bv.run(base(strategy_type="buy_and_hold", params={}))
     assert len(r["open_positions"]) == 1
-    rsi = bv.STRATEGY_REGISTRY["rsi_range"]()
-    rsi._in_position = True
-    bv._start_flat(rsi)
-    assert rsi._in_position is False
+    assert r["open_positions"][0]["entry_t"] == r["candles"][0][0]  # achat a la 1re bougie de la periode
 
 
 def test_trade_stop_and_target_are_reported(market, monkeypatch):

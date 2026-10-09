@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.93 |
-| **Date** | 2026-09-28 |
+| **Version** | 0.94 |
+| **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
 | **Étape du cycle en V** | Expression du besoin |
@@ -107,6 +107,7 @@
 | 0.91 | EF-99 : le backtest dimensionne sur le cash reel et refuse un achat sans fonds (plus de compte a credit) |
 | 0.92 | EF-100 : atelier de backtest trade par trade ; frais des bots a zero ; decision au demarrage des bots |
 | 0.93 | EF-101 : connecteur Capital.com (compte demo) |
+| 0.94 | EF-102 : au demarrage, les bots agissent selon leur position reelle et decident sur la derniere bougie close (IBKR compris) |
 ---
 
 ## 1. Introduction
@@ -286,6 +287,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-98 | Un algorithme rentable sur l'ETH seul - demande de l'utilisateur du 2026-10-01 | Doit - **realise dans la limite du verifiable** : regle choisie sur 2025, figee, puis rentable sur 2026 jamais vue (+16,8 % apres frais, baisse max -25,9 % contre -55 % pour l'ETH garde). Aucune garantie pour l'avenir. Bot `ETH_MOMENTUM` en paper. Voir STC §3.85 |
 | EF-100 | Un outil dedie pour visualiser et regler les strategies en backtest, trade par trade, avec l'interface de TradingView - demande de l'utilisateur du 2026-10-09 ; frais des bots a zero (courtiers sans commission) | Doit - **realise**. Atelier de backtest (`/backtest.html`) ; couts separes commission / spread / financement de nuit ; frais des bots a 0. Voir STC §3.87 |
 | EF-101 | Se connecter au courtier vise par l'utilisateur (Capital.com) pour mesurer ses couts reels (spread, financement) et preparer le trading des bots chez lui - 2026-10-09 | Devrait - **realise en partie** : connecteur compte demo (le reel est refuse dans le code) et script de verification ; executeur pour les bots a venir. Voir STC §3.88 |
+| EF-102 | Au demarrage, un bot doit agir selon sa position REELLE et decider sur la derniere bougie close - defauts constates le 2026-10-09 : une strategie a etat (achat unique, RSI, Bollinger) pouvait sortir du rechauffage en se croyant en position, bot a plat (achat unique jamais execute), ou ignorer une position restauree ; un bot actions IBKR relance chaque jour ne decidait jamais | Doit - **realise**. Strategie alignee une fois sur la position reelle avant la premiere decision (backtests inchanges) ; bots IBKR : la derniere bougie close est une vraie decision. Voir STC §3.89 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

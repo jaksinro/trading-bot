@@ -277,8 +277,10 @@ def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict
         raise ValueError("pas assez de bougies sur la periode choisie")
     strategy = STRATEGY_REGISTRY[spec["strategy_type"]](**spec["params"])
     for c in warm:
-        strategy.on_candle(c)   # chauffe des indicateurs, signaux ignores (comme run_paper)
-    _start_flat(strategy)
+        # Chauffe des indicateurs, signaux ignores (comme run_paper). Une strategie
+        # qui retient son etat "en position" est alignee par le moteur avant sa
+        # premiere decision (`align_position`, EF-102) : le backtest commence a plat.
+        strategy.on_candle(c)
 
     costs = spec["costs"]
     cost = costs["fee_pct"] + costs["spread_pct"] / 2   # cout par ordre
@@ -350,19 +352,6 @@ def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict
             "warnings": _warnings(spec, warm),
         })
     return result
-
-
-def _start_flat(strategy) -> None:
-    """Le backtest commence SANS position. Certaines strategies retiennent leur
-    propre etat (achat deja fait, "en position") : un signal emis pendant la
-    chauffe - puis ignore - les laissait croire en position. L'achat unique ne
-    rachetait jamais ; RSI et Bollinger attendaient une vente avant d'acheter.
-    Celles qui recoivent l'etat reel du moteur (`sync_position`) n'en ont pas
-    besoin."""
-    if hasattr(strategy, "_bought"):
-        strategy._bought = False
-    if hasattr(strategy, "_in_position") and not hasattr(strategy, "sync_position"):
-        strategy._in_position = False
 
 
 def _stats(spec, entry, equity, trades, open_positions, financing_total) -> dict:

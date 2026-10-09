@@ -43,6 +43,14 @@ class RsiRangeStrategy(Strategy):
         rs = avg_gain / avg_loss
         return 100.0 - (100.0 / (1.0 + rs))
 
+    def align_position(self, entry_price: float | None) -> None:
+        """Position reelle transmise par le moteur avant sa premiere decision
+        (EF-102). Un achat emis pendant le rechauffage (signal ignore) laissait
+        la strategie "en position", bot a plat : plus aucun achat avant son
+        propre signal de vente. Et une position restauree au redemarrage
+        n'etait jamais revendue sur son signal."""
+        self._in_position = entry_price is not None
+
     def on_candle(self, candle: Candle) -> Signal | None:
         if self._prev_close is None:
             self._prev_close = candle.close

@@ -18,6 +18,13 @@ class BuyAndHoldStrategy(Strategy):
     def __init__(self):
         self._bought = False
 
+    def align_position(self, entry_price: float | None) -> None:
+        """Position reelle transmise par le moteur avant sa premiere decision
+        (EF-102) : le rechauffage consommait l'unique achat (signal ignore) et
+        le bot ne detenait jamais rien. Bot a plat : on achete ; position
+        restauree au redemarrage : on n'achete pas une 2e fois."""
+        self._bought = entry_price is not None
+
     def on_candle(self, candle: Candle) -> Signal | None:
         if self._bought:
             return None

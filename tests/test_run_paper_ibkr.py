@@ -78,7 +78,7 @@ def test_ib_poll_new_closed_candle_returns_none_on_a_single_forming_bar():
 def test_ib_warm_up_strategy_feeds_strategy_and_price_history_excluding_last_bar():
     """Meme convention que la version ccxt : la DERNIERE bougie renvoyee est
     exclue (bougie du jour, potentiellement pas encore cloturee au moment du
-    demarrage du bot)."""
+    demarrage du bot), et la derniere CLOSE est laissee a la boucle du bot."""
     fake = FakeIB(_dated_bars(6))
     seen_closes = []
 
@@ -90,9 +90,40 @@ def test_ib_warm_up_strategy_feeds_strategy_and_price_history_excluding_last_bar
     price_history = deque()
     last_ts = ib_warm_up_strategy(fake, FakeContract(), DummyStrategy(), warmup_candles=3, price_history=price_history)
 
-    assert len(seen_closes) == 3  # warmup_candles=3, derniere bougie exclue
+    assert seen_closes == [101.5, 102.5, 103.5]  # 3 bougies completes, sans 104.5 (decidee) ni 105.5 (en cours)
     assert len(price_history) == 3
     assert last_ts is not None
+
+
+def test_ib_last_closed_bar_is_decided_by_the_bot_at_startup():
+    """Meme bug que le chemin ccxt (corrige par EF-100) : la derniere bougie
+    close etait absorbee par le rechauffage, signal ignore, et le bot attendait
+    la cloture suivante - un bot en bougies jour relance chaque jour ne
+    decidait jamais. Elle doit sortir du premier sondage de la boucle."""
+    bars = _dated_bars(10)  # la 10e = bougie du jour, en cours
+    fake = FakeIB(bars)
+
+    class DummyStrategy:
+        def on_candle(self, candle):
+            pass
+
+    last_ts = ib_warm_up_strategy(fake, FakeContract(), DummyStrategy(), warmup_candles=5)
+    first = ib_poll_new_closed_candle(fake, FakeContract(), last_ts)
+    assert first is not None and first.close == bars[-2].close
+    assert ib_poll_new_closed_candle(fake, FakeContract(), first.timestamp) is None
+
+
+def test_ib_warm_up_strategy_requests_one_more_bar_for_the_startup_decision():
+    """Une bougie de plus est demandee : le rechauffage garde ses
+    `warmup_candles` bougies completes malgre celle laissee a la boucle."""
+    fake = FakeIB(_dated_bars(30))
+
+    class DummyStrategy:
+        def on_candle(self, candle):
+            pass
+
+    ib_warm_up_strategy(fake, FakeContract(), DummyStrategy(), warmup_candles=5)
+    assert fake.calls[0]["durationStr"] == "16 D"  # 5 + 1 bougies, + 10 jours de marge (week-ends, feries)
 
 
 def test_ib_warm_up_strategy_raises_on_empty_history():

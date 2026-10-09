@@ -67,6 +67,7 @@ class Engine:
         self.capital_cap = capital_cap
         self._last_price: float | None = None
         self._current_day = None  # journee UTC en cours, pour la remise a zero du compteur
+        self._strategy_aligned = False  # EF-102 : `align_position` deja appele (une seule fois)
 
     def _roll_daily_counters_if_new_day(self, candle: Candle) -> None:
         """Remet a zero le compteur de perte journaliere au changement de jour
@@ -175,8 +176,20 @@ class Engine:
         # le stop-loss du moteur la desynchronisent (position sans sortie possible).
         sync = getattr(self.strategy, "sync_position", None)
         if sync is not None:
-            positions = self.executor.get_positions()
-            sync(positions[0].avg_entry_price if positions else None)
+            sync(self._real_entry_price())
+        # EF-102 : une strategie qui retient son propre etat (achat unique, RSI,
+        # Bollinger) est alignee UNE fois sur la position reelle, avant la premiere
+        # decision. Le rechauffage lui donne l'historique en ignorant ses signaux :
+        # elle pouvait s'en croire en position, bot a plat (plus jamais d'achat), ou
+        # ignorer une position restauree au redemarrage (jamais revendue). Une seule
+        # fois et non a chaque bougie : apres un stop-loss du moteur, elle attend
+        # toujours son propre signal de sortie avant de racheter - le comportement
+        # mesure par tous les backtests (racheter aussitot les degradait, STC §3.89).
+        if not self._strategy_aligned:
+            self._strategy_aligned = True
+            align = getattr(self.strategy, "align_position", None)
+            if align is not None:
+                align(self._real_entry_price())
         signal = self.strategy.on_candle(candle)
         if signal is not None:
             messages.extend(self._handle_signal(signal, candle))
@@ -184,6 +197,10 @@ class Engine:
         if not messages:
             messages.append("Aucun signal de la strategie")
         return messages
+
+    def _real_entry_price(self) -> float | None:
+        positions = self.executor.get_positions()
+        return positions[0].avg_entry_price if positions else None
 
     def _handle_signal(self, signal, candle: Candle) -> list[str]:
         """Validation par le gestionnaire de risque puis execution - partage

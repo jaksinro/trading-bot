@@ -37,6 +37,11 @@ class MeanReversionStrategy(Strategy):
         upper = middle + self.num_std * std
         return lower, middle, upper
 
+    def align_position(self, entry_price: float | None) -> None:
+        """Position reelle transmise par le moteur avant sa premiere decision
+        (EF-102), meme raison que `RsiRangeStrategy.align_position`."""
+        self._in_position = entry_price is not None
+
     def on_candle(self, candle: Candle) -> Signal | None:
         self._closes.append(candle.close)
         if len(self._closes) < self.window:

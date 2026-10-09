@@ -3,8 +3,8 @@
 
 | | |
 |---|---|
-| **Version** | 0.98 |
-| **Date** | 2026-10-05 |
+| **Version** | 0.99 |
+| **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
 | **Étape du cycle en V** | Conception / Réalisation |
@@ -112,6 +112,7 @@
 | 0.96 | EF-99 (§3.86) : **backtest dimensionne sur le cash reel** - `BacktestExecutor` refuse un achat au-dela du cash, le moteur dimensionne sur le cash (plus de compte a credit) ; `CashEngine` des bancs supprime |
 | 0.97 | EF-100 (§3.87) : **atelier de backtest** (chaque trade sur le graphique TradingView, reglages, couts commission / spread / financement, balayage) ; frais des bots a zero ; cache des bougies complete par la fin ; **les bots decident sur la derniere bougie close au demarrage** (ETH_MOMENTUM n'avait rien decide en 8 jours) |
 | 0.98 | EF-101 (§3.88) : **connecteur Capital.com, compte demo seulement** (session, cotation et spread, bougies, positions) ; script de verification des couts reels ; QuantStats et GateGuard laisses a l'utilisateur |
+| 0.99 | EF-102 (§3.89) : **etat "en position" des strategies aligne une fois sur la position reelle avant la premiere decision** (achat unique, RSI, Bollinger : rechauffage et position restauree) ; synchro a chaque bougie mesuree et ecartee (pire dans 20 cas sur 24 avec stop) ; **bots IBKR : decision sur la derniere bougie close au demarrage** |
 
 ---
 
@@ -2019,13 +2020,13 @@ Regle de decision satisfaite. Tous les candidats sont positifs sur 2026 : c'est 
 
 **Moteur** (`backtest_view.py`) : le vrai moteur des bots (`Engine`, `RiskManager`, `BacktestExecutor` dimensionne sur le cash, EF-99), chauffe des indicateurs avant la periode, surveillance des sorties optionnelle sur une unite plus fine (`merge_dual_timeframe`). Renvoie bougies, trades (entree, sortie, motif, stop et objectif propres au trade), courbe de capital, courbe "garder l'actif", niveaux de la strategie bougie par bougie (`chart_levels`), statistiques et rendement par semestre civil (meme discipline que les bancs). Formulaire genere depuis la signature des strategies (`catalog`) : un parametre ajoute apparait sans toucher a la page. Couts separes : commission ; spread (moitie a chaque ordre) ; financement de nuit des CFD (pourcentage de la valeur detenue a chaque changement de jour UTC, impute a la vente du lot). Balayage d'un parametre (2 a 30 valeurs, memes bougies). Avertissements : couts nuls, chauffe incomplete, periode avant 2025.
 
-Deux defauts trouves en le construisant : (1) le cache des bougies ne se completait jamais par la fin - nouvelle fonction `data_feed.extend_cache_to_now` (bougies closes seulement, sans toucher au debut ; `fetch_historical_candles` inchangee pour la reproductibilite des bancs) ; (2) une strategie qui retient son etat (achat unique, RSI, Bollinger) pouvait finir la chauffe "en position" et ne jamais acheter : `_start_flat` remet l'etat a plat au debut du backtest.
+Deux defauts trouves en le construisant : (1) le cache des bougies ne se completait jamais par la fin - nouvelle fonction `data_feed.extend_cache_to_now` (bougies closes seulement, sans toucher au debut ; `fetch_historical_candles` inchangee pour la reproductibilite des bancs) ; (2) une strategie qui retient son etat (achat unique, RSI, Bollinger) pouvait finir la chauffe "en position" et ne jamais acheter : `_start_flat` remet l'etat a plat au debut du backtest (remplace depuis par l'alignement du moteur, EF-102, §3.89).
 
 **Page** (`reporting/static/backtest.html`, route `/backtest.html`, API `/api/bt-catalog`, `/api/bt-run`, `/api/bt-sweep`) : cartes de statistiques ; graphique (bougies, fleches d'achat et de vente colorees selon le resultat, bandes "en position", niveaux de la strategie) ; selection d'un trade par le tableau, un clic dans sa bande ou les fleches du clavier : zoom, lignes achat / vente / stop / objectif, trajet, fiche ; courbe de capital synchronisee avec "garder l'actif" et le backtest precedent ; tableau des trades et des semestres ; chargement des reglages d'un bot ; reglages memorises dans le navigateur. Verifiee dans le navigateur sur ETH_MOMENTUM (2025-01-01 -> 2026-10-08, sans couts : +70,5 %, ETH garde -25,9 %, 27 trades, 3,9 s).
 
 **Frais des bots** : `fee_pct: 0.0` dans les six configurations (les trois bots tendance n'avaient pas la ligne et prenaient le defaut de 0,1 %), avec la raison en commentaire ; champ "Frais par ordre" d'un nouveau bot a 0 dans le formulaire (le defaut du code reste 0,1 % : une config sans la ligne l'affiche honnetement). Reserve ecrite a l'utilisateur : "sans commission" n'est pas "sans cout" - spread a chaque ordre et, sur CFD, financement de nuit, a renseigner dans l'atelier ; les bots tradent toujours sur le testnet Binance (aucun connecteur vers ces courtiers).
 
-**Bug des bots corrige au passage** : `warm_up_strategy` consommait la DERNIERE bougie close pendant le rechauffage (signal ignore) et le bot attendait la cloture suivante. ETH_MOMENTUM (bougies jour, relance a chaque ouverture de session) n'a pris aucune decision du 01/10 au 09/10 : sa seule cloture est a 2 h du matin, PC eteint. Le rechauffage s'arrete maintenant a l'avant-derniere bougie close (une bougie de plus est telechargee pour garder une chauffe complete) ; la boucle recupere aussitot la derniere (`poll_new_closed_candle`) et la traite comme une vraie decision. Verifie : au redemarrage, ETH_MOMENTUM a decide sur la cloture du 08/10 (vote baissier, reste en liquidites). Le chemin IBKR (`ib_warm_up_strategy`) a le meme defaut, non corrige (aucun bot actions en service).
+**Bug des bots corrige au passage** : `warm_up_strategy` consommait la DERNIERE bougie close pendant le rechauffage (signal ignore) et le bot attendait la cloture suivante. ETH_MOMENTUM (bougies jour, relance a chaque ouverture de session) n'a pris aucune decision du 01/10 au 09/10 : sa seule cloture est a 2 h du matin, PC eteint. Le rechauffage s'arrete maintenant a l'avant-derniere bougie close (une bougie de plus est telechargee pour garder une chauffe complete) ; la boucle recupere aussitot la derniere (`poll_new_closed_candle`) et la traite comme une vraie decision. Verifie : au redemarrage, ETH_MOMENTUM a decide sur la cloture du 08/10 (vote baissier, reste en liquidites). Le chemin IBKR (`ib_warm_up_strategy`) avait le meme defaut, corrige par EF-102 (§3.89).
 
 **Validation** : `tests/test_backtest_view.py`, 13 tests (catalogue genere, lecture du formulaire, coherence trades / capital, spread, financement de nuit, depart a plat, stop et objectif par trade, surveillance fine, semestres, balayage sur les memes bougies, cache complete par la fin, routes HTTP) ; `tests/test_warm_up_price_history.py` : decision sur la derniere bougie close au demarrage. Suite complete : **994 tests**.
 
@@ -2038,6 +2039,29 @@ Deux defauts trouves en le construisant : (1) le cache des bougies ne se complet
 **Non realise dans cette session, bloque par les protections de l'environnement** : installation de QuantStats (`pip install`) et ajout des exemptions GateGuard dans les reglages de Claude Code (auto-modification) - commandes et lignes fournies a l'utilisateur pour qu'il les applique lui-meme.
 
 **Validation** : `tests/test_capitalcom.py`, 8 tests sur faux serveur (compte reel refuse ; identifiants manquants ; connexion unique puis jetons reutilises ; reconnexion sur 401 et apres inactivite ; mot de passe absent des erreurs ; spread ; bougies au prix milieu en UTC ; ouverture avec niveaux puis confirmation).
+
+### 3.89 EF-102 : etat "en position" des strategies au demarrage, decision au demarrage des bots IBKR
+
+**Constat** (2026-10-09, en construisant l'atelier EF-100) : deux defauts du demarrage des bots paper (`run_paper.py`).
+
+1. Le rechauffage (`warm_up_strategy`, `ib_warm_up_strategy`) donne l'historique a la strategie en ignorant ses signaux. Les strategies qui retiennent leur propre etat - `BuyAndHoldStrategy._bought`, `RsiRangeStrategy._in_position`, `MeanReversionStrategy._in_position` - pouvaient finir le rechauffage en se croyant en position, bot a plat : l'achat unique (signal emis a la 1re bougie de chauffe) n'achetait **jamais** ; RSI et Bollinger attendaient une vente avant d'acheter. A l'inverse, une position restauree depuis la base (EF-27) n'etait pas vue : la strategie ne la revendait jamais sur son propre signal. L'atelier le corrigeait seul (`backtest_view._start_flat`, remise a plat sans tenir compte d'une position).
+2. Le chemin IBKR consommait encore la derniere bougie close pendant le rechauffage, puis le bot attendait la cloture suivante : un bot en bougies jour relance chaque jour ne decidait jamais (meme bug que le chemin ccxt, corrige par EF-100, §3.87).
+
+**Correction 1 - alignement unique avant la premiere decision** : les trois strategies exposent `align_position(entry_price)` (prix d'entree de la position reelle, ou `None`). `Engine._decide` l'appelle **une seule fois**, juste avant le premier `on_candle` qu'il traite, avec la position reelle de l'executeur (`_real_entry_price`, partage avec `sync_position`). Couvre les deux chemins de donnees (ccxt et IBKR), le premier demarrage comme la reprise avec position restauree, et l'atelier : `_start_flat` est supprime (meme effet, un seul mecanisme). Sans effet sur `run_backtest` / `optimize` / les bancs : la strategie y est neuve a la premiere bougie, donc deja a plat.
+
+**Piste ecartee apres mesure - synchro a chaque bougie** : la piste proposee (une `sync_position` comme `VolumeProfileStrategy`, appelee avant chaque bougie) a ete implementee puis mesuree avant d'etre retenue. Elle change le comportement en cours de route : apres un stop-loss du moteur, la strategie rachete aussitot si la condition d'entree tient encore (RSI toujours en survente, cours toujours sous la bande basse) ; jusqu'ici elle attendait son propre signal de sortie, un delai implicite. Mesure 2025-01-01 -> 2026-10-08, ETH et BTC, 1h et 4h, reglages par defaut, commission 0,1 %, 36 backtests (`backtest_view.simulate`, memes bougies avant / apres) :
+
+| Risque | Pire | Mieux | Inchange | Ecart median du rendement | Trades (total) |
+|---|---|---|---|---|---|
+| stop-loss 2 % | 10 | 2 | 0 | -4,7 points | 1 228 -> 2 026 |
+| stop 5 % + trailing 5 % | 10 | 2 | 0 | -4,3 points | 1 224 -> 1 994 |
+| sans stop | 1 | 2 | 9 | 0 | 1 209 -> 1 213 |
+
+Exemples : Bollinger ETH 1h stop 2 % -21,6 % -> -46,3 % ; achat unique ETH 1h stop 2 % -1,6 % -> -18,3 % (26 rachats apres stop). Non retenue : elle aurait change le comportement de trois strategies sans validation. Avec l'alignement unique, les 36 backtests sont **identiques** a l'avant-correction (verifie). **Ecart residuel assume** : apres un stop-loss en cours de session, la strategie attend son signal de sortie ; un redemarrage du bot pendant cette attente la remet alignee (a plat), donc prete a racheter - ce delai implicite n'est pas persiste.
+
+**Correction 2 - IBKR** : `ib_warm_up_strategy` demande une bougie de plus (`warmup_needed + 1` + 10 jours de marge), exclut la bougie du jour (en formation, EF-75) ET la derniere close (`bars[:-2][-warmup_needed:]`), et renvoie l'horodatage de l'avant-derniere close : `ib_poll_new_closed_candle` renvoie aussitot la derniere close, traitee comme une vraie decision. Aucun bot actions en service : correction non verifiee sur une vraie session TWS. **Point non verifie** : la marge de 10 jours suppose que `durationStr` en "D" compte des jours calendaires ; si c'est le cas, 60 jours ne donnent qu'environ 42 bougies pour 50 voulues (rechauffage incomplet, signale par l'avertissement EF-83 pour les strategies qui exposent `_seen`).
+
+**Validation** : `tests/test_startup_strategy_position.py`, 9 tests rejouant le demarrage (rechauffage, puis premiere decision sur la derniere close) : achat unique qui achete bot a plat et pas une 2e fois avec une position restauree ; RSI et Bollinger qui achetent apres un signal ignore pendant la chauffe, revendent une position restauree sur leur signal, ne doublent pas une position restauree ; alignement unique (apres un stop-loss, pas de rachat avant le signal de sortie). Les 6 tests du defaut echouaient avant correction. `tests/test_run_paper_ibkr.py` : decision sur la derniere close au demarrage, une bougie de plus demandee, bougies exactes du rechauffage (3 tests, echouaient avant correction). `tests/test_backtest_view.py` : depart a plat de l'atelier sans `_start_flat`. Suite complete : **1013 tests**.
 
 ---
 

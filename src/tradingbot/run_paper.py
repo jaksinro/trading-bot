@@ -443,14 +443,22 @@ def ib_warm_up_strategy(
         trend_filter.ema_period if trend_filter else 0,
         atr_sizer.baseline_period if atr_sizer else 0,
     )
+    # +1 bougie : la derniere close est laissee a la boucle (voir ci-dessous) ;
     # +10 jours de marge : les jours non ouvres (week-ends/feries) ne
     # produisent aucune bougie, il faut demander plus de jours calendaires
     # que de bougies voulues pour etre sur d'en obtenir assez.
+    duration_days = warmup_needed + 1 + 10
     bars = ib.reqHistoricalData(
-        contract, endDateTime="", durationStr=f"{warmup_needed + 10} D",
+        contract, endDateTime="", durationStr=f"{duration_days} D",
         barSizeSetting="1 day", whatToShow="TRADES", useRTH=True,
     )
-    closed_history = bars[-(warmup_needed + 1):-1] if len(bars) > warmup_needed else bars[:-1]
+    # bars[-1] : bougie du jour, en formation (EF-75). bars[-2] : derniere close,
+    # NON consommee ici - la boucle du bot la recupere aussitot
+    # (ib_poll_new_closed_candle) et la traite comme une vraie decision. Meme bug
+    # que le chemin ccxt (EF-100) : absorbee par le rechauffage, signal ignore,
+    # le bot attendait la cloture suivante et, relance chaque jour en bougies
+    # jour, ne decidait jamais (EF-102).
+    closed_history = bars[:-2][-warmup_needed:]
     for bar in closed_history:
         candle = _ib_row_to_candle(bar)
         if hasattr(strategy, "on_candle"):
@@ -472,7 +480,7 @@ def ib_warm_up_strategy(
         # jamais un etat de demarrage normal pour une action : on echoue ici.
         raise ValueError(
             f"IBKR n'a renvoye aucune bougie journaliere exploitable pour {contract.symbol} "
-            f"({warmup_needed + 10} jours demandes, {len(bars)} bougie(s) recue(s)). Causes "
+            f"({duration_days} jours demandes, {len(bars)} bougie(s) recue(s)). Causes "
             "habituelles : contrat mal qualifie, ou abonnement aux donnees de marche absent "
             "pour cette place. Lance `python -m tradingbot.diagnose_ibkr` pour situer le probleme."
         )
