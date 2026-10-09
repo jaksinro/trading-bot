@@ -25,7 +25,8 @@ risk:
   max_daily_loss_pct: 0.05
   max_concurrent_positions: 1
   trailing_stop_pct: null
-  fee_pct: 0.001
+  # 2026-10-09 : courtiers vises sans commission (capital.com, Trade Nation...) : le cout reel est le spread (et le financement de nuit des CFD), pas une commission.
+  fee_pct: 0.0
   partial_take_profit_pct: null
   partial_exit_fraction: 0.5
   profit_lock_arm_pct: null

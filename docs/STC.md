@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.96 |
+| **Version** | 0.97 |
 | **Date** | 2026-10-05 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -110,6 +110,7 @@
 | 0.94 | EF-98 (§3.85) : **recherche d'un algorithme ETH** - 372 regles sur 2025, choix fige puis test unique sur 2026 ; **vote de momentum** (7/14/30/60/90 j, majorite) : +16,8 % en 2026 apres frais, baisse max -25,9 % (ETH : -8,7 %, -55 %) ; bot `ETH_MOMENTUM` lance en paper |
 | 0.95 | §3.85 : **premier lancement sans liquidation** - le bot s'attribuait le solde du compte partage (ETH_MOMENTUM : 0,0928 ETH des autres bots, +50 % fictif) ; solde desormais ignore, ni vendu ni adopte |
 | 0.96 | EF-99 (§3.86) : **backtest dimensionne sur le cash reel** - `BacktestExecutor` refuse un achat au-dela du cash, le moteur dimensionne sur le cash (plus de compte a credit) ; `CashEngine` des bancs supprime |
+| 0.97 | EF-100 (§3.87) : **atelier de backtest** (chaque trade sur le graphique TradingView, reglages, couts commission / spread / financement, balayage) ; frais des bots a zero ; cache des bougies complete par la fin ; **les bots decident sur la derniere bougie close au demarrage** (ETH_MOMENTUM n'avait rien decide en 8 jours) |
 
 ---
 
@@ -2006,6 +2007,28 @@ Regle de decision satisfaite. Tous les candidats sont positifs sur 2026 : c'est 
 **Implementation** : `ExecutionAdapter.sizes_on_cash` (faux par defaut) ; `BacktestExecutor.sizes_on_cash = True`. Quand il est vrai et sans panier commun, `Engine._buy_capital_reference()` renvoie `max(cash, 0)` : les gains se reinvestissent, une perte reduit la mise suivante. `BacktestExecutor` renvoie `status="rejected"` pour un achat dont cout + frais depasse le cash ; les ventes ne sont jamais bloquees. Donc `optimize.py`, `run_backtest.py`, `backtest_lab` et le reoptimiseur automatique en beneficient sans changement d'appel. **Inchange** : paper/testnet (`PaperExecutor` garde le capital de depart, l'exchange refuse un achat sans fonds) et panier commun. `CashEngine` et `bench_common.py` supprimes (les 3 bancs utilisent `Engine`). Tests : `tests/test_backtest_cash_sizing.py` (6 : achat rejete au-dela du cash et avec frais, vente jamais bloquee, cash jamais negatif apres une chute continue, 1er achat identique a l'ancien, taille suivant le cash).
 
 **Impact attendu sur les resultats** : un backtest qui reste en position longtemps ou qui gagne est dimensionne sur un cash different de 1000 ; les resultats d'anciens `optimize.py` peuvent bouger legerement. **Reste a faire** : relancer `optimize.py` sur 2-3 bots de la flotte et noter ici si les parametres retenus changent (backtest de ~3 ans, non lance en execution non surveillee).
+
+---
+
+### 3.87 EF-100 : atelier de backtest, frais des bots a zero, decision des bots au demarrage
+
+**Demande** : "le probleme actuel c'est la non visibilite des backtests. Je veux un outil a part entiere pour visualiser et regler les strategies en backtest [...] l'interface de TradingView et les cours disponibles via la plateforme [...] visualiser chaque trade" ; et "passer par d'autres brokers (capital.com, Trade Nation, NinjaTrader) sans frais, qui prennent que dans le spread : enleve les 0,1 % de frais dans les bots".
+
+**Cours "de TradingView"** : TradingView ne fournit pas ses donnees de marche par une interface programmable (ni la bibliotheque gratuite Lightweight Charts, ni la bibliotheque Advanced Charts sous licence ne contiennent de donnees : on leur fournit les cours). L'atelier utilise donc la bibliotheque de graphiques de TradingView (deja employee depuis EF-87) et les cours du marche public Binance - le flux affiche par TradingView sous BINANCE:ETHUSDT. Les prix des CFD des courtiers vises suivent le meme marche, a leur spread pres.
+
+**Moteur** (`backtest_view.py`) : le vrai moteur des bots (`Engine`, `RiskManager`, `BacktestExecutor` dimensionne sur le cash, EF-99), chauffe des indicateurs avant la periode, surveillance des sorties optionnelle sur une unite plus fine (`merge_dual_timeframe`). Renvoie bougies, trades (entree, sortie, motif, stop et objectif propres au trade), courbe de capital, courbe "garder l'actif", niveaux de la strategie bougie par bougie (`chart_levels`), statistiques et rendement par semestre civil (meme discipline que les bancs). Formulaire genere depuis la signature des strategies (`catalog`) : un parametre ajoute apparait sans toucher a la page. Couts separes : commission ; spread (moitie a chaque ordre) ; financement de nuit des CFD (pourcentage de la valeur detenue a chaque changement de jour UTC, impute a la vente du lot). Balayage d'un parametre (2 a 30 valeurs, memes bougies). Avertissements : couts nuls, chauffe incomplete, periode avant 2025.
+
+Deux defauts trouves en le construisant : (1) le cache des bougies ne se completait jamais par la fin - nouvelle fonction `data_feed.extend_cache_to_now` (bougies closes seulement, sans toucher au debut ; `fetch_historical_candles` inchangee pour la reproductibilite des bancs) ; (2) une strategie qui retient son etat (achat unique, RSI, Bollinger) pouvait finir la chauffe "en position" et ne jamais acheter : `_start_flat` remet l'etat a plat au debut du backtest.
+
+**Page** (`reporting/static/backtest.html`, route `/backtest.html`, API `/api/bt-catalog`, `/api/bt-run`, `/api/bt-sweep`) : cartes de statistiques ; graphique (bougies, fleches d'achat et de vente colorees selon le resultat, bandes "en position", niveaux de la strategie) ; selection d'un trade par le tableau, un clic dans sa bande ou les fleches du clavier : zoom, lignes achat / vente / stop / objectif, trajet, fiche ; courbe de capital synchronisee avec "garder l'actif" et le backtest precedent ; tableau des trades et des semestres ; chargement des reglages d'un bot ; reglages memorises dans le navigateur. Verifiee dans le navigateur sur ETH_MOMENTUM (2025-01-01 -> 2026-10-08, sans couts : +70,5 %, ETH garde -25,9 %, 27 trades, 3,9 s).
+
+**Frais des bots** : `fee_pct: 0.0` dans les six configurations (les trois bots tendance n'avaient pas la ligne et prenaient le defaut de 0,1 %), avec la raison en commentaire ; champ "Frais par ordre" d'un nouveau bot a 0 dans le formulaire (le defaut du code reste 0,1 % : une config sans la ligne l'affiche honnetement). Reserve ecrite a l'utilisateur : "sans commission" n'est pas "sans cout" - spread a chaque ordre et, sur CFD, financement de nuit, a renseigner dans l'atelier ; les bots tradent toujours sur le testnet Binance (aucun connecteur vers ces courtiers).
+
+**Bug des bots corrige au passage** : `warm_up_strategy` consommait la DERNIERE bougie close pendant le rechauffage (signal ignore) et le bot attendait la cloture suivante. ETH_MOMENTUM (bougies jour, relance a chaque ouverture de session) n'a pris aucune decision du 01/10 au 09/10 : sa seule cloture est a 2 h du matin, PC eteint. Le rechauffage s'arrete maintenant a l'avant-derniere bougie close (une bougie de plus est telechargee pour garder une chauffe complete) ; la boucle recupere aussitot la derniere (`poll_new_closed_candle`) et la traite comme une vraie decision. Verifie : au redemarrage, ETH_MOMENTUM a decide sur la cloture du 08/10 (vote baissier, reste en liquidites). Le chemin IBKR (`ib_warm_up_strategy`) a le meme defaut, non corrige (aucun bot actions en service).
+
+**Validation** : `tests/test_backtest_view.py`, 13 tests (catalogue genere, lecture du formulaire, coherence trades / capital, spread, financement de nuit, depart a plat, stop et objectif par trade, surveillance fine, semestres, balayage sur les memes bougies, cache complete par la fin, routes HTTP) ; `tests/test_warm_up_price_history.py` : decision sur la derniere bougie close au demarrage. Suite complete : **994 tests**.
+
+---
 
 ## 4. Structure du projet
 

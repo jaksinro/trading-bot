@@ -2674,7 +2674,7 @@ function renderCreationTab() {
         <div class="field"><label>Trailing stop (%, vide = desactive)</label><input id="f_trailing_stop_pct" type="number" step="0.01" placeholder="vide = desactive"></div>
         <div class="field"><label>Sens du trailing stop</label><select id="f_trailing_mode"><option value="distance">% sous le plus haut atteint</option><option value="gain">% du gain rendu (achat 2000, plus haut 2100, 50 % : vend a 2050)</option></select></div>
         <div class="field"><label>Armement (% de gain avant d'activer le trailing, mode gain ; vide = frais couverts)</label><input id="f_trailing_arm_pct" type="number" step="0.01" placeholder="vide = 0,2 %"></div>
-        <div class="field"><label>Frais par ordre (%)</label><input id="f_fee_pct" type="number" step="0.01" value="0.1"></div>
+        <div class="field"><label>Frais par ordre (%)</label><input id="f_fee_pct" type="number" step="0.01" value="0"></div>
         <div class="field"><label>Timeframe de surveillance des sorties (ex: 5m, vide = desactive)</label><input id="f_exit_check_timeframe" type="text" placeholder="vide = desactive"></div>
       </div>
       <p class="adv-hint">"Timeframe de surveillance des sorties" verifie le stop-loss/verrou de gain/trailing stop plus souvent que le timeframe du bot (ex: toutes les 5 minutes au lieu d'une fois par heure), sans changer les entrees de la strategie - doit etre plus fin que le timeframe choisi ci-dessus. Voir le manuel utilisateur.</p>
@@ -3308,6 +3308,8 @@ async function renderTestContent() {
 
   contentEl.innerHTML = `
     <h1>Backtest</h1>
+    <p><a href="${CONTROL_SERVER}/backtest.html" target="_blank" rel="noopener" style="font-weight:600;">Ouvrir l'Atelier de backtest</a>
+    <span class="muted" style="font-size:12px;"> - chaque trade sur le graphique, reglages de la strategie, du risque et des couts, balayage d'un parametre.</span></p>
     <p class="muted">Teste un bot precis sur une periode/devise/parametres de ton choix, sans passer par le terminal - meme moteur que <code>python -m tradingbot.backtest_lab</code> (voir le manuel utilisateur).</p>
     <div class="section-block">
       <h2>General</h2>

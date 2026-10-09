@@ -899,6 +899,8 @@ def manual_symbol_state(symbol: str) -> dict:
 # Page Trading (EF-89)
 # ----------------------------------------------------------------------------
 TRADING_PAGE_PATH = Path(__file__).resolve().parent / "reporting" / "static" / "trading.html"
+# EF-100 : atelier de backtest (page statique, comme l'Espace Trading).
+BACKTEST_PAGE_PATH = Path(__file__).resolve().parent / "reporting" / "static" / "backtest.html"
 CANDLE_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
 _candles_cache: dict[tuple, tuple[float, list]] = {}
 
@@ -1221,6 +1223,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/dismiss-proposal": self._handle_dismiss_proposal,
             "/api/reoptimize-all": self._handle_reoptimize_all,
             "/api/run-backtest": self._handle_run_backtest,
+            "/api/bt-run": self._handle_bt_run,
+            "/api/bt-sweep": self._handle_bt_sweep,
             "/api/restart-all-bots": self._handle_restart_all,
             "/api/dca-run": self._handle_dca_run,
             "/api/dca-save": self._handle_dca_save,
@@ -1433,6 +1437,29 @@ class Handler(BaseHTTPRequestHandler):
         if chart_data:
             response["chart"] = chart_data
         self._send_json(200, response)
+
+    def _handle_bt_run(self, payload: dict) -> None:
+        """Atelier de backtest (EF-100) : un backtest complet, trade par trade."""
+        from tradingbot.backtest_view import run
+
+        self._bt_respond(run, payload)
+
+    def _handle_bt_sweep(self, payload: dict) -> None:
+        """Atelier de backtest (EF-100) : balayage d'un parametre."""
+        from tradingbot.backtest_view import sweep
+
+        self._bt_respond(sweep, payload)
+
+    def _bt_respond(self, fn, payload: dict) -> None:
+        try:
+            result = fn(payload)
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
+            return
+        except Exception as e:  # noqa: BLE001 - reseau, donnees : message lisible plutot qu'un 500 muet
+            self._send_json(500, {"error": f"echec du backtest : {type(e).__name__}: {e}"})
+            return
+        self._send_json(200, result)
 
     def _handle_restart_all(self, payload: dict) -> None:
         """Redemarre (stop puis relance depuis la config sur disque) tous les
@@ -1924,9 +1951,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": f"historique indisponible : {e}"})
             return
 
-        if urlsplit(self.path).path == "/trading.html":
+        if urlsplit(self.path).path in ("/trading.html", "/backtest.html"):
+            page = TRADING_PAGE_PATH if urlsplit(self.path).path == "/trading.html" else BACKTEST_PAGE_PATH
             try:
-                body = TRADING_PAGE_PATH.read_bytes()
+                body = page.read_bytes()
             except OSError:
                 self.send_response(404)
                 self.end_headers()
@@ -2014,6 +2042,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/list-proposals":
             self._send_json(200, {"proposals": list_proposals()})
+            return
+
+        if self.path == "/api/bt-catalog":
+            from tradingbot.backtest_view import catalog
+
+            self._send_json(200, catalog(CONFIG_DIR))
             return
 
         if self.path == "/api/backtest-strategies":

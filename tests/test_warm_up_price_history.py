@@ -25,11 +25,12 @@ def test_warm_up_strategy_seeds_price_history():
 
     warm_up_strategy(exchange, "ETH/USDT", "1h", strategy, warmup_candles=5, price_history=price_history)
 
-    # 6 lignes recuperees (warmup_candles + 1), la derniere (en cours) exclue -> 5 points.
+    # 7 lignes recuperees (warmup_candles + 2) : la derniere (en cours) exclue, et la
+    # derniere CLOSE laissee a la boucle du bot (decision au demarrage) -> 5 points.
     assert len(price_history) == 5
     # EF-84 : [t, cloture, ouverture, haut, bas] - t et cloture en tete.
-    assert price_history[0] == [4000, 104.0, 104.0, 104.0, 104.0]
-    assert price_history[-1][:2] == [8000, 108.0]
+    assert price_history[0] == [3000, 103.0, 103.0, 103.0, 103.0]
+    assert price_history[-1][:2] == [7000, 107.0]
 
 
 def test_warm_up_strategy_works_without_price_history():
@@ -38,7 +39,7 @@ def test_warm_up_strategy_works_without_price_history():
 
     last_ts = warm_up_strategy(exchange, "ETH/USDT", "1h", strategy, warmup_candles=5)
 
-    assert last_ts == 8000
+    assert last_ts == 7000   # la bougie close de 8000 reste a traiter par le bot
 
 
 def test_warm_up_strategy_feeds_trend_filter():
@@ -61,8 +62,9 @@ def test_warm_up_strategy_extends_fetch_window_to_cover_ema_period():
 
     last_ts = warm_up_strategy(exchange, "ETH/USDT", "1h", strategy, warmup_candles=5, trend_filter=trend_filter)
 
-    # limit demande = ema_period(15) + 1 = 16, dernier index disponible = 19 -> derniere bougie fermee a l'index 18.
-    assert last_ts == 18000
+    # limit demande = ema_period(15) + 2 = 17, dernier index disponible = 19 -> derniere bougie fermee a l'index 18,
+    # laissee a la boucle du bot (decision au demarrage) : le rechauffage s'arrete a l'index 17.
+    assert last_ts == 17000
 
 
 def test_warm_up_strategy_feeds_atr_sizer():
@@ -82,5 +84,21 @@ def test_warm_up_strategy_extends_fetch_window_to_cover_atr_baseline_period():
 
     last_ts = warm_up_strategy(exchange, "ETH/USDT", "1h", strategy, warmup_candles=5, atr_sizer=atr_sizer)
 
-    # limit demande = baseline_period(15) + 1 = 16, meme calcul que pour le filtre de tendance.
-    assert last_ts == 18000
+    # limit demande = baseline_period(15) + 2 = 17, meme calcul que pour le filtre de tendance.
+    assert last_ts == 17000
+
+
+def test_last_closed_candle_is_decided_by_the_bot_at_startup():
+    """Bug reel du 2026-10-09 : la derniere bougie close etait absorbee par le
+    rechauffage et le bot attendait la suivante. Un bot en bougies jour relance
+    chaque matin ne decidait jamais. Elle doit sortir du premier passage de la
+    boucle (poll_new_closed_candle) comme une vraie decision."""
+    from tradingbot.run_paper import poll_new_closed_candle
+
+    rows = _rows(10)   # 0..9000 ; 9000 = bougie en cours
+    exchange = FakeExchange(rows)
+    strategy = build_strategy({"strategy": {"type": "sma_cross", "short_window": 3, "long_window": 5}})
+    last_ts = warm_up_strategy(exchange, "ETH/USDT", "1h", strategy, warmup_candles=5)
+    first = poll_new_closed_candle(exchange, "ETH/USDT", "1h", last_ts)
+    assert first is not None and first.timestamp == 8000
+    assert poll_new_closed_candle(exchange, "ETH/USDT", "1h", first.timestamp) is None

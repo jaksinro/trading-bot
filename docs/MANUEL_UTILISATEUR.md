@@ -743,6 +743,56 @@ même paire.
 - chaque ordre est listé à droite : en attente (avec **Annuler**), exécuté,
   ou refusé avec la raison.
 
+## 13. L'Atelier de backtest : voir chaque trade, régler une stratégie
+
+Ouvre-le depuis l'onglet **Test** du dashboard (lien « Ouvrir l'Atelier de
+backtest »). Il rejoue une stratégie sur l'historique avec le **même moteur que
+tes bots**, et te montre chaque achat et chaque vente sur un graphique
+TradingView.
+
+**Lancer un backtest**
+- En haut : la paire, l'unité de temps (5m à 1d) et la période. Fin vide = jusqu'à
+  aujourd'hui (les cours sont complétés automatiquement jusqu'à la dernière bougie).
+- « Charger les réglages d'un bot » reprend exactement la configuration d'un de tes
+  bots (stratégie, risque, frais, surveillance des sorties).
+- Panneau de droite : les réglages de la stratégie, la gestion du risque (stop-loss,
+  objectif, trailing stop dans les deux sens, verrou de gain, sortie partielle),
+  les coûts, le capital.
+
+**Lire le résultat**
+- Les cartes du haut : rendement, ce qu'aurait donné « garder l'actif », baisse
+  maximale, nombre de trades, part de gagnants, gain et perte moyens, rapport
+  gains/pertes, temps passé en position, coûts payés.
+- Le graphique : flèches bleues = achats, flèches vertes ou rouges = ventes
+  gagnantes ou perdantes ; bandes colorées = périodes où la stratégie détenait
+  l'actif ; lignes fines = les niveaux de la stratégie (moyenne mobile, horizons du
+  vote de momentum, POC / VAH / VAL du Volume Profile...). Chaque élément se masque
+  avec les cases au-dessus du graphique.
+- **Voir un trade** : clique une ligne du tableau, ou clique dans une bande colorée,
+  ou utilise les flèches gauche / droite du clavier (Échap pour revenir à toute la
+  période). Le graphique zoome sur le trade et affiche son prix d'achat, son prix de
+  vente, son stop et son objectif, avec une fiche : dates, durée, motif de sortie,
+  résultat.
+- Sous le graphique : la courbe de ton capital (bleue), celle de « garder l'actif »
+  (grise) et celle du backtest précédent (orange), pour comparer un réglage au
+  précédent. Le tableau « Par semestre » montre si le résultat tient dans le temps.
+
+**Régler une stratégie : le balayage**
+Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
+(ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
+de chaque semestre. « Appliquer » reprend la valeur et relance le backtest complet.
+Préfère un réglage dont les **voisins marchent aussi** (un plateau) à un réglage
+seul qui brille : celui-là a souvent juste eu de la chance sur la période.
+
+**Les coûts : à renseigner**
+- *Commission* : 0 chez les courtiers « sans commission ».
+- *Spread* : l'écart entre prix d'achat et prix de vente, c'est là que ces courtiers
+  se paient. L'atelier en compte la moitié à chaque achat et à chaque vente.
+- *Financement par nuit* : sur les CFD, garder une position d'un jour sur l'autre
+  coûte un pourcentage de sa valeur. Pour une stratégie qui garde ses positions
+  plusieurs semaines, c'est souvent le coût principal.
+Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
+
 ## Historique des changements de l'interface
 
 | Date | Changement |
@@ -823,3 +873,4 @@ même paire.
 | 2026-09-27 | **Trailing stop « % du gain rendu »** : dans le formulaire d'un bot, deux nouveaux champs. « Sens du trailing stop » permet de choisir entre l'ancien fonctionnement (X % sous le plus haut) et la part du gain rendue (achat 2000, plus haut 2100, 50 % : vente à 2050). « Armement » fixe le gain à atteindre avant que ce trailing s'active. Enregistrer un bot depuis le formulaire conserve désormais ce réglage. Voir §5.2 |
 | 2026-09-27 | **Protection contre les essais de mot de passe en série** pour l'accès au dashboard depuis un autre appareil : après 10 mots de passe faux en 15 minutes, l'appareil est bloqué 15 minutes. Ouvrir la page sans avoir encore tapé le mot de passe ne compte pas comme un échec, et la machine du serveur n'est jamais bloquée. Voir §9 |
 | 2026-09-28 | **Protection contre les essais de secret sur les alertes TradingView** : après 10 alertes au secret faux en 15 minutes, l'adresse d'où elles viennent est bloquée 15 minutes (pour les alertes seulement, pas pour le dashboard). Aucun changement visible dans le dashboard. Voir §11 |
+| 2026-10-09 | **Atelier de backtest** (lien dans l'onglet Test) : chaque trade sur un graphique TradingView, réglages de la stratégie, du risque et des coûts (commission, spread, financement de nuit), balayage d'un réglage avec le résultat par semestre, chargement des réglages d'un bot. Le champ « Frais par ordre » d'un nouveau bot vaut désormais 0 (courtiers sans commission). Voir §13 |

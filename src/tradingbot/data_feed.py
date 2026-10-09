@@ -136,6 +136,41 @@ def fetch_historical_candles(
     return _dataframe_to_candles(df)
 
 
+def extend_cache_to_now(exchange_id: str, symbol: str, timeframe: str, exchange=None) -> int:
+    """Complete le cache par la FIN avec les bougies parues depuis (EF-100).
+    `fetch_historical_candles` ne relit jamais l'exchange une fois le cache
+    cree : l'atelier de backtest s'arretait au jour du premier telechargement.
+    Ne touche pas au debut du cache. Renvoie le nombre de bougies ajoutees ;
+    la bougie en cours (non close) n'est jamais gardee."""
+    cache_path = _cache_path(exchange_id, symbol, timeframe)
+    if exchange_id == "yfinance" or not cache_path.exists():
+        return 0
+    df = pd.read_parquet(cache_path)
+    if df.empty:
+        return 0
+    if exchange is None:
+        exchange = getattr(ccxt, exchange_id)()
+    step = exchange.parse_timeframe(timeframe) * 1000
+    now = exchange.milliseconds()
+    rows: list[list[float]] = []
+    since = int(df["timestamp"].max()) + 1
+    while since + step <= now:
+        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=1000)
+        closed = [r for r in batch if r[0] + step <= now]   # bougies closes seulement
+        if not closed:
+            break
+        rows.extend(closed)
+        since = closed[-1][0] + 1
+        if len(batch) < 1000:
+            break
+    if not rows:
+        return 0
+    new = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    merged = pd.concat([df, new]).drop_duplicates("timestamp", keep="last").sort_values("timestamp")
+    merged.reset_index(drop=True).to_parquet(cache_path)
+    return len(merged) - len(df)
+
+
 def fetch_funding_rate_history(
     exchange_id: str, symbol: str, since_iso: str, use_cache: bool = True, exchange=None
 ) -> list[FundingRatePoint]:

@@ -340,8 +340,18 @@ def warm_up_strategy(
         trend_filter.ema_period if trend_filter else 0,
         atr_sizer.baseline_period if atr_sizer else 0,
     )
-    history = _fetch_ohlcv_paginated(exchange, symbol, timeframe, warmup_needed + 1)
+    # +2 : la bougie en cours (exclue) et la derniere close (laissee a la boucle, voir ci-dessous) ;
+    # le rechauffage garde ainsi ses `warmup_needed` bougies completes.
+    history = _fetch_ohlcv_paginated(exchange, symbol, timeframe, warmup_needed + 2)
     closed_history = history[:-1]  # on exclut la bougie en cours de formation
+    # La DERNIERE bougie close n'est pas consommee ici : la boucle du bot la
+    # recupere aussitot (poll_new_closed_candle, plus recente que la valeur
+    # renvoyee) et la traite comme une vraie decision. Bug reel (2026-10-09) :
+    # elle etait absorbee par le rechauffage, signal ignore, et le bot attendait
+    # la cloture SUIVANTE - ETH_MOMENTUM (bougies jour, relance a chaque
+    # ouverture de session) n'a pris aucune decision en 8 jours, sa seule
+    # cloture etant a 2 h du matin, PC eteint.
+    closed_history = closed_history[:-1]
     for row in closed_history:
         candle = _row_to_candle(row)
         if hasattr(strategy, "on_candle"):
