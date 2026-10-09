@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.92 |
+| **Version** | 0.93 |
 | **Date** | 2026-09-28 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -106,6 +106,7 @@
 | 0.90 | EF-98 : algorithme ETH par vote de momentum (recherche 2025, test 2026), bot ETH_MOMENTUM |
 | 0.91 | EF-99 : le backtest dimensionne sur le cash reel et refuse un achat sans fonds (plus de compte a credit) |
 | 0.92 | EF-100 : atelier de backtest trade par trade ; frais des bots a zero ; decision au demarrage des bots |
+| 0.93 | EF-101 : connecteur Capital.com (compte demo) |
 ---
 
 ## 1. Introduction
@@ -284,6 +285,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-97 | Le bot Volume Profile doit suivre les regles du document de l'utilisateur ("Volume Profile : quand entrer, en images") : 3 setups, entree a la cloture qui valide, stop propre au trade, objectif 2R | Doit - **realise, sans avantage demontre**. Le moteur gere desormais un stop et un objectif propres a chaque trade (conserves au redemarrage). Mesure 2025-2026 : perte sur 11 fenetres sur 12. Voir STC §3.84 |
 | EF-98 | Un algorithme rentable sur l'ETH seul - demande de l'utilisateur du 2026-10-01 | Doit - **realise dans la limite du verifiable** : regle choisie sur 2025, figee, puis rentable sur 2026 jamais vue (+16,8 % apres frais, baisse max -25,9 % contre -55 % pour l'ETH garde). Aucune garantie pour l'avenir. Bot `ETH_MOMENTUM` en paper. Voir STC §3.85 |
 | EF-100 | Un outil dedie pour visualiser et regler les strategies en backtest, trade par trade, avec l'interface de TradingView - demande de l'utilisateur du 2026-10-09 ; frais des bots a zero (courtiers sans commission) | Doit - **realise**. Atelier de backtest (`/backtest.html`) ; couts separes commission / spread / financement de nuit ; frais des bots a 0. Voir STC §3.87 |
+| EF-101 | Se connecter au courtier vise par l'utilisateur (Capital.com) pour mesurer ses couts reels (spread, financement) et preparer le trading des bots chez lui - 2026-10-09 | Devrait - **realise en partie** : connecteur compte demo (le reel est refuse dans le code) et script de verification ; executeur pour les bots a venir. Voir STC §3.88 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

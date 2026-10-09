@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 0.97 |
+| **Version** | 0.98 |
 | **Date** | 2026-10-05 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -111,6 +111,7 @@
 | 0.95 | §3.85 : **premier lancement sans liquidation** - le bot s'attribuait le solde du compte partage (ETH_MOMENTUM : 0,0928 ETH des autres bots, +50 % fictif) ; solde desormais ignore, ni vendu ni adopte |
 | 0.96 | EF-99 (§3.86) : **backtest dimensionne sur le cash reel** - `BacktestExecutor` refuse un achat au-dela du cash, le moteur dimensionne sur le cash (plus de compte a credit) ; `CashEngine` des bancs supprime |
 | 0.97 | EF-100 (§3.87) : **atelier de backtest** (chaque trade sur le graphique TradingView, reglages, couts commission / spread / financement, balayage) ; frais des bots a zero ; cache des bougies complete par la fin ; **les bots decident sur la derniere bougie close au demarrage** (ETH_MOMENTUM n'avait rien decide en 8 jours) |
+| 0.98 | EF-101 (§3.88) : **connecteur Capital.com, compte demo seulement** (session, cotation et spread, bougies, positions) ; script de verification des couts reels ; QuantStats et GateGuard laisses a l'utilisateur |
 
 ---
 
@@ -2027,6 +2028,16 @@ Deux defauts trouves en le construisant : (1) le cache des bougies ne se complet
 **Bug des bots corrige au passage** : `warm_up_strategy` consommait la DERNIERE bougie close pendant le rechauffage (signal ignore) et le bot attendait la cloture suivante. ETH_MOMENTUM (bougies jour, relance a chaque ouverture de session) n'a pris aucune decision du 01/10 au 09/10 : sa seule cloture est a 2 h du matin, PC eteint. Le rechauffage s'arrete maintenant a l'avant-derniere bougie close (une bougie de plus est telechargee pour garder une chauffe complete) ; la boucle recupere aussitot la derniere (`poll_new_closed_candle`) et la traite comme une vraie decision. Verifie : au redemarrage, ETH_MOMENTUM a decide sur la cloture du 08/10 (vote baissier, reste en liquidites). Le chemin IBKR (`ib_warm_up_strategy`) a le meme defaut, non corrige (aucun bot actions en service).
 
 **Validation** : `tests/test_backtest_view.py`, 13 tests (catalogue genere, lecture du formulaire, coherence trades / capital, spread, financement de nuit, depart a plat, stop et objectif par trade, surveillance fine, semestres, balayage sur les memes bougies, cache complete par la fin, routes HTTP) ; `tests/test_warm_up_price_history.py` : decision sur la derniere bougie close au demarrage. Suite complete : **994 tests**.
+
+### 3.88 EF-101 : connecteur Capital.com (compte demo) et pistes d'outillage
+
+**Demande** : apres une recherche de depots GitHub utiles au projet, "je donne mon go pour l'install des pistes utiles au projet et integration". Pistes retenues : connecteur Capital.com (courtier vise par l'utilisateur), QuantStats (rapports de performance), reglage de GateGuard (ECC) ; serveurs MCP communautaires (TradingView Desktop, Obsidian) et memoire claude-mem laisses a l'installation de l'utilisateur (code tiers executant sur sa machine avec un acces large).
+
+**Connecteur** (`brokers/capitalcom.py`) : API REST officielle (https://open-api.capital.com/), environnement de demonstration (`demo-api-capital.backend-capital.com`). Session par `POST /session` (en-tete `X-CAP-API-KEY`, corps `identifier` / `password` / `encryptedPassword`), jetons `CST` et `X-SECURITY-TOKEN` reutilises, reconnexion apres 9 minutes d'inactivite (la session expire a 10) ou sur un 401 (une seule fois). Fonctions : comptes, recherche d'instruments, cotation (offre / demande, spread en % du prix milieu), bougies au prix milieu (horodatage UTC), positions, ouverture avec stop et objectif puis confirmation (`/confirms/{dealReference}`), fermeture. **Compte reel refuse dans le module** : passer en argent reel reste une decision explicite de l'utilisateur. Identifiants lus dans `.env` (`CAPITALCOM_API_KEY`, `CAPITALCOM_IDENTIFIER`, `CAPITALCOM_PASSWORD`, gabarit vide dans `.env.example`), jamais repetes dans un message d'erreur. `scripts/capitalcom_check.py` (lecture seule) affiche le solde demo, les instruments trouves, le spread et le financement de nuit publies : les valeurs a reporter dans l'atelier de backtest (EF-100). Les bots tradent toujours sur le testnet Binance : un executeur Capital.com pour les bots est l'etape suivante.
+
+**Non realise dans cette session, bloque par les protections de l'environnement** : installation de QuantStats (`pip install`) et ajout des exemptions GateGuard dans les reglages de Claude Code (auto-modification) - commandes et lignes fournies a l'utilisateur pour qu'il les applique lui-meme.
+
+**Validation** : `tests/test_capitalcom.py`, 8 tests sur faux serveur (compte reel refuse ; identifiants manquants ; connexion unique puis jetons reutilises ; reconnexion sur 401 et apres inactivite ; mot de passe absent des erreurs ; spread ; bougies au prix milieu en UTC ; ouverture avec niveaux puis confirmation).
 
 ---
 
