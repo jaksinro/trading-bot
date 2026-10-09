@@ -37,9 +37,21 @@ def main() -> None:
         epic = markets[0]["epic"]
         q = client.quote(epic)
         print(f"\n{epic} : achat {q.offer}, vente {q.bid} -> spread {q.spread_pct * 100:.3f} % du prix")
-        fee = (client.market(epic).get("instrument") or {}).get("overnightFee")
+        details = client.market(epic)
+        inst, rules = details.get("instrument") or {}, details.get("dealingRules") or {}
+        fee = inst.get("overnightFee")
         if fee:
-            print(f"Financement de nuit (tel que publie par Capital.com) : {fee}")
+            print(f"Financement de nuit : achat {fee.get('longRate')} %/jour, vente {fee.get('shortRate')} %/jour "
+                  "(negatif = paye, positif = recu)")
+        # Ce que le compte permet reellement (varie selon l'entite Capital.com et les reglages du compte).
+        print(f"Marge requise : {inst.get('marginFactor')} {inst.get('marginFactorUnit')} "
+              "(50 % = levier 2:1, 100 % = sans levier)")
+        for key in ("minDealSize", "minSizeIncrement", "minStopOrProfitDistance", "maxStopOrProfitDistance"):
+            r = rules.get(key) or {}
+            print(f"  {key} : {r.get('value')} {r.get('unit', '')}")
+        print(f"  trailing stop chez le courtier : {rules.get('trailingStopsPreference')}, "
+              f"stop garanti : {inst.get('guaranteedStopAllowed')}")
+        print(f"  horaires (UTC) : {(inst.get('openingHours') or {}).get('mon')}")
         print("\nA reporter dans l'atelier : Spread = "
               f"{q.spread_pct * 100:.3f} %, et le taux de nuit d'une position acheteuse (converti en % par jour).")
     except CapitalComError as e:
