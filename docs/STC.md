@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.06 |
+| **Version** | 1.07 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -120,6 +120,7 @@
 | 1.04 | EF-107 (§3.94) : **Volume Profile selon les couts** - `Engine` transmet le cout aller-retour (`set_round_trip_cost`), `cost_cover` (2R net), `min_risk_cost_ratio` (filtre) ; banc `bench_vp_costs.py` : le filtre aide, l'objectif repousse seul non |
 | 1.05 | EF-108 (§3.95) : **Volume Profile, objectif minimal** `min_target_pct` ; mesure : plafond 1,5 % + objectif >= 2 % gagne 7 fenetres sur 12 a tous les spreads testes |
 | 1.06 | EF-109 (§3.96) : **profil de volume de TradingView** - `volume_profile` (lignes en pas entiers, zone de valeur officielle), `profile_source.py` (bougies fines, table TradingView), sources branchees dans l'atelier, `backtest_lab`, `run_paper` et les bancs ; `profile_period: developing` ; mesures refaites |
+| 1.07 | EF-110 (§3.97) : **carte du projet dans Obsidian** - `scripts/obsidian_sync.py` |
 
 ---
 
@@ -2270,6 +2271,20 @@ Deuxieme constat, sur la capture : le profil TradingView montre etait une PLAGE 
 Lecture : avec le profil de TradingView, les reglages d'origine sont nettement perdants ; plafond 1,5 % + objectif minimal 1,5 % reste le meilleur et le plus regulier (7 fenetres sur 12 a tous les spreads, mediane +5 a +8 % par semestre), et devient preferable a 2 % (mesure EF-108 faite avec l'ancien calcul). ETH et BTC gagnent (+30 / +10 % a 0,06 %), DOGE perd (-29 %). Le profil en developpement - "le rebond sur le VAL du jour" de la capture - perd partout : le VAL d'une plage tracee apres coup n'est pas tradable.
 
 **Validation** : `tests/test_volume_profile.py` (zone de valeur recalculee a la main selon TradingView : 103 -> 106 au lieu de 103 -> 107 ; +5 : egalite au plus proche du POC, lignes en pas entiers et nombre le plus proche, profil sur les bougies fines de la seance, repli si la source echoue, profil en developpement sans futur) ; `tests/test_profile_source.py` (12 : table TradingView, 10 min depuis 5 min, bougies closes seulement, pagination de l'exchange, branchement a la demande). Suite complete : **1094 tests**.
+
+### 3.97 EF-110 : carte du projet dans Obsidian
+
+**Demande** (2026-10-10) : l'utilisateur a installe Obsidian et veut y retrouver plus facilement tout ce qui concerne le trading bot.
+
+**Conception** (`scripts/obsidian_sync.py`) : un coffre Obsidian est un dossier de notes Markdown. Le script ecrit dans le coffre (par defaut celui ouvert dans Obsidian, lu dans `%APPDATA%/obsidian/obsidian.json` ; sinon `--vault`) un dossier `Trading bot/` :
+- `Trading bot.md` : accueil - documents, bots, strategies, mesures, et tableau de toutes les exigences (sujet, statut) ;
+- `Documents/` : copies de la STB, la STC, le manuel, la feuille de route, le README et les consignes, ou chaque `EF-xx` devient un lien (barre echappee dans les tableaux, rien dans les titres ni les blocs de code) ;
+- `Exigences/` : une note par exigence - besoin et statut de la STB, puis la ou les sections de la STC dont le titre la cite ; titre tire de la STC, sinon du besoin ;
+- `Bots/` (une note par `config/**/*.yml` : marche, strategie liee, configuration complete, liens vers le fichier et le journal), `Strategies/` (role, reglages introspectes comme dans l'atelier, bots qui l'utilisent, documentation du module), `Mesures/` (protocole de chaque banc `bench_*.py`), `Code source.md` et `Scripts.md` (chaque fichier, son role, un lien qui l'ouvre).
+
+Choix : des COPIES regenerees plutot que des liens vers le depot - un dossier lie dans Obsidian permettrait de supprimer ou modifier les vrais documents depuis Obsidian. Chaque note generee porte une marque en premiere ligne ; une mise a jour remplace seulement ces notes, jamais une note ecrite par l'utilisateur dans le dossier. Aucun chemin personnel dans le depot : le coffre est lu dans la configuration d'Obsidian.
+
+**Validation** : `tests/test_obsidian_sync.py` (4 tests : carte complete et note personnelle conservee apres deux mises a jour, noms de notes valides coupes sur un mot, liens d'exigences hors titres et code et echappes dans les tableaux, coffre ouvert choisi par defaut). Premiere generation : 143 notes (6 documents, 108 exigences, 7 bots, 12 strategies, 7 bancs). Suite complete : **1098 tests**.
 
 ---
 
