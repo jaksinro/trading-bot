@@ -279,3 +279,18 @@ def test_workshop_opens_on_the_reference_bot(tmp_path):
     vp = {p["name"]: p["default"] for p in next(s for s in cat["strategies"] if s["type"] == "volume_profile")["params"]}
     assert vp["trend_days"] == 50 and vp["allow_short"] is True and vp["max_risk_pct"] == 0.015
     assert bv.catalog(tmp_path / "vide")["default_bot"] is None
+
+
+def test_backtests_can_be_switched_off_on_the_raspberry_pi(server, monkeypatch):
+    """EF-114 : TRADINGBOT_ROLE=pi -> routes de backtest refusees, atelier prevenu."""
+    monkeypatch.setenv("TRADINGBOT_ROLE", "pi")
+    for route in ("/api/bt-run", "/api/bt-sweep", "/api/run-backtest", "/api/reoptimize-all"):
+        status, err = call(server, route, base())
+        assert status == 403 and "Raspberry Pi" in err["error"], route
+    status, cat = call(server, "/api/bt-catalog")
+    assert status == 200 and cat["backtests_enabled"] is False
+    monkeypatch.setenv("TRADINGBOT_ROLE", "pc")
+    assert call(server, "/api/bt-catalog")[1]["backtests_enabled"] is True
+    for route in ("/api/start-bot", "/api/launch-bot", "/api/restart-all-bots", "/api/dca-run"):
+        status, err = call(server, route, {"config_path": "config/x.yml", "name": "x"})
+        assert status == 403 and "Raspberry Pi" in err["error"], route

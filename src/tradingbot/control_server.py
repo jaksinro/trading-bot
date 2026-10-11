@@ -900,6 +900,29 @@ def manual_symbol_state(symbol: str) -> dict:
 # ----------------------------------------------------------------------------
 TRADING_PAGE_PATH = Path(__file__).resolve().parent / "reporting" / "static" / "trading.html"
 # EF-100 : atelier de backtest (page statique, comme l'Espace Trading).
+# EF-114 : role de la machine (TRADINGBOT_ROLE dans .env). "pi" : les bots tournent,
+# les backtests sont coupes (trop lourds : bougies 1 min, balayages). "pc" : backtests
+# seulement, aucun bot ne demarre - sinon les memes bots tourneraient sur les deux
+# machines et passeraient chaque ordre deux fois. Vide : les deux (comportement d'origine).
+ROLE_ENV = "TRADINGBOT_ROLE"
+BACKTEST_ROUTES = {"/api/run-backtest", "/api/bt-run", "/api/bt-sweep", "/api/reoptimize-all"}
+BOT_ROUTES = {"/api/launch-bot", "/api/start-bot", "/api/restart-all-bots", "/api/dca-run"}
+BACKTESTS_OFF_MESSAGE = "Backtests desactives sur cette machine (Raspberry Pi) : lance-les depuis le PC."
+BOTS_OFF_MESSAGE = "Bots desactives sur cette machine (PC de backtest) : ils tournent sur le Raspberry Pi."
+
+
+def machine_role() -> str:
+    return os.environ.get(ROLE_ENV, "").strip().lower()
+
+
+def backtests_enabled() -> bool:
+    return machine_role() != "pi"
+
+
+def bots_enabled() -> bool:
+    return machine_role() != "pc"
+
+
 BACKTEST_PAGE_PATH = Path(__file__).resolve().parent / "reporting" / "static" / "backtest.html"
 CANDLE_TIMEFRAMES = ("1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w")
 _candles_cache: dict[tuple, tuple[float, list]] = {}
@@ -1247,6 +1270,12 @@ class Handler(BaseHTTPRequestHandler):
         handler = routes.get(self.path)
         if handler is None:
             self._send_json(404, {"error": "route inconnue"})
+            return
+        if self.path in BACKTEST_ROUTES and not backtests_enabled():
+            self._send_json(403, {"error": BACKTESTS_OFF_MESSAGE})
+            return
+        if self.path in BOT_ROUTES and not bots_enabled():
+            self._send_json(403, {"error": BOTS_OFF_MESSAGE})
             return
         handler(payload)
 
@@ -2054,7 +2083,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/bt-catalog":
             from tradingbot.backtest_view import catalog
 
-            self._send_json(200, catalog(CONFIG_DIR))
+            self._send_json(200, {**catalog(CONFIG_DIR), "backtests_enabled": backtests_enabled()})
             return
 
         if self.path == "/api/backtest-strategies":

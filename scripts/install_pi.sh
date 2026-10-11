@@ -16,6 +16,11 @@ echo "== 1/5 Paquets systeme"
 sudo apt-get update -qq
 sudo apt-get install -y -qq python3 python3-venv python3-pip curl git
 
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+    echo "   Python $(python3 -V) trop ancien : le projet demande 3.12+ (Raspberry Pi OS Trixie / Debian 13)."
+    exit 1
+fi
+
 echo "== 2/5 Environnement Python"
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
@@ -29,6 +34,12 @@ if [ ! -f .env ]; then
 fi
 if ! grep -q "^DASHBOARD_PASSWORD=.\+" .env; then
     echo "   ATTENTION : DASHBOARD_PASSWORD absent de .env - le dashboard refusera les autres appareils (403)."
+fi
+# EF-114 : sur le Pi, les bots tournent et les backtests sont coupes (ils se font sur le PC).
+if grep -q "^TRADINGBOT_ROLE=" .env; then
+    sed -i "s/^TRADINGBOT_ROLE=.*/TRADINGBOT_ROLE=pi/" .env
+else
+    echo "TRADINGBOT_ROLE=pi" >> .env
 fi
 SCHEME="http"
 if grep -q "^DASHBOARD_TLS_CERT=.\+" .env; then

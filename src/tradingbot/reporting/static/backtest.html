@@ -656,6 +656,10 @@ async function init() {
     else if (e.key === "Escape") clearSelection();
   });
   setStatus("Pret. Charge les reglages d'un bot ou choisis une strategie, puis lance le backtest.");
+  if (c.backtests_enabled === false) {   // EF-114 : Raspberry Pi, backtests sur le PC seulement
+    $("runBtn").disabled = true; $("sweepBtn").disabled = true;
+    setStatus("Backtests desactives sur ce Raspberry Pi : lance-les depuis le PC.", true);
+  }
 }
 init();
 </script>
