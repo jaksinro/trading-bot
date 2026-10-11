@@ -755,6 +755,10 @@ TradingView.
   aujourd'hui (les cours sont complétés automatiquement jusqu'à la dernière bougie).
 - « Charger les réglages d'un bot » reprend exactement la configuration d'un de tes
   bots (stratégie, risque, frais, surveillance des sorties).
+- À l'ouverture (si tu n'as pas encore lancé de backtest), l'Atelier charge les
+  réglages du bot **ETH_VP_TENDANCE** : Volume Profile avec stop au plus loin à
+  1,5 %, objectif minimal 1,5 %, filtre de tendance 50 jours, ventes à découvert,
+  sorties vérifiées chaque minute, courtier Capital.com.
 - Panneau de droite : les réglages de la stratégie, la gestion du risque (stop-loss,
   objectif, trailing stop dans les deux sens, verrou de gain, sortie partielle),
   les coûts, le capital.
@@ -964,3 +968,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Volume Profile : objectif minimal** - nouveau réglage « Objectif minimal » dans l'Atelier (trades à objectif trop proche ignorés). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Volume Profile calculé comme TradingView** - bougies d'une minute, 24 lignes, zone de valeur officielle ; nouveaux réglages « Profil sur bougies fines » et « Profil : previous / developing ». Les backtests, l'Atelier et le bot utilisent ce calcul. Voir §13 |
 | 2026-10-11 | **Volume Profile : filtre de tendance** - nouveau réglage « Filtre de tendance : moyenne sur N jours » dans l'Atelier (achats seulement au-dessus de la moyenne, ventes à découvert seulement en dessous). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |
+| 2026-10-11 | **Atelier : réglages de référence par défaut** - à l'ouverture, l'Atelier charge les réglages du nouveau bot ETH_VP_TENDANCE, et propose ses valeurs quand on choisit le Volume Profile. La surveillance des sorties peut se faire chaque minute. Voir §13 |

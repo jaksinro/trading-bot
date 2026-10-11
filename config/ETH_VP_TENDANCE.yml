@@ -1,0 +1,46 @@
+# Volume Profile avec les reglages mesures en octobre 2026 (STC 3.92 a 3.99), cree le
+# 2026-10-11 a la demande de l'utilisateur. Reglages par defaut de l'atelier de backtest.
+# Compte Binance testnet AU COMPTANT : les ventes a decouvert y sont refusees (journal
+# "Vente a decouvert ignoree") - seuls les achats filtres passent, tant que l'executeur
+# d'un courtier CFD (Capital.com) n'existe pas.
+name: ETH_VP_TENDANCE
+exchange: binance
+symbol: ETH/USDT
+timeframe: 15m
+warmup_candles: 5000      # 52 jours : la moyenne 50 jours du filtre de tendance doit etre prete
+flatten_on_start: false
+capital_allocated: 200.0
+strategy:
+  type: volume_profile
+  setups: [poc_rebound, value_area_reentry, breakout]
+  session_hours: 24         # profil = la journee UTC precedente
+  rows: 24                  # comme TradingView (EF-109)
+  value_area_pct: 0.7
+  reward_risk: 2.0          # objectif a 2 fois le risque
+  max_signal_age: 3
+  pullback_max_depth: 0.25
+  stop_buffer_pct: 0.0005
+  min_risk_pct: 0.0
+  max_risk_pct: 0.015       # stop au plus loin a 1,5 %, rapproche au-dela (EF-105)
+  wide_stop: cap
+  min_target_pct: 0.015     # objectif d'au moins 1,5 %, sinon pas de trade (EF-108)
+  trend_days: 50            # achats au-dessus de la moyenne 50 jours, ventes en dessous (EF-111)
+  allow_short: true         # refuse au comptant (Binance) ; actif en backtest et chez un courtier CFD
+  lower_timeframe_profile: true   # profil sur bougies 1 min, comme TradingView
+  profile_period: previous
+risk:
+  max_position_size_pct: 1.0
+  stop_loss_pct: null       # stop et objectif propres a chaque trade
+  take_profit_pct: null
+  max_daily_loss_pct: 0.05
+  max_concurrent_positions: 1
+  trailing_stop_pct: null
+  fee_pct: 0.0
+  partial_take_profit_pct: null
+  partial_exit_fraction: 0.5
+  profit_lock_arm_pct: null
+  profit_lock_trigger_pct: null
+exit_check_timeframe: 1m    # stop et objectif verifies chaque minute (comme les mesures)
+backtest:
+  starting_capital: 1000
+  since: '2025-01-01T00:00:00Z'

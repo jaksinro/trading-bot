@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.09 |
+| **Version** | 1.10 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -123,6 +123,7 @@
 | 1.07 | EF-110 (§3.97) : **carte du projet dans Obsidian** - `scripts/obsidian_sync.py` |
 | 1.08 | §3.98 : **analyse du Volume Profile 2024 / 2025 / 2026** (`scripts/analyse_vp_annees.py`) - 2026 plus calme et achats en tendance baissiere perdants |
 | 1.09 | EF-111 (§3.99) : **filtre de tendance du Volume Profile** (`trend_days`, `warmup_days`) ; avec ventes en tendance baissiere, ETH gagne 4 semestres sur 4 a 0,06 % de spread |
+| 1.10 | EF-112 (§3.100) : **bot `ETH_VP_TENDANCE`** et **reglages par defaut de l'atelier** (`DEFAULT_BOT`, sorties a la minute) |
 
 ---
 
@@ -2354,6 +2355,18 @@ Lecture :
 - Les ventes sont impossibles sur le compte Binance au comptant du bot actuel : cette variante suppose un courtier CFD (Capital.com) et l'executeur a construire. La config du bot n'est pas modifiee.
 
 **Validation** : `tests/test_volume_profile.py` (+3 : achat seulement au-dessus de la moyenne, vente seulement en dessous, aucune entree sans historique suffisant et chauffe declaree). Suite complete : **1101 tests**.
+
+### 3.100 EF-112 : bot ETH_VP_TENDANCE, reglages par defaut de l'atelier
+
+**Demande** (2026-10-11) : creer un bot avec les reglages mesures (EF-105 a EF-111) et les appliquer par defaut dans le backtest.
+
+**Conception** :
+- `config/ETH_VP_TENDANCE.yml` : ETH/USDT 15 min, `volume_profile` - 24 lignes et profil sur 1 min (TradingView), `max_risk_pct: 0.015`, `min_target_pct: 0.015`, `trend_days: 50`, `allow_short: true`, `exit_check_timeframe: 1m`, `warmup_candles: 5000` (52 jours pour la moyenne). Ecrit a la main : le formulaire de creation du dashboard ne gere pas le Volume Profile. Lance en papier sur le testnet Binance (compte au comptant) : chaque vente a decouvert y est refusee par le moteur (panier commun, EF-104) - le bot ne prend que les achats filtres tant qu'un executeur de courtier CFD n'existe pas. `ETH_VOLUME_PROFILE` n'est pas modifie.
+- Atelier : `backtest_view.DEFAULT_BOT` - le catalogue indique `default_bot` et, pour la strategie de ce bot, remplace les valeurs proposees de ses reglages par celles du bot ; la page charge ce bot a l'ouverture quand aucun backtest precedent n'est memorise (cle de stockage `bt_form_v2`, nouvelle pour que les reglages de reference s'appliquent une premiere fois). Surveillance des sorties possible a la minute (`EXIT_TIMEFRAMES`).
+
+**Premier backtest dans l'atelier** (reglages par defaut, du 2025-01-01 au 2026-10-11, Capital.com sans levier : spread 0,061 %, sorties chaque minute) : +104,3 % contre -24,9 % pour garder l'ETH, baisse maximale -19,8 %, 277 trades, 42 % de gagnants, rapport gains / pertes 1,33, couts 241 $ ; achats +591 $ (109 trades), ventes a decouvert +452 $ (168 trades). Le bot au comptant ne beneficie que de la part achats.
+
+**Validation** : `tests/test_backtest_view.py` (+1 : bot de reference charge par defaut et ses reglages proposes ; absent -> aucun). Bot demarre : rechauffage de 5 000 bougies, surveillance a la minute, premiere decision prise. Suite complete : **1102 tests**.
 
 ---
 

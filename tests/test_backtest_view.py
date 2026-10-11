@@ -265,3 +265,17 @@ def test_short_warning_names_a_spot_broker(market):
         bv.parse({**p, "broker": "inconnu"})
     doge = bv.parse({**base(broker="ninjatrader"), "symbol": "DOGE/USDT"})
     assert any("n'est pas proposee" in w for w in bv._warnings(doge, []))
+
+
+def test_workshop_opens_on_the_reference_bot(tmp_path):
+    """EF-112 : reglages du bot de reference charges par defaut, et proposes pour sa strategie."""
+    import shutil
+
+    from pathlib import Path
+
+    shutil.copy(Path(__file__).resolve().parents[1] / "config" / f"{bv.DEFAULT_BOT}.yml", tmp_path)
+    cat = bv.catalog(tmp_path)
+    assert cat["default_bot"] == bv.DEFAULT_BOT
+    vp = {p["name"]: p["default"] for p in next(s for s in cat["strategies"] if s["type"] == "volume_profile")["params"]}
+    assert vp["trend_days"] == 50 and vp["allow_short"] is True and vp["max_risk_pct"] == 0.015
+    assert bv.catalog(tmp_path / "vide")["default_bot"] is None

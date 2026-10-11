@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.03 |
+| **Version** | 1.04 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -117,6 +117,7 @@
 | 1.01 | EF-109 : profil de volume calcule comme TradingView (bougies fines, lignes, zone de valeur) ; profil en developpement en option |
 | 1.02 | EF-110 : carte du projet dans Obsidian (documents, exigences, bots, strategies, mesures, code) |
 | 1.03 | EF-111 : Volume Profile - filtre de tendance (achats au-dessus de la moyenne N jours, ventes en dessous) |
+| 1.04 | EF-112 : bot ETH_VP_TENDANCE (reglages mesures) et reglages par defaut de l'atelier |
 ---
 
 ## 1. Introduction
@@ -306,6 +307,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-109 | Calculer le profil de volume exactement comme TradingView - demande de l'utilisateur du 2026-10-09 ("le calcul de ton volume profile est faux et n'est pas le meme que dans TradingView", avec une capture ETH 08/10 -> 09/10) | Doit - **realise**. Methode officielle de TradingView : bougies fines selon la table du Session Volume Profile (1 min pour un graphique 15 min), 24 lignes par defaut en pas de cotation entiers, zone de valeur construite ligne a ligne sans depasser 70 %. Verifie sur la plage de la capture : POC / VAH / VAL a quelques dollars de TradingView (source de cours differente). Fournie aux backtests, a l'atelier et aux bots. Option `profile_period: developing` (profil du jour sans futur) : mesuree perdante. Voir STC §3.96 |
 | EF-110 | Retrouver facilement tout ce qui concerne le trading bot dans Obsidian - demande de l'utilisateur du 2026-10-10 ("ajouter tout les fichier en lien avec le trading bot dans obsidian") | Devrait - **realise**. `scripts/obsidian_sync.py` ecrit dans le coffre ouvert un dossier "Trading bot" : accueil, copies des documents avec liens vers chaque exigence, une note par exigence, bot, strategie et banc de mesure, code source et scripts. Les notes de l'utilisateur ne sont jamais touchees ; le depot n'est jamais modifie. A relancer apres un changement. Voir STC §3.97 |
 | EF-111 | Volume Profile : ne plus acheter contre la tendance - suite de l'analyse 2024-2026 (STC 3.98) demandee par l'utilisateur le 2026-10-11 ("go") | Devrait - **realise (reglage, desactive par defaut)** : `trend_days` - achats seulement si la cloture de la veille est au-dessus de sa moyenne N jours, ventes a decouvert seulement en dessous. Mesure (12 fenetres, spread 0,06 %) : seul, le filtre efface la perte du 1er semestre 2026 (ETH -15,8 % -> -0,5 %) mais rogne 2025 ; avec les ventes, ETH gagne 4 semestres sur 4 (30 et 50 jours) ou 3 sur 4 (100 jours), BTC partage, DOGE perd. Ventes impossibles sur Binance au comptant. Config du bot inchangee. Voir STC §3.99 |
+| EF-112 | Un bot avec les reglages mesures du Volume Profile, appliques par defaut dans le backtest - demande de l'utilisateur du 2026-10-11 ("creer un bot avec ces parametres et fais en sorte qu'il s'applique par defaut dans le backtest") | Doit - **realise**. Bot `ETH_VP_TENDANCE` (ETH 15 min, profil TradingView, plafond de stop 1,5 %, objectif minimal 1,5 %, filtre de tendance 50 jours, ventes a decouvert, sorties chaque minute), lance en papier sur le testnet Binance : les ventes y sont refusees (compte au comptant), seuls les achats filtres passent. L'atelier s'ouvre sur ses reglages ; sorties a la minute possibles. Voir STC §3.100 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

@@ -43,8 +43,11 @@ from tradingbot.run_backtest import STRATEGY_REGISTRY
 DAY_MS = 86_400_000
 MAX_SWEEP_VALUES = 30
 MAX_OVERLAYS = 8
+DEFAULT_BOT = "ETH_VP_TENDANCE"   # EF-112 : reglages charges a l'ouverture de l'atelier
 SYMBOLS = ["ETH/USDT", "BTC/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT", "PAXG/USDT"]
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
+# EF-112 : sorties surveillees jusqu'a la minute (stop et objectif poses chez le courtier).
+EXIT_TIMEFRAMES = ["1m"] + TIMEFRAMES
 
 # Strategies proposees dans l'atelier (le market making a son propre moteur).
 STRATEGIES = {
@@ -158,12 +161,27 @@ def bot_configs(config_dir) -> list[dict]:
 
 
 def catalog(config_dir) -> dict:
+    bots = bot_configs(config_dir)
+    # EF-112 : l'atelier s'ouvre sur les reglages du bot de reference, et ses valeurs deviennent
+    # les reglages proposes quand on choisit sa strategie.
+    default = next((b for b in bots if b["name"] == DEFAULT_BOT), None)
+
+    def params_of(stype: str) -> list[dict]:
+        params = strategy_params(stype)
+        if default and default["strategy"].get("type") == stype:
+            for f in params:
+                if f["name"] in default["strategy"]:
+                    value = default["strategy"][f["name"]]
+                    f["default"] = list(value) if isinstance(value, tuple) else value
+        return params
+
     return {
-        "strategies": [{"type": k, "label": v[0], "description": v[1], "params": strategy_params(k)}
+        "strategies": [{"type": k, "label": v[0], "description": v[1], "params": params_of(k)}
                        for k, v in STRATEGIES.items()],
         "risk_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in RISK_FIELDS],
         "cost_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in COST_FIELDS],
-        "symbols": SYMBOLS, "timeframes": TIMEFRAMES, "bots": bot_configs(config_dir),
+        "symbols": SYMBOLS, "timeframes": TIMEFRAMES, "exit_timeframes": EXIT_TIMEFRAMES, "bots": bots,
+        "default_bot": default["name"] if default else None,
         "default_start": "2025-01-01", "brokers": broker_list(), "default_broker": DEFAULT_BROKER,
     }
 
@@ -269,8 +287,8 @@ def parse(payload: dict) -> dict:
     symbol = str(payload.get("symbol") or "ETH/USDT").upper()
     timeframe = payload.get("timeframe") or "1h"
     exit_tf = payload.get("exit_check_timeframe") or None
-    for tf in filter(None, (timeframe, exit_tf)):
-        if tf not in TIMEFRAMES:
+    for tf, allowed in ((timeframe, TIMEFRAMES), (exit_tf, EXIT_TIMEFRAMES)):
+        if tf and tf not in allowed:
             raise ValueError(f"unite de temps inconnue : {tf}")
     if exit_tf and ccxt.Exchange.parse_timeframe(exit_tf) >= ccxt.Exchange.parse_timeframe(timeframe):
         raise ValueError("la surveillance des sorties doit etre plus fine que l'unite de temps")

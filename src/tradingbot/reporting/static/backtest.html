@@ -230,6 +230,8 @@ function date(ms, withTime) { return new Date(ms).toLocaleString("fr-FR", withTi
 function dur(h) { return h == null ? "-" : h < 48 ? num(h, 0) + " h" : num(h / 24, 1) + " j"; }
 function t(ms) { return Math.floor(ms / 1000) + TZ; }
 
+// EF-112 : nouvelle cle, pour que les reglages de reference s'appliquent une premiere fois.
+const FORM_KEY = "bt_form_v2";
 async function api(path, body) {
   const resp = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const data = await resp.json().catch(() => ({}));
@@ -319,7 +321,7 @@ async function applyBroker() {
 }
 function setTimeframe(tf) {
   document.querySelectorAll("#tf button").forEach(b => b.classList.toggle("active", b.dataset.tf === tf));
-  const order = state.catalog.timeframes;
+  const order = state.catalog.exit_timeframes || state.catalog.timeframes;
   const keep = $("exitTf").value;
   $("exitTf").innerHTML = '<option value="">non</option>' + order.slice(0, order.indexOf(tf)).map(x => `<option value="${x}">toutes les ${x}</option>`).join("");
   if ([...$("exitTf").options].some(o => o.value === keep)) $("exitTf").value = keep;
@@ -556,7 +558,7 @@ async function runBacktest() {
     const r = await api("/api/bt-run", p);
     if (state.result) state.prevEquity = state.result.equity.map(q => ({ time: t(q[0]), value: q[1] }));
     state.result = r;
-    try { localStorage.setItem("bt_form", JSON.stringify(p)); } catch (e) { /* stockage indisponible */ }
+    try { localStorage.setItem(FORM_KEY, JSON.stringify(p)); } catch (e) { /* stockage indisponible */ }
     renderTables(); renderCharts(); clearSelection();
     setStatus(`${r.candles.length.toLocaleString("fr-FR")} bougies, ${r.trades.length} trades - calcule en ${((performance.now() - t0) / 1000).toFixed(1)} s.`);
   } catch (e) {
@@ -633,8 +635,10 @@ async function init() {
   setTimeframe("1h");
   renderStrategyFields();
   let saved = null;
-  try { saved = JSON.parse(localStorage.getItem("bt_form") || "null"); } catch (e) { saved = null; }
-  applyForm(saved);
+  try { saved = JSON.parse(localStorage.getItem(FORM_KEY) || "null"); } catch (e) { saved = null; }
+  // EF-112 : sans backtest precedent, l'atelier s'ouvre sur les reglages du bot de reference.
+  if (saved) applyForm(saved);
+  else if (c.default_bot) loadBot(c.default_bot);
   applyBroker();
 
   $("runBtn").onclick = runBacktest;
