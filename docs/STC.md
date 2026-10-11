@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.07 |
+| **Version** | 1.08 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -121,6 +121,7 @@
 | 1.05 | EF-108 (§3.95) : **Volume Profile, objectif minimal** `min_target_pct` ; mesure : plafond 1,5 % + objectif >= 2 % gagne 7 fenetres sur 12 a tous les spreads testes |
 | 1.06 | EF-109 (§3.96) : **profil de volume de TradingView** - `volume_profile` (lignes en pas entiers, zone de valeur officielle), `profile_source.py` (bougies fines, table TradingView), sources branchees dans l'atelier, `backtest_lab`, `run_paper` et les bancs ; `profile_period: developing` ; mesures refaites |
 | 1.07 | EF-110 (§3.97) : **carte du projet dans Obsidian** - `scripts/obsidian_sync.py` |
+| 1.08 | §3.98 : **analyse du Volume Profile 2024 / 2025 / 2026** (`scripts/analyse_vp_annees.py`) - 2026 plus calme et achats en tendance baissiere perdants |
 
 ---
 
@@ -2285,6 +2286,35 @@ Lecture : avec le profil de TradingView, les reglages d'origine sont nettement p
 Choix : des COPIES regenerees plutot que des liens vers le depot - un dossier lie dans Obsidian permettrait de supprimer ou modifier les vrais documents depuis Obsidian. Chaque note generee porte une marque en premiere ligne ; une mise a jour remplace seulement ces notes, jamais une note ecrite par l'utilisateur dans le dossier. Aucun chemin personnel dans le depot : le coffre est lu dans la configuration d'Obsidian.
 
 **Validation** : `tests/test_obsidian_sync.py` (4 tests : carte complete et note personnelle conservee apres deux mises a jour, noms de notes valides coupes sur un mot, liens d'exigences hors titres et code et echappes dans les tableaux, coffre ouvert choisi par defaut). Premiere generation : 143 notes (6 documents, 108 exigences, 7 bots, 12 strategies, 7 bancs). Suite complete : **1098 tests**.
+
+### 3.98 Analyse : pourquoi le Volume Profile rend mal en 2026
+
+**Question** (utilisateur, 2026-10-11) : pourquoi le rendement 2026 est-il mauvais alors que 2024 et 2025 etaient tres positifs ? 2024 sert de point de comparaison pour ce diagnostic seulement, aucun reglage n'y est choisi.
+
+**Methode** (`scripts/analyse_vp_annees.py`) : ETH/USDT, une annee par fenetre (2026 jusqu'au 10/10), entrees 15 min, profil de la veille calcule comme TradingView (EF-109), sorties 1 min au plus haut / plus bas. Chaque trade garde son setup et son contexte : tendance (cloture de la veille au-dessus ou au-dessous de sa moyenne 50 jours), volatilite (amplitude journaliere moyenne sur 20 jours), distance au stop, position de la cloture de la veille par rapport a la zone de valeur. En parallele, le comportement du MARCHE autour de la zone de valeur de la veille, sans strategie.
+
+**Le marche** :
+
+| | 2024 | 2025 | 2026 (au 10/10) |
+|---|---|---|---|
+| Garder l'ETH | +46,3 % | -10,9 % | -15,6 % |
+| Amplitude journaliere moyenne | 5,06 % | 5,86 % | **4,52 %** |
+| Largeur de la zone de valeur de la veille | 2,44 % | 2,98 % | **2,25 %** |
+| Sortie sous le VAL / retour dans la zone a la cloture | 66 % / 50 % | 68 % / 53 % | 64 % / 48 % |
+| Sortie sur le VAH / retour | 71 % / 43 % | 69 % / 48 % | 65 % / 47 % |
+
+Le comportement autour des niveaux change peu (retour dans la zone 48 % des fois en 2026 contre 50 - 53 %) : le profil "marche" toujours. Ce qui change : 2026 est l'annee la plus CALME (amplitude et zone de valeur les plus etroites des trois) et une annee baissiere.
+
+**La strategie** (reglages du bot, spread 0 puis 0,06 %) : 2024 +81,6 % / +33,5 % ; 2025 +23,5 % / -9,6 % ; 2026 -2,4 % / -21,6 %. Avec plafond 1,5 % + objectif >= 1,5 % : 2024 +50,8 % / +39,2 % ; 2025 +43,3 % / +28,5 % ; 2026 +11,3 % / +4,2 %.
+
+Trois causes, par ordre de poids (somme des resultats des trades, reglages du bot, spread 0) :
+1. **Les gros gagnants ont disparu.** Les trades a stop large (>= 2 %) font l'essentiel du gain : +46,8 % en 2024, +34,1 % en 2025, seulement +6,0 % en 2026 (20 trades, 40 % de gagnants contre 48 - 56 %). Marche plus calme : moins de mouvements amples, objectif moyen atteint plus petit (+1,29 % contre +1,38 / +1,49 %). Les trades a stop serre (< 0,5 %) perdent toutes les annees.
+2. **Acheter en tendance baissiere perd en 2026.** Entrees sous la moyenne 50 jours : +55,3 % en 2024, -6,8 % en 2025, **-22,9 %** en 2026 ; entrees au-dessus : +7,8 %, +33,5 %, +23,7 %. Avec les reglages recommandes, l'ecart est net : tendance haussiere 48 % de gagnants et +22,3 % en 2026, baissiere 29 % et -9,9 %. Les achats en tendance haussiere gagnent les trois annees (+22,9 / +25,1 / +22,3 %).
+3. **Les setups de continuation s'essoufflent.** "Cassure" proche de 0 chaque annee avec les reglages du bot ; "rebond sur le POC (meche)" passe de +15,0 % en 2025 a -5,0 % en 2026 ; veilles fermees au-dessus du VAH : -6,3 % en 2026. Le "retour dans la zone" reste positif les trois annees (+43,3 / +16,6 / +7,1 %).
+
+Les couts aggravent : a 0,06 % de spread, 2026 perd 21,6 % avec les reglages du bot.
+
+**Pistes, a mesurer avant toute decision** (lecture des trades, pas encore une simulation : ignorer un trade libere le bot pour un autre) : n'acheter qu'en tendance haussiere (moyenne 50 jours), et vendre a decouvert en tendance baissiere chez un courtier qui le permet ; garder plafond 1,5 % + objectif >= 1,5 %.
 
 ---
 
