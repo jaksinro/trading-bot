@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.04 |
+| **Version** | 1.05 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Brouillon — première étape du cycle en V |
@@ -118,6 +118,7 @@
 | 1.02 | EF-110 : carte du projet dans Obsidian (documents, exigences, bots, strategies, mesures, code) |
 | 1.03 | EF-111 : Volume Profile - filtre de tendance (achats au-dessus de la moyenne N jours, ventes en dessous) |
 | 1.04 | EF-112 : bot ETH_VP_TENDANCE (reglages mesures) et reglages par defaut de l'atelier |
+| 1.05 | EF-113 : Coinbase pour trader en reel (achats et ventes) - etape 1, verification du compte en lecture seule |
 ---
 
 ## 1. Introduction
@@ -308,6 +309,7 @@ Deux stratégies sont disponibles à ce jour : un croisement de moyennes mobiles
 | EF-110 | Retrouver facilement tout ce qui concerne le trading bot dans Obsidian - demande de l'utilisateur du 2026-10-10 ("ajouter tout les fichier en lien avec le trading bot dans obsidian") | Devrait - **realise**. `scripts/obsidian_sync.py` ecrit dans le coffre ouvert un dossier "Trading bot" : accueil, copies des documents avec liens vers chaque exigence, une note par exigence, bot, strategie et banc de mesure, code source et scripts. Les notes de l'utilisateur ne sont jamais touchees ; le depot n'est jamais modifie. A relancer apres un changement. Voir STC §3.97 |
 | EF-111 | Volume Profile : ne plus acheter contre la tendance - suite de l'analyse 2024-2026 (STC 3.98) demandee par l'utilisateur le 2026-10-11 ("go") | Devrait - **realise (reglage, desactive par defaut)** : `trend_days` - achats seulement si la cloture de la veille est au-dessus de sa moyenne N jours, ventes a decouvert seulement en dessous. Mesure (12 fenetres, spread 0,06 %) : seul, le filtre efface la perte du 1er semestre 2026 (ETH -15,8 % -> -0,5 %) mais rogne 2025 ; avec les ventes, ETH gagne 4 semestres sur 4 (30 et 50 jours) ou 3 sur 4 (100 jours), BTC partage, DOGE perd. Ventes impossibles sur Binance au comptant. Config du bot inchangee. Voir STC §3.99 |
 | EF-112 | Un bot avec les reglages mesures du Volume Profile, appliques par defaut dans le backtest - demande de l'utilisateur du 2026-10-11 ("creer un bot avec ces parametres et fais en sorte qu'il s'applique par defaut dans le backtest") | Doit - **realise**. Bot `ETH_VP_TENDANCE` (ETH 15 min, profil TradingView, plafond de stop 1,5 %, objectif minimal 1,5 %, filtre de tendance 50 jours, ventes a decouvert, sorties chaque minute), lance en papier sur le testnet Binance : les ventes y sont refusees (compte au comptant), seuls les achats filtres passent. L'atelier s'ouvre sur ses reglages ; sorties a la minute possibles. Voir STC §3.100 |
+| EF-113 | Trader le Volume Profile en argent reel chez Coinbase, achats ET ventes a decouvert - choix de l'utilisateur du 2026-10-11 ("lets go with coinbase, we will use real money") | Doit - **en cours, etape 1 realisee** : `scripts/coinbase_check.py` (lecture seule, aucun ordre) - donnees publiques du contrat ETH_USDC-PERPETUAL et, avec la cle de l'utilisateur, droits de la cle, contrats visibles et acces a la passerelle mondiale. Deux offres Coinbase possibles, eligibilite d'un compte francais a verifier avec la cle. Etape 2 : executeur pour le bot, en simulation sur les cours Coinbase d'abord ; le passage en reel reste une action de l'utilisateur. Voir STC §3.101 |
 *(Priorités selon MoSCoW : Doit / Devrait / Pourrait / Ne fera pas)*
 
 ---

@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.10 |
+| **Version** | 1.11 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -124,6 +124,7 @@
 | 1.08 | §3.98 : **analyse du Volume Profile 2024 / 2025 / 2026** (`scripts/analyse_vp_annees.py`) - 2026 plus calme et achats en tendance baissiere perdants |
 | 1.09 | EF-111 (§3.99) : **filtre de tendance du Volume Profile** (`trend_days`, `warmup_days`) ; avec ventes en tendance baissiere, ETH gagne 4 semestres sur 4 a 0,06 % de spread |
 | 1.10 | EF-112 (§3.100) : **bot `ETH_VP_TENDANCE`** et **reglages par defaut de l'atelier** (`DEFAULT_BOT`, sorties a la minute) |
+| 1.11 | EF-113 (§3.101) : **Coinbase, etape 1** - `scripts/coinbase_check.py` (lecture seule) ; contrat ETH_USDC-PERPETUAL mesure : spread 0,0004 %, frais 0,015 / 0,035 %, financement ~0,0007 % / 8 h |
 
 ---
 
@@ -2367,6 +2368,21 @@ Lecture :
 **Premier backtest dans l'atelier** (reglages par defaut, du 2025-01-01 au 2026-10-11, Capital.com sans levier : spread 0,061 %, sorties chaque minute) : +104,3 % contre -24,9 % pour garder l'ETH, baisse maximale -19,8 %, 277 trades, 42 % de gagnants, rapport gains / pertes 1,33, couts 241 $ ; achats +591 $ (109 trades), ventes a decouvert +452 $ (168 trades). Le bot au comptant ne beneficie que de la part achats.
 
 **Validation** : `tests/test_backtest_view.py` (+1 : bot de reference charge par defaut et ses reglages proposes ; absent -> aucun). Bot demarre : rechauffage de 5 000 bougies, surveillance a la minute, premiere decision prise. Suite complete : **1102 tests**.
+
+### 3.101 EF-113 : Coinbase, etape 1 - ce que le compte permet
+
+**Demande** (2026-10-11) : trader le Volume Profile (bot `ETH_VP_TENDANCE`) en argent reel chez Coinbase, achats et ventes a decouvert. Regle maintenue : le code est ecrit et teste, mais aucun ordre reel n'est passe et le mode reel n'est jamais active par l'assistant ; compte, cle API et bascule en reel sont des actions de l'utilisateur.
+
+**Constat** (documentation Coinbase et donnees publiques, 2026-10-11) : deux offres de derives.
+- Contrats europeens ("perpetual-style", echeance 5 ans) de Coinbase Financial Services Europe (CySEC), annonces disponibles en France via Coinbase Advanced ; leur acces par API n'est pas documente clairement.
+- Passerelle mondiale construite sur Deribit depuis le 2026-10-01 (`drb.coinbase.com/api/v2`, JSON-RPC 2.0, authentification `public/auth` avec un jeton signe par la cle CDP) pour les "clients non americains eligibles", France non confirmee ; levier affiche jusqu'a 50 (incompatible en apparence avec les limites europeennes pour les particuliers). Son contrat `ETH_USDC-PERPETUAL` convient au bot : regle en USDC, taille 0,0001 ETH, minimum 10 USDC par ordre. Mesure du 2026-10-11 : spread 0,0004 %, frais 0,015 % (maker) / 0,035 % (taker), financement 0,0007 % sur 8 h - soit ~0,07 % l'aller-retour au marche, ~0,03 % en ordres limites.
+- ccxt (`coinbase`) gere l'API Advanced Trade (jeton CDP ES256 / EdDSA) mais pas la passerelle mondiale ; Advanced Trade n'a pas d'environnement de test.
+
+**Conception** (`scripts/coinbase_check.py`, lecture seule) : sans cle, cours, spread, frais et financement d'`ETH_USDC-PERPETUAL` ; avec la cle (`COINBASE_API_KEY_NAME`, `COINBASE_API_PRIVATE_KEY` dans `.env`, jamais affichees) : droits de la cle (alerte si elle peut transferer des fonds), contrats a terme ETH visibles par le compte via Advanced Trade, et authentification a la passerelle mondiale (avec et sans revendication `uri`, la forme attendue n'etant pas documentee) puis solde USDC et positions. Jeton CDP signe localement (`cryptography`).
+
+**Etape 2** (apres le resultat du script avec la cle) : executeur pour le bot sur l'API qui marche, d'abord en simulation sur les cours Coinbase (aucun ordre envoye), puis mode reel derriere les memes garde-fous independants que `LiveExecutor` (EF-69) : drapeau d'activation explicite, cle sans droit de transfert, plafond par ordre, fichier d'arret, coupe-circuit de perte journaliere, et taille limitee a 1 fois le capital (sans levier).
+
+**Validation** : `tests/test_coinbase_check.py` (2 : jeton ES256 et EdDSA verifies avec la cle publique). Suite complete : **1104 tests**.
 
 ---
 
