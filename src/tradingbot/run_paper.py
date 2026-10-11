@@ -805,6 +805,11 @@ def main(config_path: str) -> None:
     logger.save_open_positions(executor.portfolio.positions)
 
     warmup_candles = config.get("warmup_candles", DEFAULT_WARMUP_CANDLES)
+    # EF-111 : une strategie a filtre de tendance (moyenne sur N jours) a besoin de N jours d'historique,
+    # sinon elle n'entre jamais avant N jours de fonctionnement.
+    warmup_days = getattr(strategy, "warmup_days", 0) or 0
+    if warmup_days:
+        warmup_candles = max(warmup_candles, -(-warmup_days * 86_400 // timeframe_seconds) + 2)
     # Reessai sans risque (EF-103) : les deux fonctions telechargent TOUT
     # l'historique avant de nourrir la strategie, un nouvel essai ne lui fait
     # donc jamais compter une bougie deux fois (verifie par test).

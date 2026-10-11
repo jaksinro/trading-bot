@@ -50,9 +50,11 @@ SPREADS = [0.0, 0.0002, 0.001]
 
 
 def run_one(m1, m15, start, end, kw, cost):
-    warm = [c for c in m15 if start - 2 * 86_400_000 <= c.timestamp < start]
-    entry = [c for c in m15 if start <= c.timestamp < end]
     strategy = VolumeProfileStrategy(setups=ALL, **kw)
+    # Chauffe : 2 jours, ou l'historique qu'exige un filtre de tendance (EF-111).
+    warm_days = max(2, getattr(strategy, "warmup_days", 0))
+    warm = [c for c in m15 if start - warm_days * 86_400_000 <= c.timestamp < start]
+    entry = [c for c in m15 if start <= c.timestamp < end]
     # EF-109 : profil calcule comme TradingView, sur les bougies 1 min (graphique 15 min).
     strategy.set_profile_source(preloaded(m1, 60_000))
     for c in warm:

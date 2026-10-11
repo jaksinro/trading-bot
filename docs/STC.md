@@ -3,7 +3,7 @@
 
 | | |
 |---|---|
-| **Version** | 1.08 |
+| **Version** | 1.09 |
 | **Date** | 2026-10-09 |
 | **Auteur** | jaksinro |
 | **Statut** | Réalisé (au-delà du MVP initial) |
@@ -122,6 +122,7 @@
 | 1.06 | EF-109 (§3.96) : **profil de volume de TradingView** - `volume_profile` (lignes en pas entiers, zone de valeur officielle), `profile_source.py` (bougies fines, table TradingView), sources branchees dans l'atelier, `backtest_lab`, `run_paper` et les bancs ; `profile_period: developing` ; mesures refaites |
 | 1.07 | EF-110 (§3.97) : **carte du projet dans Obsidian** - `scripts/obsidian_sync.py` |
 | 1.08 | §3.98 : **analyse du Volume Profile 2024 / 2025 / 2026** (`scripts/analyse_vp_annees.py`) - 2026 plus calme et achats en tendance baissiere perdants |
+| 1.09 | EF-111 (§3.99) : **filtre de tendance du Volume Profile** (`trend_days`, `warmup_days`) ; avec ventes en tendance baissiere, ETH gagne 4 semestres sur 4 a 0,06 % de spread |
 
 ---
 
@@ -2315,6 +2316,44 @@ Trois causes, par ordre de poids (somme des resultats des trades, reglages du bo
 Les couts aggravent : a 0,06 % de spread, 2026 perd 21,6 % avec les reglages du bot.
 
 **Pistes, a mesurer avant toute decision** (lecture des trades, pas encore une simulation : ignorer un trade libere le bot pour un autre) : n'acheter qu'en tendance haussiere (moyenne 50 jours), et vendre a decouvert en tendance baissiere chez un courtier qui le permet ; garder plafond 1,5 % + objectif >= 1,5 %.
+
+### 3.99 EF-111 : Volume Profile, filtre de tendance
+
+**Origine** : analyse 2024-2026 (§3.98) - en 2026, les achats pris sous la moyenne 50 jours perdaient, ceux pris au-dessus gagnaient les trois annees. L'utilisateur a demande de le mesurer (2026-10-11).
+
+**Conception** :
+- `VolumeProfileStrategy(trend_days=0)` : garde les clotures de seance (`deque`) ; `trend()` = "up" si la cloture de la veille depasse la moyenne des `trend_days` dernieres, "down" sinon, "unknown" tant que l'historique est trop court (aucune entree), None sans filtre. Les setups continuent de suivre leur etat ; seuls les signaux du sens permis sont gardes (achat en "up", vente a decouvert en "down" si `allow_short`).
+- `warmup_days` (= `trend_days` + 2) : historique que le lanceur doit fournir. Atelier : chauffe = le plus long de `warmup_bars` et `warmup_days` (`backtest_view.warm_ms`). Bot : `warmup_candles` releve au besoin (`run_paper`, 52 jours = 4 994 bougies 15 min). Bancs : chauffe de `warmup_days` (`bench_vp_stops.run_one`), donnees depuis le 2024-09-15 (`bench_vp_costs.DATA_SINCE`). Backtests du dashboard (`backtest_lab`) : pas de chauffe separee, aucune entree pendant les N premiers jours.
+
+**Mesure** (`bench_vp_costs.py` ; profil TradingView, sorties 1 min, ETH / BTC / DOGE x 4 semestres = 12 fenetres ; base = plafond 1,5 % + objectif >= 1,5 %) - fenetres gagnantes / mediane / somme :
+
+| Variante | Spread 0 | Spread 0,06 % | Spread 0,1 % |
+|---|---|---|---|
+| Base | 7/12 / +8,1 % / +58,6 % | 7/12 / +6,5 % / +11,9 % | 7/12 / +5,4 % / -18,1 % |
+| + tendance 50 j (achats seuls) | 7/12 / +0,7 % / +36,2 % | 5/12 / -0,8 % / +19,1 % | 4/12 / -1,8 % / +7,9 % |
+| + tendance 30 j | 7/12 / +1,3 % / +17,9 % | 6/12 / +0,1 % / -0,4 % | 4/12 / -0,8 % / -12,4 % |
+| + tendance 100 j | 6/12 / +1,2 % / +25,1 % | 6/12 / +0,3 % / +8,0 % | 6/12 / -0,3 % / -3,2 % |
+| **+ tendance 50 j + ventes** | **8/12 / +5,8 % / +81,8 %** | **7/12 / +3,9 % / +33,7 %** | **7/12 / +1,9 % / +2,9 %** |
+| Reglages du bot + tendance 50 j | 6/12 / +1,7 % / -3,7 % | 5/12 / -4,5 % / -72,6 % | 3/12 / -8,7 % / -116 % |
+
+Par semestre, spread 0,06 % :
+
+| | S1 2025 | S2 2025 | S1 2026 | S2 2026* |
+|---|---|---|---|---|
+| ETH base | +13,9 % | +12,9 % | -15,8 % | +19,4 % |
+| ETH + tendance 50 j | -3,0 % | +25,6 % | -0,5 % | +16,9 % |
+| ETH + tendance 30 j + ventes | +11,7 % | +23,9 % | +14,8 % | +9,5 % |
+| **ETH + tendance 50 j + ventes** | **+13,1 %** | **+34,5 %** | **+6,2 %** | **+20,3 %** |
+| ETH + tendance 100 j + ventes | +7,6 % | +25,4 % | -2,3 % | +11,7 % |
+| BTC base / + 50 j / + 50 j + ventes | +9,3 / +13,2 / +14,0 % | +5,0 / +0,3 / +6,1 % | -12,2 / -5,7 / -4,1 % | +7,9 / +5,7 / +1,8 % |
+| DOGE base / + 50 j / + 50 j + ventes | +23,8 / -4,5 / -30,4 % | -27,8 / -20,0 / -14,2 % | -10,0 / -1,1 / -1,8 % | -14,5 / -7,8 / -11,7 % |
+
+Lecture :
+- Le filtre SEUL (achats seulement en tendance haussiere) efface l'essentiel de la perte du 1er semestre 2026 sur les trois marches (ETH -15,8 -> -0,5 %, BTC -12,2 -> -5,7 %, DOGE -10,0 -> -1,1 %) mais rogne 2025 (ETH S1 +13,9 -> -3,0 %) : 60 % de trades en moins, mediane plus basse, voisins 30 et 100 jours peu convaincants. Il reduit le risque plus qu'il n'augmente le gain.
+- Filtre + VENTES A DECOUVERT en tendance baissiere : sur ETH, 4 semestres gagnants sur 4 a 30 et 50 jours, 3 sur 4 a 100 jours - plateau, et le 1er semestre 2026 devient positif (+6 a +15 %). BTC partage (1 a 3 semestres sur 4 selon la duree). DOGE perd quelle que soit la variante : la strategie ne lui convient pas.
+- Les ventes sont impossibles sur le compte Binance au comptant du bot actuel : cette variante suppose un courtier CFD (Capital.com) et l'executeur a construire. La config du bot n'est pas modifiee.
+
+**Validation** : `tests/test_volume_profile.py` (+3 : achat seulement au-dessus de la moyenne, vente seulement en dessous, aucune entree sans historique suffisant et chauffe declaree). Suite complete : **1101 tests**.
 
 ---
 

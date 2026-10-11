@@ -54,6 +54,13 @@ EF-108 : `min_target_pct` - trade ignore si l'objectif est a moins de ce % du
 prix d'entree (objectifs de 0,2 - 0,3 % releves par l'utilisateur : intradables).
 Seuil absolu, actif meme quand les couts ne sont pas renseignes (bots a 0 frais).
 
+EF-111 : `trend_days` (0 = sans filtre) - achats seulement quand la cloture de la
+veille est AU-DESSUS de la moyenne des `trend_days` dernieres clotures de seance,
+ventes a decouvert (si `allow_short`) seulement en DESSOUS. Analyse 2024-2026
+(STC 3.98) : en 2026 les achats sous la moyenne 50 jours perdaient, ceux au-dessus
+gagnaient les trois annees. Tant que l'historique est trop court, aucune entree :
+le lanceur fournit `warmup_days` jours de bougies au demarrage.
+
 Trois setups (`setups`), evalues a chaque cloture :
 1. `poc_rebound` - la veille a fini AU-DESSUS du VAH. Le prix redescend au POC
    et le rejette : meche sous le POC avec cloture au-dessus, puis bougie verte
@@ -73,6 +80,7 @@ Trois setups (`setups`), evalues a chaque cloture :
 from __future__ import annotations
 
 import math
+from collections import deque
 
 import numpy as np
 
@@ -185,7 +193,7 @@ class VolumeProfileStrategy(Strategy):
                  max_risk_pct: float = 0.0, wide_stop: str = "cap", fixed_stop_pct: float = 0.0,
                  fixed_target_pct: float = 0.0, cost_cover: bool = False, min_risk_cost_ratio: float = 0.0,
                  min_target_pct: float = 0.0, lower_timeframe_profile: bool = True,
-                 profile_period: str = "previous"):
+                 profile_period: str = "previous", trend_days: int = 0):
         setups = tuple(setups)
         unknown = [s for s in setups if s not in SETUPS]
         if not setups or unknown:
@@ -193,7 +201,7 @@ class VolumeProfileStrategy(Strategy):
         if (session_hours < 1 or rows < 5 or not 0 < value_area_pct < 1 or reward_risk <= 0
                 or max_signal_age < 1 or pullback_max_depth < 0 or stop_buffer_pct < 0 or min_risk_pct < 0
                 or not 0 <= max_risk_pct < 1 or not 0 <= fixed_stop_pct < 1 or not 0 <= fixed_target_pct < 1
-                or min_risk_cost_ratio < 0 or not 0 <= min_target_pct < 1):
+                or min_risk_cost_ratio < 0 or not 0 <= min_target_pct < 1 or trend_days < 0):
             raise ValueError("parametres hors bornes")
         if profile_period not in PROFILE_PERIODS:
             raise ValueError(f"profile_period : {profile_period!r} inconnu (attendus : {', '.join(PROFILE_PERIODS)})")
@@ -215,6 +223,11 @@ class VolumeProfileStrategy(Strategy):
         self._profile_source = None
         self.profile_source_errors = 0
         self._bar_ms: int | None = None
+        # EF-111 : filtre de tendance - achats seulement si la cloture de la veille est au-dessus de la
+        # moyenne de ses `trend_days` dernieres clotures de seance, ventes seulement en dessous.
+        self.trend_days = int(trend_days)
+        self._closes: deque[float] = deque(maxlen=max(1, self.trend_days))
+        self.warmup_days = self.trend_days + 2 if self.trend_days else 0   # historique a fournir au demarrage
         self._period_ms = session_hours * HOUR_MS
         self._offset_ms = WEEK_OFFSET_MS if session_hours % 168 == 0 else 0
         self._session: list[Candle] = []
@@ -261,6 +274,7 @@ class VolumeProfileStrategy(Strategy):
                 start = self._session_start(self._session_id)
                 self.profile = self._profile_of(start, start + self._period_ms, self._session)
             self.previous_close = self._session[-1].close
+            self._closes.append(self.previous_close)
             self._session = []
             self._reset_session_state()
         self._session_id = session
@@ -273,6 +287,21 @@ class VolumeProfileStrategy(Strategy):
     def set_round_trip_cost(self, pct: float) -> None:
         """Cout aller-retour en fraction du prix (commission x 2 + spread), donne par le moteur."""
         self.round_trip_cost = max(0.0, float(pct))
+
+    def trend(self) -> str | None:
+        """"up" / "down" selon la moyenne des `trend_days` dernieres clotures de seance ;
+        None sans filtre ; "unknown" tant que l'historique est trop court (aucune entree)."""
+        if not self.trend_days:
+            return None
+        if len(self._closes) < self.trend_days:
+            return "unknown"
+        return "up" if self._closes[-1] > sum(self._closes) / len(self._closes) else "down"
+
+    def _allowed(self, direction: str) -> bool:
+        trend = self.trend()
+        if trend is None:
+            return True
+        return trend == ("up" if direction == "long" else "down")
 
     def sync_position(self, entry_price: float | None) -> None:
         """Etat reel transmis par le moteur : pas de nouvelle entree en position.
@@ -298,6 +327,7 @@ class VolumeProfileStrategy(Strategy):
                         self._reentry(st, c, prev_close, hi, lo) if "value_area_reentry" in self.setups else None,
                         self._breakout(st, c, hi, lo) if "breakout" in self.setups else None]
                 found += [(direction, *h) for h in hits if h is not None]
+            found = [f for f in found if self._allowed(f[0])]   # EF-111 : sens permis par la tendance
             if found and not self._in_position:
                 signal = self._signal(candle, *found[0])
         self._prev = candle

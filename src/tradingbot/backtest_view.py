@@ -82,6 +82,7 @@ PARAM_LABELS = {
     "min_target_pct": "Objectif minimal (trade ignore en dessous, 0 = sans filtre)",
     "lower_timeframe_profile": "Profil sur bougies fines, comme TradingView (1 min en 15 min)",
     "profile_period": "Profil : previous (veille) ou developing (jour en cours, sans futur)",
+    "trend_days": "Filtre de tendance : moyenne sur N jours (0 = sans filtre)",
 }
 HIDDEN_PARAMS = {"warmup_candles"}
 
@@ -305,9 +306,16 @@ def _fresh(symbol: str, timeframe: str, since_iso: str) -> list:
     return candles
 
 
-def load_candles(spec: dict) -> tuple[list, list]:
+def warm_ms(spec: dict) -> int:
+    """Duree de chauffe : les bougies demandees, ou davantage si la strategie l'exige
+    (filtre de tendance sur N jours, EF-111)."""
     tf_ms = ccxt.Exchange.parse_timeframe(spec["timeframe"]) * 1000
-    since = datetime.fromtimestamp((spec["start"] - spec["warmup_bars"] * tf_ms) / 1000, timezone.utc)
+    days = getattr(STRATEGY_REGISTRY[spec["strategy_type"]](**spec["params"]), "warmup_days", 0) or 0
+    return max(spec["warmup_bars"] * tf_ms, days * DAY_MS)
+
+
+def load_candles(spec: dict) -> tuple[list, list]:
+    since = datetime.fromtimestamp((spec["start"] - warm_ms(spec)) / 1000, timezone.utc)
     candles = _fresh(spec["symbol"], spec["timeframe"], since.strftime("%Y-%m-%dT%H:%M:%SZ"))
     candles = [c for c in candles if c.timestamp < spec["end"]]
     fine = []
@@ -321,7 +329,7 @@ def load_candles(spec: dict) -> tuple[list, list]:
 # ------------------------------------------------------------------ simulation
 def simulate(spec: dict, candles: list, fine: list, light: bool = False) -> dict:
     """Backtest complet. `light` : statistiques seulement (balayage)."""
-    warm = [c for c in candles if c.timestamp < spec["start"]][-spec["warmup_bars"]:] if spec["warmup_bars"] else []
+    warm = [c for c in candles if spec["start"] - warm_ms(spec) <= c.timestamp < spec["start"]]
     entry = [c for c in candles if spec["start"] <= c.timestamp < spec["end"]]
     if len(entry) < 2:
         raise ValueError("pas assez de bougies sur la periode choisie")

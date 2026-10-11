@@ -45,12 +45,14 @@ VARIANTS = [
     ("plafond 1,5 % + couvre + stop >= 10 x", {**CAP, "cost_cover": True, "min_risk_cost_ratio": 10}),
 ]
 SPREADS = [0.0006, 0.001]
+DATA_SINCE = "2024-09-15T00:00:00Z"
 
 
 def market_job(market, variants, spreads):
     # Variantes passees en argument : sous Windows, chaque processus reimporte ce module.
+    # Depuis mi-septembre 2024 : chauffe d'un filtre de tendance jusqu'a 100 jours avant 2025 (EF-111).
     m1 = [c for c in fetch_historical_candles(exchange_id="binance", symbol=market, timeframe="1m",
-                                              since_iso="2024-12-25T00:00:00Z") if c.timestamp >= ms("2024-12-25")]
+                                              since_iso=DATA_SINCE) if c.timestamp >= ms(DATA_SINCE[:10])]
     m15 = aggregate(m1, 15)
     return {(vi, si, wi): run_one(m1, m15, ms(a), ms(b), kw, spread / 2)
             for vi, (_, kw) in enumerate(variants) for si, spread in enumerate(spreads)

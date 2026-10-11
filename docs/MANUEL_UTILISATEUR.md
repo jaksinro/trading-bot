@@ -837,6 +837,15 @@ profil de la **veille**, connu dès l'ouverture. Le réglage « Profil : develop
 utilise le profil du jour en cours, calculé seulement avec ce qui est déjà passé :
 mesuré sur 2025-2026, il perd partout.
 
+**Volume Profile : filtre de tendance**
+« Filtre de tendance : moyenne sur N jours » (0 = sans filtre) : la stratégie n'achète
+que si le prix de clôture de la veille est au-dessus de sa moyenne sur N jours, et ne
+vend à découvert (si la case est cochée) que s'il est en dessous. L'Atelier charge
+automatiquement assez d'historique avant le début pour calculer cette moyenne.
+Mesuré sur 2025-2026 avec 0,06 % de spread : sur ETH, avec les ventes à découvert et
+50 jours, la stratégie gagne les 4 semestres (dont le 1er semestre 2026, perdant sans
+filtre) ; sans les ventes, le filtre réduit surtout les pertes. Il ne sauve pas DOGE.
+
 **Régler une stratégie : le balayage**
 Choisis un réglage dans « Balayer un réglage », écris les valeurs à essayer
 (ex. `200, 300, 500`), puis « Balayer » : un backtest par valeur, avec le résultat
@@ -954,3 +963,4 @@ Avec les trois à zéro, un bandeau te rappelle que le résultat est optimiste.
 | 2026-10-09 | **Volume Profile selon les coûts** - deux réglages dans l'Atelier : « Objectif repoussé pour couvrir spread et commission » et « Stop au moins à N fois les coûts ». Désactivés par défaut ; ton bot n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Volume Profile : objectif minimal** - nouveau réglage « Objectif minimal » dans l'Atelier (trades à objectif trop proche ignorés). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |
 | 2026-10-09 | **Volume Profile calculé comme TradingView** - bougies d'une minute, 24 lignes, zone de valeur officielle ; nouveaux réglages « Profil sur bougies fines » et « Profil : previous / developing ». Les backtests, l'Atelier et le bot utilisent ce calcul. Voir §13 |
+| 2026-10-11 | **Volume Profile : filtre de tendance** - nouveau réglage « Filtre de tendance : moyenne sur N jours » dans l'Atelier (achats seulement au-dessus de la moyenne, ventes à découvert seulement en dessous). Désactivé par défaut ; ton bot n'est pas modifié. Voir §13 |

@@ -527,3 +527,40 @@ def test_minimum_target_works_without_costs_and_for_short_sells():
     out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
                    c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
     assert out == [None, None]                                              # objectif de vente < 50 %
+
+
+# ---------------------------------------------------------------- EF-111 : filtre de tendance
+def sessions(strategy, closes):
+    """Une bougie par jour avant DAY0 : chaque cloture devient une cloture de seance."""
+    for i, close in enumerate(closes):
+        strategy.on_candle(c(DAY0 - (len(closes) - i) * 24 * H, close - 0.5, close + 0.5, close=close, volume=10))
+
+
+def reentry_signal(strategy):
+    poc, vah, val = yesterday(strategy, last_close=105)
+    return feed(strategy, [c(at(1), val - 1.5, val - 0.2, close=val - 1.0, open_=val - 0.3),
+                           c(at(2), val - 1.1, val + 0.6, close=val + 0.4, open_=val - 1.0)])[1]
+
+
+def test_long_only_above_the_moving_average():
+    up = VolumeProfileStrategy(setups=["value_area_reentry"], trend_days=3)
+    sessions(up, [90, 95, 100])                      # puis la veille finit a 105 : au-dessus de la moyenne
+    assert reentry_signal(up) is not None and up.trend() == "up"
+    down = VolumeProfileStrategy(setups=["value_area_reentry"], trend_days=3)
+    sessions(down, [130, 125])                       # 130, 125, 105 : moyenne 120 > 105
+    assert reentry_signal(down) is None and down.trend() == "down"
+
+
+def test_short_only_below_the_moving_average():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], allow_short=True, trend_days=3)
+    sessions(s, [130, 125])
+    poc, vah, val = yesterday(s, last_close=105)
+    out = feed(s, [c(at(1), vah + 0.2, vah + 1.5, close=vah + 1.0, open_=vah + 0.3),
+                   c(at(2), vah - 0.6, vah + 1.1, close=vah - 0.4, open_=vah + 1.0)])
+    assert out[1] is not None and out[1].position_side == "short"
+
+
+def test_no_entry_until_enough_history_and_warmup_is_declared():
+    s = VolumeProfileStrategy(setups=["value_area_reentry"], trend_days=50)
+    assert s.warmup_days == 52 and VolumeProfileStrategy().warmup_days == 0
+    assert reentry_signal(s) is None and s.trend() == "unknown"
