@@ -481,7 +481,8 @@ function drawProfile() {
 const TV_INTERVALS = { "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D" };
 function openInTradingView(tr) {
   const p = state.lastPayload || {};
-  const symbol = "BINANCE:" + String(p.symbol || "ETH/USDT").replace("/", "");
+  const raw = String(p.symbol || "ETH/USDT");          // EF-116 : "COINBASE:ETH/USD" ou "ETH/USDT" (Binance)
+  const symbol = (raw.includes(":") ? raw : "BINANCE:" + raw).replace("/", "");
   const when = new Date(tr.entry_t);
   const pad = n => String(n).padStart(2, "0");
   const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}`;

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from tradingbot.data_feed import _cache_path, fetch_historical_candles
+from tradingbot.data_feed import _cache_path, fetch_historical_candles, split_symbol
 from tradingbot.profile_source import _minutes, aggregate, fetch_plan
 from tradingbot.strategies.volume_profile import HOUR_MS, WEEK_OFFSET_MS, profile_histogram
 from tradingbot.types import Candle
@@ -25,14 +25,15 @@ from tradingbot.types import Candle
 
 def _candles_between(symbol: str, timeframe: str, start: int, end: int) -> list[Candle]:
     """Bougies [start, end) du cache local ; telechargement seulement si le cache ne couvre pas."""
-    path = _cache_path("binance", symbol, timeframe)
+    exchange, symbol = split_symbol(symbol)                   # EF-116 : Binance ou Coinbase
+    path = _cache_path(exchange, symbol, timeframe)
     if path.exists():
         df = pd.read_parquet(path, filters=[("timestamp", ">=", start), ("timestamp", "<", end)])
         if len(df):
             return [Candle(timestamp=int(r.timestamp), open=float(r.open), high=float(r.high), low=float(r.low),
                            close=float(r.close), volume=float(r.volume)) for r in df.itertuples(index=False)]
     since = datetime.fromtimestamp(start / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return [c for c in fetch_historical_candles(exchange_id="binance", symbol=symbol, timeframe=timeframe,
+    return [c for c in fetch_historical_candles(exchange_id=exchange, symbol=symbol, timeframe=timeframe,
                                                 since_iso=since) if start <= c.timestamp < end]
 
 

@@ -27,6 +27,35 @@ def _safe_symbol(symbol: str) -> str:
     return symbol.replace("/", "-").replace(":", "-")
 
 
+# EF-116 : places dont les pages sont plus courtes que demande (Coinbase : 300 bougies) et qui
+# sautent les minutes sans echange - une page incomplete n'y signifie PAS la fin de l'historique.
+SHORT_PAGE_EXCHANGES = {"coinbase"}
+
+
+def _fetch_until_now(exchange, symbol: str, timeframe: str, since_ms: int) -> list:
+    """Pagination jusqu'a la derniere bougie close, trous sans echange compris."""
+    tf_ms = exchange.parse_timeframe(timeframe) * 1000
+    now = exchange.milliseconds()
+    rows, since = [], since_ms
+    while since < now - tf_ms:
+        batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=300)
+        if not batch:
+            since += 300 * tf_ms              # fenetre sans aucun echange : on la saute
+            continue
+        rows.extend(batch)
+        since = batch[-1][0] + 1
+    return rows
+
+
+def split_symbol(symbol: str, default_exchange: str = "binance") -> tuple[str, str]:
+    """EF-116 : "COINBASE:ETH/USD" -> ("coinbase", "ETH/USD") ; "ETH/USDT" -> ("binance", "ETH/USDT").
+    Prefixe de place comme sur TradingView, pour choisir la source des cours sans changer les signatures."""
+    if ":" in symbol and symbol.split(":", 1)[0].isalpha():
+        exchange, pair = symbol.split(":", 1)
+        return exchange.lower(), pair
+    return default_exchange, symbol
+
+
 def _cache_path(exchange_id: str, symbol: str, timeframe: str) -> Path:
     return CACHE_DIR / f"{exchange_id}_{_safe_symbol(symbol)}_{timeframe}.parquet"
 
@@ -119,7 +148,9 @@ def fetch_historical_candles(
     else:
         all_rows: list[list[float]] = []
         fetch_since_ms = since_ms
-        while True:
+        if exchange_id in SHORT_PAGE_EXCHANGES:
+            all_rows = _fetch_until_now(exchange, symbol, timeframe, fetch_since_ms)
+        while exchange_id not in SHORT_PAGE_EXCHANGES:
             batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=fetch_since_ms, limit=1000)
             if not batch:
                 break
@@ -154,7 +185,9 @@ def extend_cache_to_now(exchange_id: str, symbol: str, timeframe: str, exchange=
     now = exchange.milliseconds()
     rows: list[list[float]] = []
     since = int(df["timestamp"].max()) + 1
-    while since + step <= now:
+    if exchange_id in SHORT_PAGE_EXCHANGES:                     # EF-116 : pages de 300, trous sautes
+        rows = [r for r in _fetch_until_now(exchange, symbol, timeframe, since) if r[0] + step <= now]
+    while exchange_id not in SHORT_PAGE_EXCHANGES and since + step <= now:
         batch = exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=1000)
         closed = [r for r in batch if r[0] + step <= now]   # bougies closes seulement
         if not closed:

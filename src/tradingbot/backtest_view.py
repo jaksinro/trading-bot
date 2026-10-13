@@ -32,11 +32,11 @@ import yaml
 
 from tradingbot.backtest_lab import merge_dual_timeframe
 from tradingbot.brokers.costs import BROKERS, DEFAULT_BROKER, broker_list, capitalcom_reader, costs_for
-from tradingbot.data_feed import extend_cache_to_now, fetch_historical_candles
+from tradingbot.data_feed import extend_cache_to_now, fetch_historical_candles, split_symbol
 from tradingbot.engine import Engine
 from tradingbot.execution.backtest_executor import BacktestExecutor
 from tradingbot.portfolio import Portfolio
-from tradingbot.profile_source import attach_preloaded
+from tradingbot.profile_source import aggregate, attach_preloaded
 from tradingbot.risk.risk_manager import TRAILING_MODES, RiskConfig, RiskManager
 from tradingbot.run_backtest import STRATEGY_REGISTRY
 
@@ -45,6 +45,9 @@ MAX_SWEEP_VALUES = 30
 MAX_OVERLAYS = 8
 DEFAULT_BOT = "ETH_VP_TENDANCE"   # EF-112 : reglages charges a l'ouverture de l'atelier
 SYMBOLS = ["ETH/USDT", "BTC/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT", "PAXG/USDT"]
+# EF-116 : cours Coinbase (comptant, historique long ; les contrats "PERP FUT" suivent ces cours).
+# PAXG = or tokenise. Prefixe de place comme sur TradingView.
+SYMBOLS += [f"COINBASE:{b}/USD" for b in ("ETH", "BTC", "SOL", "XRP", "DOGE", "ADA", "LINK", "AVAX", "PAXG")]
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 # EF-112 : sorties surveillees jusqu'a la minute (stop et objectif poses chez le courtier).
 EXIT_TIMEFRAMES = ["1m"] + TIMEFRAMES
@@ -214,7 +217,7 @@ def broker_costs(payload: dict) -> dict:
     symbol = str(payload.get("symbol") or "ETH/USDT").upper()
     if symbol not in SYMBOLS:
         raise ValueError(f"paire inconnue : {symbol}")
-    return costs_for(broker, symbol, _last_price, live_reader=capitalcom_reader())
+    return costs_for(broker, split_symbol(symbol)[1], _last_price, live_reader=capitalcom_reader())
 
 
 # ------------------------------------------------------------------ lecture du formulaire
@@ -314,10 +317,13 @@ def _fresh(symbol: str, timeframe: str, since_iso: str) -> list:
     """Bougies du cache, completees jusqu'a la derniere bougie close (le cache
     seul s'arretait au jour de son premier telechargement). Hors ligne : on
     garde le cache tel quel plutot que d'echouer."""
-    candles = fetch_historical_candles(exchange_id="binance", symbol=symbol, timeframe=timeframe, since_iso=since_iso)
+    exchange, symbol = split_symbol(symbol)                   # EF-116 : Binance ou Coinbase
+    if exchange == "coinbase" and timeframe == "4h":           # Coinbase ne fournit pas de 4 h : 4 x 1 h
+        return aggregate(_fresh(f"COINBASE:{symbol}", "1h", since_iso), 4, 60)
+    candles = fetch_historical_candles(exchange_id=exchange, symbol=symbol, timeframe=timeframe, since_iso=since_iso)
     try:
-        if extend_cache_to_now("binance", symbol, timeframe):
-            candles = fetch_historical_candles(exchange_id="binance", symbol=symbol, timeframe=timeframe,
+        if extend_cache_to_now(exchange, symbol, timeframe):
+            candles = fetch_historical_candles(exchange_id=exchange, symbol=symbol, timeframe=timeframe,
                                                since_iso=since_iso)
     except Exception:  # noqa: BLE001 - reseau indisponible : le cache suffit
         pass
