@@ -488,7 +488,7 @@ function openInTradingView(tr) {
   try { navigator.clipboard.writeText(stamp); } catch (e) { /* presse-papiers indisponible : la date reste affichee */ }
   window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${TV_INTERVALS[p.timeframe] || "15"}`,
               "_blank", "noopener");
-  $("tvHint").textContent = `Date copiee : ${stamp}. Dans TradingView, Alt+G (Aller a), colle-la, puis ajoute l'indicateur Session Volume Profile.`;
+  $("tvHint").textContent = `Date copiee : ${stamp}. Dans TradingView : icone calendrier \"Aller a\" en bas du graphique (ou clic sur le graphique puis Alt+G), colle-la, puis ajoute l'indicateur Session Volume Profile.`;
 }
 
 const PALETTE = { trend: "#5b8def", entry: "#2fd699", exit: "#ff6b6b", level: "#f5b74f" };
