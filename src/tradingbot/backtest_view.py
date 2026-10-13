@@ -48,6 +48,15 @@ SYMBOLS = ["ETH/USDT", "BTC/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USD
 # EF-116 : cours Coinbase (comptant, historique long ; les contrats "PERP FUT" suivent ces cours).
 # PAXG = or tokenise. Prefixe de place comme sur TradingView.
 SYMBOLS += [f"COINBASE:{b}/USD" for b in ("ETH", "BTC", "SOL", "XRP", "DOGE", "ADA", "LINK", "AVAX", "PAXG")]
+# EF-117 : indices et matieres premieres (Yahoo Finance, contrats a terme en serie continue),
+# equivalents des produits Coinbase (US 500, Tech100, or, argent, platine, cuivre, petrole, gaz).
+YAHOO_MARKETS = {"^GSPC": "S&P 500 (indice)", "^NDX": "Nasdaq-100 (indice)", "GC=F": "Or (contrat a terme)",
+                 "SI=F": "Argent (contrat a terme)", "PL=F": "Platine (contrat a terme)",
+                 "HG=F": "Cuivre (contrat a terme)", "CL=F": "Petrole WTI (contrat a terme)",
+                 "NG=F": "Gaz naturel (contrat a terme)"}
+SYMBOLS += [f"YAHOO:{code}" for code in YAHOO_MARKETS]
+SYMBOL_LABELS = {**{s: s.replace("COINBASE:", "Coinbase ") for s in SYMBOLS if s.startswith("COINBASE:")},
+                 **{f"YAHOO:{code}": f"{name} - Yahoo" for code, name in YAHOO_MARKETS.items()}}
 TIMEFRAMES = ["5m", "15m", "1h", "4h", "1d"]
 # EF-112 : sorties surveillees jusqu'a la minute (stop et objectif poses chez le courtier).
 EXIT_TIMEFRAMES = ["1m"] + TIMEFRAMES
@@ -183,7 +192,7 @@ def catalog(config_dir) -> dict:
                        for k, v in STRATEGIES.items()],
         "risk_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in RISK_FIELDS],
         "cost_fields": [dict(zip(("name", "label", "kind", "default"), f)) for f in COST_FIELDS],
-        "symbols": SYMBOLS, "timeframes": TIMEFRAMES, "exit_timeframes": EXIT_TIMEFRAMES, "bots": bots,
+        "symbols": SYMBOLS, "symbol_labels": SYMBOL_LABELS, "timeframes": TIMEFRAMES, "exit_timeframes": EXIT_TIMEFRAMES, "bots": bots,
         "default_bot": default["name"] if default else None,
         "default_start": "2025-01-01", "brokers": broker_list(), "default_broker": DEFAULT_BROKER,
     }
@@ -217,7 +226,13 @@ def broker_costs(payload: dict) -> dict:
     symbol = str(payload.get("symbol") or "ETH/USDT").upper()
     if symbol not in SYMBOLS:
         raise ValueError(f"paire inconnue : {symbol}")
-    return costs_for(broker, split_symbol(symbol)[1], _last_price, live_reader=capitalcom_reader())
+    exchange, pair = split_symbol(symbol)
+    if exchange == "yfinance":                                # EF-117 : couts non releves hors crypto
+        return {"broker": broker, "label": BROKERS.get(broker, {}).get("label", broker), "available": False,
+                "shorts": BROKERS.get(broker, {}).get("shorts", False), "live": False, "sources": [], "checked": "",
+                "notes": ["Couts de ce courtier non releves pour les indices et matieres premieres : "
+                          "renseigne spread et financement a la main (Saisie libre)."]}
+    return costs_for(broker, pair, _last_price, live_reader=capitalcom_reader())
 
 
 # ------------------------------------------------------------------ lecture du formulaire
@@ -318,8 +333,9 @@ def _fresh(symbol: str, timeframe: str, since_iso: str) -> list:
     seul s'arretait au jour de son premier telechargement). Hors ligne : on
     garde le cache tel quel plutot que d'echouer."""
     exchange, symbol = split_symbol(symbol)                   # EF-116 : Binance ou Coinbase
-    if exchange == "coinbase" and timeframe == "4h":           # Coinbase ne fournit pas de 4 h : 4 x 1 h
-        return aggregate(_fresh(f"COINBASE:{symbol}", "1h", since_iso), 4, 60)
+    if exchange in ("coinbase", "yfinance") and timeframe == "4h":   # pas de 4 h chez eux : 4 x 1 h
+        prefix = "COINBASE" if exchange == "coinbase" else "YAHOO"
+        return aggregate(_fresh(f"{prefix}:{symbol}", "1h", since_iso), 4, 60)
     candles = fetch_historical_candles(exchange_id=exchange, symbol=symbol, timeframe=timeframe, since_iso=since_iso)
     try:
         if extend_cache_to_now(exchange, symbol, timeframe):
@@ -507,6 +523,10 @@ def _warnings(spec, warm) -> list[str]:
     costs = spec["costs"]
     if not costs["spread_pct"] and not costs["fee_pct"]:
         out.append("Aucun cout de transaction : resultats optimistes. Renseigne le spread de ton courtier.")
+    if spec["symbol"].startswith("YAHOO:"):                    # EF-117 : limites de Yahoo Finance
+        out.append("Yahoo Finance limite l'historique intrajournalier : 1 h sur 2 ans, 15 et 5 min sur 60 jours. "
+                   "Indices fermes la nuit et le week-end ; contrats a terme en serie continue (changements "
+                   "d'echeance raccordes par Yahoo).")
     broker = BROKERS.get(spec.get("broker") or "")
     base = spec["symbol"].split("/")[0]
     if broker is not None and broker.get("only") and base not in broker["only"]:

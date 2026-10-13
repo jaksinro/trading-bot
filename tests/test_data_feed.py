@@ -107,11 +107,25 @@ def test_fetch_historical_candles_yfinance_maps_daily_bars_to_candles(tmp_path, 
     assert download_fn.calls[0]["interval"] == "1d"
 
 
-def test_fetch_historical_candles_yfinance_rejects_non_daily_timeframe():
+def test_fetch_historical_candles_yfinance_rejects_unknown_timeframe():
     download_fn = _fake_yfinance_download([])
     with pytest.raises(ValueError):
-        fetch_historical_candles("yfinance", "TTE.PA", "1h", "2026-09-01T00:00:00Z", yf_download_fn=download_fn)
+        fetch_historical_candles("yfinance", "TTE.PA", "4h", "2026-09-01T00:00:00Z", yf_download_fn=download_fn)
     assert download_fn.calls == []  # rejete avant tout appel reseau
+
+
+def test_yfinance_hourly_start_is_clamped_to_yahoo_depth(tmp_path, monkeypatch):
+    """EF-117 : 1 h chez Yahoo = 2 ans au plus ; un debut plus ancien est ramene dans la fenetre."""
+    from datetime import datetime, timezone
+
+    import tradingbot.data_feed as data_feed
+
+    monkeypatch.setattr(data_feed, "CACHE_DIR", tmp_path)
+    download_fn = _fake_yfinance_download([("2026-09-01 14:00", 1, 2, 0.5, 1.5, 10)])
+    candles = fetch_historical_candles("yfinance", "^GSPC", "1h", "2020-01-01T00:00:00Z", yf_download_fn=download_fn)
+    start = download_fn.calls[0]["start"]
+    assert download_fn.calls[0]["interval"] == "1h" and len(candles) == 1
+    assert (datetime.now(tz=timezone.utc) - start).days <= 729
 
 
 def test_fetch_historical_candles_yfinance_uses_cache_when_it_covers_the_requested_period(tmp_path, monkeypatch):
