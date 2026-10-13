@@ -121,8 +121,8 @@ def _ticks_per_row(span_ticks: int, rows: int) -> int:
     return min(options, key=lambda t: (abs(-(-span_ticks // t) - rows), -t))
 
 
-def volume_profile(candles, rows: int = 24, value_area_pct: float = 0.70,
-                   tick: float | None = None) -> tuple[float, float, float] | None:
+def profile_histogram(candles, rows: int = 24, value_area_pct: float = 0.70,
+                      tick: float | None = None) -> dict | None:
     """(POC, VAH, VAL) des bougies donnees, calcules comme TradingView (EF-109), ou
     None si le profil est vide. Methode officielle ("Volume profile indicators:
     basic concepts", relevee le 2026-10-09) :
@@ -142,7 +142,9 @@ def volume_profile(candles, rows: int = 24, value_area_pct: float = 0.70,
     vols = np.array([c.volume for c in candles], dtype=float)
     lo, hi = float(lows.min()), float(highs.max())
     if hi <= lo:
-        return (lo, lo, lo)
+        v = float(vols.sum())
+        return {"edges": [lo, lo], "up": [v], "down": [0.0], "poc": lo, "vah": lo, "val": lo,
+                "poc_i": 0, "low_i": 0, "high_i": 0}
     tick = tick or price_tick(candles)
     span_ticks = max(1, round((hi - lo) / tick))
     per_row = _ticks_per_row(span_ticks, rows)
@@ -153,10 +155,15 @@ def volume_profile(candles, rows: int = 24, value_area_pct: float = 0.70,
     height = np.where(flat, 1.0, highs - lows)
     overlap = np.clip(np.minimum(highs[:, None], edges[None, 1:]) - np.maximum(lows[:, None], edges[None, :-1]),
                       0.0, None)
-    bins = (overlap / height[:, None] * vols[:, None]).sum(axis=0)
+    share = overlap / height[:, None] * vols[:, None]
+    bins = share.sum(axis=0)
+    # Volume acheteur / vendeur, comme TradingView : bougie cloturee >= ouverture = volume acheteur.
+    up_rows = np.array([c.close >= c.open for c in candles])
+    buys = share[up_rows].sum(axis=0)
     if flat.any():                       # bougie sans amplitude : tout son volume dans sa ligne
         idx = np.minimum(((lows[flat] - lo) / step).astype(int), n - 1)
         np.add.at(bins, idx, vols[flat])
+        np.add.at(buys, idx[up_rows[flat]], vols[flat & up_rows])
     poc_i = int(bins.argmax())
     remaining = bins.sum() * value_area_pct - bins[poc_i]
     low_i = high_i = poc_i
@@ -176,7 +183,17 @@ def volume_profile(candles, rows: int = 24, value_area_pct: float = 0.70,
                 break
             remaining -= bins[down]
             low_i = down
-    return float(lo + (poc_i + 0.5) * step), float(edges[high_i + 1]), float(edges[low_i])
+    return {"edges": [float(x) for x in edges], "up": [float(x) for x in buys],
+            "down": [float(b - u) for b, u in zip(bins, buys)], "poc": float(lo + (poc_i + 0.5) * step),
+            "vah": float(edges[high_i + 1]), "val": float(edges[low_i]),
+            "poc_i": poc_i, "low_i": low_i, "high_i": high_i}
+
+
+def volume_profile(candles, rows: int = 24, value_area_pct: float = 0.70,
+                   tick: float | None = None) -> tuple[float, float, float] | None:
+    """(POC, VAH, VAL), calcules comme TradingView (voir `profile_histogram`), ou None si vide."""
+    h = profile_histogram(candles, rows, value_area_pct, tick)
+    return None if h is None else (h["poc"], h["vah"], h["val"])
 
 
 def _mirror(c: Candle | None) -> Candle | None:

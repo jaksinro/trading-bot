@@ -294,3 +294,23 @@ def test_backtests_can_be_switched_off_on_the_raspberry_pi(server, monkeypatch):
     for route in ("/api/start-bot", "/api/launch-bot", "/api/restart-all-bots", "/api/dca-run"):
         status, err = call(server, route, {"config_path": "config/x.yml", "name": "x"})
         assert status == 403 and "Raspberry Pi" in err["error"], route
+
+
+def test_session_profile_matches_the_strategy_levels(monkeypatch):
+    """EF-115 : l'histogramme affiche est celui que la strategie utilisait (seance precedente)."""
+    from tradingbot import profile_view
+    from tradingbot.strategies.volume_profile import volume_profile
+    from tradingbot.types import Candle
+
+    day = 86_400_000
+    bars = [Candle(timestamp=day + i * 60_000, open=100 + (i % 7), high=101 + (i % 7), low=99 + (i % 7),
+                   close=100 + (i % 5), volume=1 + i % 3) for i in range(1440)]
+    monkeypatch.setattr(profile_view, "_candles_between",
+                        lambda symbol, tf, start, end: [c for c in bars if start <= c.timestamp < end])
+    h = profile_view.session_profile({"symbol": "ETH/USDT", "timeframe": "15m", "time": 2 * day + 3_600_000})
+    assert (h["start"], h["end"], h["session_end"]) == (day, 2 * day, 3 * day)
+    assert (h["poc"], h["vah"], h["val"]) == volume_profile(bars)
+    assert len(h["up"]) == len(h["down"]) == len(h["edges"]) - 1
+    assert sum(h["up"]) + sum(h["down"]) == pytest.approx(sum(c.volume for c in bars))
+    dev = profile_view.session_profile({"time": day + 3_600_000, "profile_period": "developing"})
+    assert (dev["start"], dev["end"]) == (day, day + 3_600_000) and dev["candles"] == 60

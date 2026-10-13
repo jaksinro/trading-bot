@@ -1249,6 +1249,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/bt-run": self._handle_bt_run,
             "/api/bt-sweep": self._handle_bt_sweep,
             "/api/bt-broker-costs": self._handle_bt_broker_costs,
+            "/api/bt-profile": self._handle_bt_profile,
             "/api/restart-all-bots": self._handle_restart_all,
             "/api/dca-run": self._handle_dca_run,
             "/api/dca-save": self._handle_dca_save,
@@ -1479,6 +1480,12 @@ class Handler(BaseHTTPRequestHandler):
         from tradingbot.backtest_view import sweep
 
         self._bt_respond(sweep, payload)
+
+    def _handle_bt_profile(self, payload: dict) -> None:
+        """EF-115 : histogramme du Volume Profile de la seance d'un trade (atelier)."""
+        from tradingbot.profile_view import session_profile
+
+        self._bt_respond(session_profile, payload)
 
     def _handle_bt_broker_costs(self, payload: dict) -> None:
         """EF-106 : couts d'un courtier existant pour l'atelier (lecture seule)."""

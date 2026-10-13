@@ -85,6 +85,12 @@
   #tradeCard { position: absolute; top: 8px; right: 86px; z-index: 4; background: rgba(23,27,37,0.94); border: 1px solid var(--border-strong);
                border-radius: var(--radius-md); padding: 9px 12px; font-size: 12px; display: none; min-width: 230px; }
   #tradeCard .t { font-weight: 650; margin-bottom: 5px; }
+  #vpCanvas { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+  #tradeCard .tv { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  #tradeCard .tv button { background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong);
+                          border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; }
+  #tradeCard .tv button:hover { border-color: var(--accent); }
+  #tradeCard .tv small { color: var(--text-faint); max-width: 260px; line-height: 1.4; }
   #tradeCard dl { display: grid; grid-template-columns: auto auto; gap: 2px 12px; margin: 0; }
   #tradeCard dt { color: var(--text-faint); } #tradeCard dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
   .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--text-faint); z-index: 2; }
@@ -145,12 +151,14 @@
       </span>
       <span class="toggles">
         <label><input type="checkbox" id="tgLevels" checked> Niveaux de la strategie</label>
+        <label><input type="checkbox" id="tgProfile" checked> Profil de volume</label>
         <label><input type="checkbox" id="tgSpans" checked> Periodes en position</label>
         <label><input type="checkbox" id="tgMarkers" checked> Achats / ventes</label>
       </span>
     </div>
     <div class="chart-wrap" id="priceWrap">
       <div id="price"></div>
+      <canvas id="vpCanvas" aria-hidden="true"></canvas>
       <div class="legend" id="priceLegend"></div>
       <div id="tradeCard" aria-live="polite"></div>
       <div class="empty" id="priceEmpty">Le graphique apparaitra apres le premier backtest.</div>
@@ -390,6 +398,97 @@ function makeCharts() {
     if (i >= 0) selectTrade(i, true);
   });
   state.charts = { price, equity };
+  // EF-115 : le profil de volume suit le zoom, le defilement et la taille du graphique.
+  price.timeScale().subscribeVisibleTimeRangeChange(() => requestAnimationFrame(drawProfile));
+  new ResizeObserver(() => requestAnimationFrame(drawProfile)).observe($("price"));
+}
+
+// ----------------------------------------------------------------- profil de volume (EF-115)
+// Comme le Session Volume Profile de TradingView : histogramme horizontal ancre au debut de la
+// seance, volume acheteur (turquoise) et vendeur (rose), zone de valeur en couleurs franches,
+// POC en rouge, VAH / VAL en blanc prolonges sur la seance du trade.
+async function loadProfile(tr) {
+  state.vp = null;
+  drawProfile();
+  const p = state.lastPayload;
+  if (!p || p.strategy_type !== "volume_profile") return;
+  const sel = state.sel;
+  try {
+    const vp = await api("/api/bt-profile", { symbol: p.symbol, timeframe: p.timeframe, time: tr.entry_t,
+      rows: p.params.rows, value_area_pct: p.params.value_area_pct, session_hours: p.params.session_hours,
+      profile_period: p.params.profile_period });
+    if (state.sel !== sel) return;               // un autre trade a ete choisi entre-temps
+    state.vp = vp;
+    // Le profil vient de la seance precedente : le zoom l'inclut, du debut de cette seance a la sortie du trade.
+    const step = state.times.length > 1 ? (state.times[1] - state.times[0]) / 1000 : 900;
+    const exit = snap(tr.exit_t);
+    state.charts.price.timeScale().setVisibleRange({ from: t(vp.start) - step * 4,
+                                                     to: exit + Math.max((exit - t(vp.start)) * 0.15, step * 12) });
+    requestAnimationFrame(drawProfile);
+  } catch (e) { setStatus("Profil de volume indisponible : " + e.message, true); }
+}
+function drawProfile() {
+  const cv = $("vpCanvas"), box = $("price");
+  if (!cv || !state.charts.price) return;
+  const w = box.clientWidth, h = box.clientHeight, dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  cv.style.width = w + "px"; cv.style.height = h + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const vp = state.vp;
+  if (!vp || !$("tgProfile").checked) return;
+  const ts = state.charts.price.timeScale(), S = state.series.candles, plotW = ts.width();
+  const range = ts.getVisibleRange();
+  if (!range) return;
+  const x = ms => { const c = ts.timeToCoordinate(t(ms)); return c != null ? c : (t(ms) - range.from) / (range.to - range.from) * plotW; };
+  const y = price => S.priceToCoordinate(price);
+  const x0 = x(vp.start), x1 = x(vp.end), x2 = x(vp.session_end);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, plotW, h); ctx.clip();
+  const total = vp.up.map((u, i) => u + vp.down[i]);
+  const maxVol = Math.max(...total) || 1;
+  const maxBar = Math.max(40, (x1 - x0) * 0.7);
+  const yVah = y(vp.vah), yVal = y(vp.val);
+  if (yVah != null && yVal != null) {           // fond de la zone de valeur sur la seance du profil
+    ctx.fillStyle = "rgba(91,141,239,0.07)";
+    ctx.fillRect(x0, yVah, x1 - x0, yVal - yVah);
+  }
+  vp.up.forEach((up, i) => {
+    const top = y(vp.edges[i + 1]), bottom = y(vp.edges[i]);
+    if (top == null || bottom == null) return;
+    const inside = i >= vp.low_i && i <= vp.high_i, a = inside ? 0.8 : 0.32;
+    const height = Math.max(1, bottom - top - 1), wu = up / maxVol * maxBar, wd = vp.down[i] / maxVol * maxBar;
+    ctx.fillStyle = `rgba(38,198,218,${a})`; ctx.fillRect(x0, top + 0.5, wu, height);
+    ctx.fillStyle = `rgba(240,98,146,${a})`; ctx.fillRect(x0 + wu, top + 0.5, wd, height);
+  });
+  const level = (price, color, width, label) => {
+    const yy = y(price);
+    if (yy == null) return;
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x2, yy); ctx.stroke();
+    ctx.fillStyle = color; ctx.font = "600 10.5px Inter, system-ui, sans-serif";
+    ctx.fillText(`${label} ${px(price)}`, Math.min(Math.max(x0, 0) + 4, plotW - 120), yy - 4);
+  };
+  level(vp.vah, "rgba(255,255,255,0.9)", 1.2, "VAH");
+  level(vp.val, "rgba(255,255,255,0.9)", 1.2, "VAL");
+  level(vp.poc, "#ff4d4d", 2, "POC");
+  ctx.restore();
+}
+
+// Lien TradingView : le graphique s'ouvre sur la paire et l'unite ; TradingView n'accepte pas
+// de date dans le lien, la date du trade est copiee pour "Aller a" (Alt+G).
+const TV_INTERVALS = { "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D" };
+function openInTradingView(tr) {
+  const p = state.lastPayload || {};
+  const symbol = "BINANCE:" + String(p.symbol || "ETH/USDT").replace("/", "");
+  const when = new Date(tr.entry_t);
+  const pad = n => String(n).padStart(2, "0");
+  const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}`;
+  try { navigator.clipboard.writeText(stamp); } catch (e) { /* presse-papiers indisponible : la date reste affichee */ }
+  window.open(`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(symbol)}&interval=${TV_INTERVALS[p.timeframe] || "15"}`,
+              "_blank", "noopener");
+  $("tvHint").textContent = `Date copiee : ${stamp}. Dans TradingView, Alt+G (Aller a), colle-la, puis ajoute l'indicateur Session Volume Profile.`;
 }
 
 const PALETTE = { trend: "#5b8def", entry: "#2fd699", exit: "#ff6b6b", level: "#f5b74f" };
@@ -497,7 +596,10 @@ function selectTrade(i, scroll) {
     <dt>Duree</dt><dd>${dur((tr.exit_t - tr.entry_t) / 3.6e6)}</dd>
     <dt>Motif de sortie</dt><dd>${esc(reasonLabel(tr.reason))}${tr.partial ? " (partielle)" : ""}</dd>
     ${tr.stop != null || tr.target != null ? `<dt>Stop / objectif</dt><dd>${px(tr.stop)} / ${px(tr.target)}</dd>` : ""}
-    <dt>Couts payes</dt><dd>${num(tr.fees + tr.financing)} USDT</dd></dl>`;
+    <dt>Couts payes</dt><dd>${num(tr.fees + tr.financing)} USDT</dd></dl>
+    <div class="tv"><button type="button" id="tvBtn">Ouvrir dans TradingView</button><small id="tvHint"></small></div>`;
+  $("tvBtn").onclick = () => openInTradingView(tr);
+  loadProfile(tr);
   const rows = document.querySelectorAll("#trades tbody tr[data-i]");
   rows.forEach((row, k) => row.classList.toggle("sel", k === state.sel));
   if (scroll && rows[state.sel]) rows[state.sel].scrollIntoView({ block: "nearest" });
@@ -508,6 +610,8 @@ function clearSelection() {
   state.lines.forEach(l => state.series.candles.removePriceLine(l));
   state.lines = [];
   state.series.path.setData([]);
+  state.vp = null;
+  drawProfile();
   $("tradeCard").style.display = "none";
   document.querySelectorAll("#trades tbody tr.sel").forEach(row => row.classList.remove("sel"));
   if (state.result) { $("tradeLabel").textContent = `${state.result.trades.length} trade(s)`; renderMarkers(); }
@@ -556,6 +660,7 @@ async function runBacktest() {
   const t0 = performance.now();
   try {
     const r = await api("/api/bt-run", p);
+    state.lastPayload = p;
     if (state.result) state.prevEquity = state.result.equity.map(q => ({ time: t(q[0]), value: q[1] }));
     state.result = r;
     try { localStorage.setItem(FORM_KEY, JSON.stringify(p)); } catch (e) { /* stockage indisponible */ }
@@ -647,6 +752,7 @@ async function init() {
   $("nextBtn").onclick = () => selectTrade(state.sel + 1, true);
   $("allBtn").onclick = clearSelection;
   $("tgLevels").onchange = () => state.overlays.forEach(s => s.applyOptions({ visible: $("tgLevels").checked }));
+  $("tgProfile").onchange = drawProfile;
   $("tgSpans").onchange = () => state.result && renderSpans();
   $("tgMarkers").onchange = () => renderMarkers();
   document.addEventListener("keydown", e => {
